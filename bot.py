@@ -14,7 +14,7 @@ from config import TELEGRAM_TOKEN as CONFIG_TELEGRAM_TOKEN, \
                      GOOGLE_SERVICE_ACCOUNT_EMAIL as CONFIG_GOOGLE_SERVICE_ACCOUNT_EMAIL, \
                      SPREADSHEET_ID as CONFIG_SPREADSHEET_ID
 
-LOCAL_RUN = True # Установите False для продакшена, где переменные окружения настроены на сервере
+LOCAL_RUN = os.getenv('LOCAL_RUN', 'False').lower() == 'true'
 
 # Переопределяем переменные из .env, если LOCAL_RUN True, или используем из config (которые берутся из os.environ)
 TELEGRAM_TOKEN = CONFIG_TELEGRAM_TOKEN
