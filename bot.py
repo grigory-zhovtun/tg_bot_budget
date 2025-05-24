@@ -1,6 +1,7 @@
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram.error import BadRequest # Import BadRequest for specific error handling
 from google.oauth2.service_account import Credentials
 import gspread
 import re
@@ -336,10 +337,92 @@ def generate_subcategories_keyboard(selected_category):
     return InlineKeyboardMarkup(keyboard)
 
 
+async def delete_transient_messages(context: ContextTypes.DEFAULT_TYPE, chat_id: int):
+    transient_ids = context.chat_data.get('transient_bot_message_ids', [])
+    if transient_ids:
+        for message_id in transient_ids:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=message_id)
+                # print(f"Successfully deleted transient message {message_id} in chat {chat_id}") # Optional: for debugging
+            except Exception as e:
+                # print(f"Failed to delete transient message {message_id} in chat {chat_id}: {e}") # Optional: for debugging
+                pass  # Ignore if message doesn't exist or other errors
+        context.chat_data['transient_bot_message_ids'] = []
+
+
+async def send_or_edit_active_inline_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, reply_markup: InlineKeyboardMarkup):
+    await delete_transient_messages(context, chat_id)
+
+    active_message_id = context.chat_data.get('active_inline_keyboard_message_id')
+    message_sent_or_edited = False
+
+    if active_message_id:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=active_message_id,
+                text=text,
+                reply_markup=reply_markup
+            )
+            # print(f"Successfully edited active_inline_keyboard_message_id {active_message_id}") # Optional: for debugging
+            message_sent_or_edited = True
+        except BadRequest as e:
+            if "message is not modified" in e.message.lower():
+                # print(f"Message {active_message_id} not modified, considering it handled.") # Optional: for debugging
+                message_sent_or_edited = True # Message is already as desired
+            else:
+                # print(f"Failed to edit message {active_message_id} (BadRequest): {e}. Will send a new one.") # Optional: for debugging
+                pass # Will proceed to send a new message
+        except Exception as e:
+            # print(f"Failed to edit message {active_message_id} (Exception): {e}. Will send a new one.") # Optional: for debugging
+            pass # Will proceed to send a new message
+
+    if not message_sent_or_edited:
+        # Try to delete the old message if it exists and we are about to send a new one
+        if active_message_id:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=active_message_id)
+                # print(f"Deleted old active_inline_keyboard_message_id {active_message_id} before sending new.") # Optional: for debugging
+            except Exception as e:
+                # print(f"Failed to delete old active_inline_keyboard_message_id {active_message_id}: {e}") # Optional: for debugging
+                pass
+        
+        new_message = await context.bot.send_message(
+            chat_id=chat_id,
+            text=text,
+            reply_markup=reply_markup
+        )
+        context.chat_data['active_inline_keyboard_message_id'] = new_message.message_id
+        # print(f"Sent new active_inline_keyboard_message_id {new_message.message_id}") # Optional: for debugging
+    # If message was successfully edited, active_inline_keyboard_message_id doesn't change
+    # If a new one was sent, it's updated.
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not sheet:
-        await update.message.reply_text(
-            'Ошибка: Не удалось подключиться к Google Sheets. Пожалуйста, проверьте конфигурацию (переменные окружения / .env) и перезапустите бота.')
+    chat_id = update.effective_chat.id
+    await delete_transient_messages(context, chat_id)
+
+    # Attempt to delete existing main messages
+    if context.chat_data.get('active_inline_keyboard_message_id'):
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=context.chat_data.pop('active_inline_keyboard_message_id'))
+        except Exception as e:
+            # print(f"Error deleting old active_inline_keyboard_message_id: {e}") # Optional for debugging
+            pass
+    
+    if context.chat_data.get('pinned_reply_keyboard_message_id'):
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=context.chat_data.pop('pinned_reply_keyboard_message_id'))
+        except Exception as e:
+            # print(f"Error deleting old pinned_reply_keyboard_message_id: {e}") # Optional for debugging
+            pass
+
+    if not sheet: # This check already exists
+        # Send a new message if sheet is not available, this message will be transient
+        error_message_sheet = await update.message.reply_text(
+            'Ошибка: Не удалось подключиться к Google Sheets. Пожалуйста, проверьте конфигурацию (переменные окружения / .env) и перезапустите бота.'
+        )
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(error_message_sheet.message_id)
         return
 
     current_source = context.user_data.get('source')
@@ -347,57 +430,91 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['source'] = SOURCES[0]
         current_source = SOURCES[0]
     elif not SOURCES:
-        await update.message.reply_text(
+        # Send a new message if sources are not available
+        error_message_sources = await update.message.reply_text(
             "Список источников пуст. Пожалуйста, заполните источники в Google Таблице (лист 'system', колонка F) и выполните /reboot.",
-            reply_markup=None)
+            reply_markup=None
+        )
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(error_message_sources.message_id)
+        # Do not send main_inline_message if sources are missing
         return
+
+
+    # Send the sources keyboard message and store its ID
+    sources_keyboard_message = await update.message.reply_text(
+        "Источники платежей (доступны всегда):",
+        reply_markup=generate_sources_keyboard()
+    )
+    context.chat_data['pinned_reply_keyboard_message_id'] = sources_keyboard_message.message_id
 
     derived_currency = FALLBACK_CURRENCY
     if current_source:
         derived_currency = get_currency_from_source(current_source)
-
-    # Сначала отправляем клавиатуру с источниками
-    await update.message.reply_text(
-        "Источники платежей (доступны всегда):",
-        reply_markup=generate_sources_keyboard()
-    )
     
-    welcome_message = f'Привет, {update.effective_user.first_name}!\nВыбери категорию:'
+    welcome_message_text = f'Привет, {update.effective_user.first_name}!\nВыбери категорию:'
     if current_source:
-        welcome_message += f'\nТекущий источник: {current_source} (Валюта: {derived_currency})'
+        welcome_message_text += f'\nТекущий источник: {current_source} (Валюта: {derived_currency})'
     else:
-        welcome_message += f'\nИсточник не выбран. Валюта не определена.'
-    welcome_message += f'\n\nВы можете изменить источник платежа в любой момент, нажав на соответствующую кнопку на клавиатуре.'
+        # This case should ideally be prevented by the SOURCES check above
+        welcome_message_text += f'\nИсточник не выбран. Валюта не определена.' 
+    welcome_message_text += f'\n\nВы можете изменить источник платежа в любой момент, нажав на соответствующую кнопку на клавиатуре.'
     
-    # Затем отправляем основное сообщение с категориями
-    await update.message.reply_text(
-        welcome_message,
-        reply_markup=generate_categories_keyboard(context)
+    # Use the new helper to send the main categories message
+    await send_or_edit_active_inline_message(
+        context,
+        chat_id,
+        welcome_message_text,
+        generate_categories_keyboard(context)
     )
 
 
 async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not client:
-        await update.message.reply_text(
-            'Ошибка: Не удалось подключиться к Google Sheets (client не инициализирован). Команда reboot не может обновить данные.')
+    chat_id = update.effective_chat.id
+    await delete_transient_messages(context, chat_id) # Clean up any previous transient messages
+
+    # Attempt to delete existing main messages before reloading and calling start
+    if context.chat_data.get('active_inline_keyboard_message_id'):
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=context.chat_data.pop('active_inline_keyboard_message_id'))
+        except Exception as e:
+            # print(f"Error deleting old active_inline_keyboard_message_id in reboot: {e}")
+            pass
+    
+    if context.chat_data.get('pinned_reply_keyboard_message_id'):
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=context.chat_data.pop('pinned_reply_keyboard_message_id'))
+        except Exception as e:
+            # print(f"Error deleting old pinned_reply_keyboard_message_id in reboot: {e}")
+            pass
+
+    if not client: # This check exists
+        error_msg_client = await update.message.reply_text(
+            'Ошибка: Не удалось подключиться к Google Sheets (client не инициализирован). Команда reboot не может обновить данные.'
+        )
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_client.message_id)
         return
 
-    global CATEGORIES, SUBCATEGORIES, SOURCES, sheet # Объявляем sheet как global для возможного переназначения
+    global CATEGORIES, SUBCATEGORIES, SOURCES, sheet 
     if not sheet and client and SPREADSHEET_ID:
         try:
-            print("Попытка открыть таблицу в reboot...")
+            # print("Попытка открыть таблицу в reboot...") # Existing print
             sheet = client.open_by_key(SPREADSHEET_ID)
         except Exception as e_reopen_reboot:
-            await update.message.reply_text(f'Ошибка при попытке открыть таблицу в reboot: {e_reopen_reboot}')
+            error_msg_sheet_reopen = await update.message.reply_text(f'Ошибка при попытке открыть таблицу в reboot: {e_reopen_reboot}')
+            context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_sheet_reopen.message_id)
             return
 
-    if not sheet: # Повторная проверка после попытки открытия
-        await update.message.reply_text(
-            'Ошибка: Не удалось подключиться к Google Sheets (sheet не инициализирован). Команда reboot не может обновить данные.')
+    if not sheet: # This check exists
+        error_msg_sheet_not_init = await update.message.reply_text(
+            'Ошибка: Не удалось подключиться к Google Sheets (sheet не инициализирован). Команда reboot не может обновить данные.'
+        )
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_sheet_not_init.message_id)
         return
 
-    CATEGORIES, SUBCATEGORIES, SOURCES = load_keyboard_data() # load_keyboard_data сама обрабатывает ошибки с sheet
+    # Load keyboard data
+    CATEGORIES, SUBCATEGORIES, SOURCES = load_keyboard_data() 
 
+    # Update user_data source (this logic exists)
     current_source = context.user_data.get('source')
     source_updated = False
     if not current_source and SOURCES:
@@ -406,18 +523,34 @@ async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif current_source and current_source not in SOURCES:
         context.user_data['source'] = SOURCES[0] if SOURCES else None
         source_updated = True
-
-    if SOURCES or source_updated : # Условие изменено чтобы сообщение об обновлении появлялось даже если источники были пустыми и остались пустыми
-        await update.message.reply_text('Данные клавиатуры (категории, подкатегории, источники) успешно обновлены.')
-        await start(update, context) # Передаем update и context в start
-    elif not SOURCES: # Это условие теперь избыточно, т.к. предыдущее его покрывает
-        await update.message.reply_text(
-             "Данные клавиатуры обновлены, но список источников пуст. Пожалуйста, заполните их в Google Таблице.")
+    
+    # Send confirmation message and mark it as transient
+    reboot_confirm_text = 'Данные клавиатуры (категории, подкатегории, источники) успешно обновлены.'
+    if not SOURCES:
+        reboot_confirm_text = "Данные клавиатуры обновлены, но список источников пуст. Пожалуйста, заполните их в Google Таблице."
+    
+    # This confirmation message should be transient as start() will draw the new interface
+    confirm_message = await update.message.reply_text(reboot_confirm_text)
+    context.chat_data.setdefault('transient_bot_message_ids', []).append(confirm_message.message_id)
+    
+    # Call start to redraw the interface
+    # start() will handle deleting transient messages (including the one above),
+    # and setting up new pinned_reply_keyboard_message_id & active_inline_keyboard_message_id
+    await start(update, context)
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    
+    # Ensure query.message is available before trying to access chat_id
+    if not query.message:
+        # print("query.message is None in button_handler, cannot proceed with transient message deletion or edits.") # Optional debug
+        return 
+    chat_id = query.message.chat_id
+    
+    await delete_transient_messages(context, chat_id) # Key addition
+
     data = query.data
 
     selected_source = context.user_data.get('source')
@@ -513,150 +646,93 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global client, sheet # Объявляем client и sheet глобальными для возможного переподключения
+    global client, sheet, GOOGLE_PRIVATE_KEY, GOOGLE_SERVICE_ACCOUNT_EMAIL, SPREADSHEET_ID, GOOGLE_APPLICATION_CREDENTIALS_PATH, CATEGORIES, SUBCATEGORIES, SOURCES, FALLBACK_CURRENCY # Ensure all used globals are mentioned
+    chat_id = update.effective_chat.id
+    user_message_text = update.message.text
 
-    if not sheet: # Проверяем sheet в начале
-        await update.message.reply_text(
-            'Ошибка: Не удалось подключиться к Google Sheets. Данные не могут быть обработаны.')
-        return
-
-    # Проверяем, ожидаем ли мы выбор источника
-    if context.user_data.get('awaiting_source_selection', False):
-        source_name = update.message.text
-        if source_name == "⬅️ Назад":
-            # Обрабатываем кнопку "Назад"
-            context.user_data.pop('awaiting_source_selection', None)
-            await update.message.reply_text(
-                "Выбери категорию:",
-                reply_markup=generate_categories_keyboard(context)
-            )
-            return
-        elif source_name in SOURCES:
-            # Устанавливаем выбранный источник
-            context.user_data['source'] = source_name
-            new_derived_currency = get_currency_from_source(source_name)
-            context.user_data.pop('category', None)
-            context.user_data.pop('subcategory', None)
-            context.user_data.pop('awaiting_source_selection', None)
-            await update.message.reply_text(
-                f"Источник '{source_name}' выбран (Валюта: {new_derived_currency}).\nВыбери категорию:",
-                reply_markup=generate_categories_keyboard(context)
-            )
-            return
-        else:
-            await update.message.reply_text(
-                "Неизвестный источник. Пожалуйста, выберите источник из списка или нажмите 'Назад':",
-                reply_markup=generate_sources_keyboard()
-            )
-            return
-
-                # Обработка нажатия на кнопки с источниками (доступны в любой момент)
-                source_name = update.message.text
-                if source_name in SOURCES:
-            previous_source = context.user_data.get('source')
-            context.user_data['source'] = source_name
-            new_derived_currency = get_currency_from_source(source_name)
-            
-            # Проверяем текущее состояние диалога
-            category = context.user_data.get('category')
-            subcategory = context.user_data.get('subcategory')
-            
-            if context.user_data.get('sms_mode'):
-                # Если мы в режиме СМС, сообщаем о смене источника
-                await update.message.reply_text(
-                    f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\nВставьте скопированные СМС:",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton(text="⬅️ Назад", callback_data="sms_back")]
-                    ])
-                )
-            elif subcategory:
-                # Если выбрана подкатегория, сообщаем о смене источника и предлагаем внести сумму
-                prompt_text = (f"Источник изменен на: {source_name} (было: {previous_source})\n"
-                              f"Категория: {category}\n"
-                              f"Подкатегория: {subcategory}\n"
-                              f"Валюта: {new_derived_currency}\n\n"
-                              f"ВНЕСИТЕ СУММУ И КОММЕНТАРИЙ (ЧЕРЕЗ ПРОБЕЛ):")
-                await update.message.reply_text(
-                    text=prompt_text,
-                    reply_markup=generate_subcategories_keyboard(category)
-                )
-            elif category:
-                # Если выбрана только категория, сообщаем о смене источника и предлагаем выбрать подкатегорию
-                await update.message.reply_text(
-                    text=f"Источник изменен на: {source_name} (было: {previous_source})\n"
-                         f"Категория: {category}\n"
-                         f"Валюта: {new_derived_currency}\n\n"
-                         f"Выберите подкатегорию:",
-                    reply_markup=generate_subcategories_keyboard(category)
-                )
-            else:
-                # Если ничего не выбрано, сообщаем о смене источника и предлагаем выбрать категорию
-                await update.message.reply_text(
-                    f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\nВыбери категорию:",
-                    reply_markup=generate_categories_keyboard(context)
-                )
-            return
-                elif source_name == "⬅️ Категории":
-            # Обрабатываем кнопку "Категории" в клавиатуре источников
-            user_selected_source = context.user_data.get('source')
-            transaction_currency = FALLBACK_CURRENCY
-            if user_selected_source:
-                transaction_currency = get_currency_from_source(user_selected_source)
-                
-            message_text = "Выбери категорию:"
-            if user_selected_source:
-                message_text = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\n{message_text}"
-            else:
-                message_text = f"Источник не выбран. Валюта не определена.\n{message_text}"
-                
-            context.user_data.pop('category', None)
-            context.user_data.pop('subcategory', None)
-            context.user_data.pop('sms_mode', None)
-            
-            await update.message.reply_text(
-                message_text,
-                reply_markup=generate_categories_keyboard(context)
-            )
-            return
-            
-                user_selected_source = context.user_data.get('source')
-                transaction_currency = FALLBACK_CURRENCY
-                if user_selected_source:
-            transaction_currency = get_currency_from_source(user_selected_source)
-                else:
-            await update.message.reply_text(
-                "Ошибка: Источник не выбран. Пожалуйста, выберите источник из клавиатуры ниже.",
-            reply_markup=generate_categories_keyboard(context)
+    if not sheet:
+        error_msg_sheet = await update.message.reply_text(
+            'Ошибка: Не удалось подключиться к Google Sheets. Данные не могут быть обработаны.'
         )
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_sheet.message_id)
+        # Consider if another action is needed here, or just let user /start or /reboot
         return
 
-    if context.user_data.get('sms_mode'):
-        original_message_id = update.message.message_id
-        chat_id = update.message.chat_id
+    # 1. Handle direct source selection from ReplyKeyboard or "Go Back to Categories"
+    if user_message_text in SOURCES:
+        source_name = user_message_text
+        # previous_source = context.user_data.get('source') # Not used in this simplified version
+        context.user_data['source'] = source_name
+        new_derived_currency = get_currency_from_source(source_name)
+        
+        context.user_data.pop('category', None)
+        context.user_data.pop('subcategory', None)
+        context.user_data.pop('sms_mode', None)
 
-        text = update.message.text
+        response_text = f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\nВыбери категорию:"
+        await send_or_edit_active_inline_message(context, chat_id, response_text, generate_categories_keyboard(context))
+        return
+
+    elif user_message_text == "⬅️ Категории":
+        user_selected_source = context.user_data.get('source')
+        transaction_currency = FALLBACK_CURRENCY
+        if user_selected_source:
+            transaction_currency = get_currency_from_source(user_selected_source)
+            
+        message_text = "Выбери категорию:"
+        if user_selected_source:
+            message_text = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\n{message_text}"
+        else:
+            message_text = f"Источник не выбран. Валюта не определена.\n{message_text}"
+            
+        context.user_data.pop('category', None)
+        context.user_data.pop('subcategory', None)
+        context.user_data.pop('sms_mode', None)
+        
+        await send_or_edit_active_inline_message(context, chat_id, message_text, generate_categories_keyboard(context))
+        return
+
+    # 2. Ensure a source is selected for any other operation
+    user_selected_source = context.user_data.get('source')
+    transaction_currency = FALLBACK_CURRENCY # Default
+    if user_selected_source:
+        transaction_currency = get_currency_from_source(user_selected_source)
+    else:
+        error_msg_no_src = await update.message.reply_text(
+            "Ошибка: Источник не выбран. Пожалуйста, выберите источник из клавиатуры ниже, затем выберите категорию."
+        )
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_no_src.message_id)
+        
+        no_src_categories_text = "Выбери категорию:" 
+        await send_or_edit_active_inline_message(context, chat_id, no_src_categories_text, generate_categories_keyboard(context))
+        return
+
+    # 3. SMS Mode processing
+    if context.user_data.get('sms_mode'):
+        original_message_id = update.message.message_id # User's SMS message
+        
         try:
-            records = parse_sms_by_date(text)
+            records = parse_sms_by_date(user_message_text)
             if not records:
-                await update.message.reply_text("Не удалось распознать транзакции в СМС. Пожалуйста, проверьте формат.")
-                context.user_data.pop('sms_mode', None) # Выход из режима СМС
-                message_text_sms_fail = "Выбери категорию:"
-                if user_selected_source: # Используем уже полученный user_selected_source
-                    message_text_sms_fail = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\n{message_text_sms_fail}"
-                await update.message.reply_text(
-                    message_text_sms_fail,
-                    reply_markup=generate_categories_keyboard(context)
-                )
+                error_msg_sms_parse = await update.message.reply_text("Не удалось распознать транзакции в СМС. Пожалуйста, проверьте формат.")
+                context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_sms_parse.message_id)
+                context.user_data.pop('sms_mode', None)
+                sms_fail_text = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nВыбери категорию:"
+                await send_or_edit_active_inline_message(context, chat_id, sms_fail_text, generate_categories_keyboard(context))
                 return
         except Exception as e:
-            await update.message.reply_text(f"Ошибка при разборе СМС: {e}")
+            error_msg_sms_exc = await update.message.reply_text(f"Ошибка при разборе СМС: {e}")
+            context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_sms_exc.message_id)
+            context.user_data.pop('sms_mode', None)
+            sms_exc_text = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nВыбери категорию:"
+            await send_or_edit_active_inline_message(context, chat_id, sms_exc_text, generate_categories_keyboard(context))
             return
 
         fact_sheet = None
         num_existing_rows = 0
         try:
             fact_sheet = sheet.worksheet("fact")
-            all_values_before_sms = fact_sheet.get_all_values() # Получаем все значения для определения последней строки
+            all_values_before_sms = fact_sheet.get_all_values() 
             num_existing_rows = len(all_values_before_sms)
         except (ConnectionError, gspread.exceptions.APIError) as e:
             print(f"Ошибка соединения/API при доступе к листу 'fact' (SMS): {e}. Попытка переподключения...")
@@ -664,144 +740,110 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if GOOGLE_APPLICATION_CREDENTIALS_PATH and os.path.exists(GOOGLE_APPLICATION_CREDENTIALS_PATH):
                     client = gspread.service_account(filename=GOOGLE_APPLICATION_CREDENTIALS_PATH)
                 elif GOOGLE_PRIVATE_KEY and GOOGLE_SERVICE_ACCOUNT_EMAIL:
-                    print("Попытка пересоздать аутентификацию gspread для SMS...")
-                    creds_info_retry_sms = {
-                        "type": "service_account",
-                        "private_key": GOOGLE_PRIVATE_KEY,
-                        "client_email": GOOGLE_SERVICE_ACCOUNT_EMAIL,
-                        # ... остальные поля creds_info
-                        "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                        "token_uri": "https://oauth2.googleapis.com/token",
-                        "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                        "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{GOOGLE_SERVICE_ACCOUNT_EMAIL.replace('@', '%40')}"
-
-                    }
+                    creds_info_retry_sms = { "type": "service_account", "private_key": GOOGLE_PRIVATE_KEY, "client_email": GOOGLE_SERVICE_ACCOUNT_EMAIL, "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs", "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{GOOGLE_SERVICE_ACCOUNT_EMAIL.replace('@', '%40')}"}
                     creds_retry_sms = Credentials.from_service_account_info(creds_info_retry_sms, scopes=["https://www.googleapis.com/auth/spreadsheets"])
                     client = gspread.authorize(creds_retry_sms)
                 else:
-                    # Если нет учетных данных, используем google.auth.default()
-                    import google.auth
+                    import google.auth # type: ignore
                     scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.file"]
-                    creds_retry_sms, _ = google.auth.default(scopes=scopes)
+                    creds_retry_sms, _ = google.auth.default(scopes=scopes) # type: ignore
                     client = gspread.authorize(creds_retry_sms)
-
-
                 if client and SPREADSHEET_ID:
-                    sheet = client.open_by_key(SPREADSHEET_ID) # Переоткрываем всю таблицу
-                    fact_sheet = sheet.worksheet("fact") # Получаем лист заново
+                    sheet = client.open_by_key(SPREADSHEET_ID)
+                    fact_sheet = sheet.worksheet("fact")
                     all_values_before_sms = fact_sheet.get_all_values()
                     num_existing_rows = len(all_values_before_sms)
-
-                else:
-                    raise Exception("Не удалось переинициализировать client или sheet для SMS.")
+                else: raise Exception("Не удалось переинициализировать client или sheet для SMS.")
             except Exception as ex_retry:
                 print(f"Не удалось переподключиться к Google Sheets (SMS): {ex_retry}")
-                await update.message.reply_text('Ошибка при записи данных из СМС. Не удалось подключиться к таблице.')
+                error_msg_gspread_sms = await update.message.reply_text('Ошибка при записи данных из СМС. Не удалось подключиться к таблице.')
+                context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_gspread_sms.message_id)
+                text_after_gspread_error_sms = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nВыбери категорию:"
+                await send_or_edit_active_inline_message(context, chat_id, text_after_gspread_error_sms, generate_categories_keyboard(context))
                 return
-        if not fact_sheet: # Если fact_sheet все еще None после попыток
-             await update.message.reply_text('Критическая ошибка: лист "fact" недоступен для записи СМС.')
+        if not fact_sheet: # Should be caught by above, but as safeguard
+             error_msg_fact_sheet_sms = await update.message.reply_text('Критическая ошибка: лист "fact" недоступен для записи СМС.')
+             context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_fact_sheet_sms.message_id)
+             text_after_fact_sheet_error_sms = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nВыбери категорию:"
+             await send_or_edit_active_inline_message(context, chat_id, text_after_fact_sheet_error_sms, generate_categories_keyboard(context))
              return
-
-
+        
         rows_to_append_sms = []
         for i, rec in enumerate(records):
-            if not rec['дата']:
+            if not rec['дата']: 
                 print(f"Пропущена запись из СМС из-за отсутствия даты: {rec}")
                 continue
-
-            next_row_num_for_formula_sms = num_existing_rows + 1 + i
-            balance_formula_sms = (
-                f'=СУММЕСЛИМН($D$2:D{next_row_num_for_formula_sms};'
-                f' $H$2:H{next_row_num_for_formula_sms}; $H{next_row_num_for_formula_sms};'
-                f' $G$2:G{next_row_num_for_formula_sms}; $G{next_row_num_for_formula_sms};'
-                f' $B$2:B{next_row_num_for_formula_sms}; "💰 ДОХОДЫ")'
-                f' - '
-                f'СУММЕСЛИМН($D$2:D{next_row_num_for_formula_sms};'
-                f' $H$2:H{next_row_num_for_formula_sms}; $H{next_row_num_for_formula_sms};'
-                f' $G$2:G{next_row_num_for_formula_sms}; $G{next_row_num_for_formula_sms};'
-                f' $B$2:B{next_row_num_for_formula_sms}; "<>💰 ДОХОДЫ")'
-            )
-
+            next_row_num_for_formula_sms = num_existing_rows + 1 + i 
+            balance_formula_sms = (f'=СУММЕСЛИМН($D$2:D{next_row_num_for_formula_sms}; $H$2:H{next_row_num_for_formula_sms}; $H{next_row_num_for_formula_sms}; $G$2:G{next_row_num_for_formula_sms}; $G{next_row_num_for_formula_sms}; $B$2:B{next_row_num_for_formula_sms}; "💰 ДОХОДЫ") - СУММЕСЛИМН($D$2:D{next_row_num_for_formula_sms}; $H$2:H{next_row_num_for_formula_sms}; $H{next_row_num_for_formula_sms}; $G$2:G{next_row_num_for_formula_sms}; $G{next_row_num_for_formula_sms}; $B$2:B{next_row_num_for_formula_sms}; "<>💰 ДОХОДЫ")')
             date_str = rec['дата'].strftime('%d.%m.%Y')
-            amount = abs(rec['сумма']) if rec['сумма'] is not None else 0.0
+            amount_val = abs(rec['сумма']) if rec['сумма'] is not None else 0.0 # Renamed from amount to avoid conflict
             op = rec['операция'].upper() if rec['операция'] else 'НЕИЗВЕСТНО'
-            category_sms = op if op != 'НЕИЗВЕСТНО' else '' # Для СМС категория = тип операции
-
-            row_sms = [
-                date_str,
-                category_sms,
-                "", # Подкатегория для СМС не указывается
-                amount,
-                balance_formula_sms,
-                f"SMS: {rec.get('валюта_из_смс', '')} {text[:30]}...", # Комментарий - начало текста СМС
-                transaction_currency, # Валюта из источника
-                user_selected_source
-            ]
+            category_sms = op if op != 'НЕИЗВЕСТНО' else ''
+            row_sms = [date_str, category_sms, "", amount_val, balance_formula_sms, f"SMS: {rec.get('валюта_из_смс', '')} {user_message_text[:30]}...", transaction_currency, user_selected_source]
             rows_to_append_sms.append(row_sms)
+            # num_existing_rows +=1 # Removed as per self-correction in prompt
 
         if rows_to_append_sms:
             try:
                 fact_sheet.append_rows(rows_to_append_sms, value_input_option='USER_ENTERED')
-                response_message_text = f"Записаны {len(rows_to_append_sms)} транзакций из СМС (Источник: {user_selected_source}, Валюта: {transaction_currency})."
-
-                try:
+                try: 
                     await context.bot.delete_message(chat_id=chat_id, message_id=original_message_id)
                     print(f"Сообщение {original_message_id} с СМС удалено.")
-                except Exception as e_delete:
+                except Exception  as e_delete: 
                     print(f"Не удалось удалить сообщение с СМС {original_message_id}: {e_delete}")
-
-                await update.message.reply_text(
-                    response_message_text,
-                    reply_markup=generate_categories_keyboard(context) # Возврат к главному меню
-                )
+                confirm_sms_text = f"Записаны {len(rows_to_append_sms)} транзакций из СМС (Источник: {user_selected_source}, Валюта: {transaction_currency})."
+                confirm_msg_sms = await update.message.reply_text(confirm_sms_text)
+                context.chat_data.setdefault('transient_bot_message_ids', []).append(confirm_msg_sms.message_id)
             except Exception as e_append:
                 print(f"Ошибка при пакетной записи СМС в Google Sheets: {e_append}")
-                await update.message.reply_text('Произошла ошибка при записи данных из СМС в таблицу.')
+                error_append_sms = await update.message.reply_text(f'Произошла ошибка при записи данных из СМС в таблицу.') 
+                context.chat_data.setdefault('transient_bot_message_ids', []).append(error_append_sms.message_id)
         else:
-            await update.message.reply_text(
-                "Не найдено корректных транзакций для записи из СМС.",
-                reply_markup=generate_categories_keyboard(context) # Возврат к главному меню
-            )
-        context.user_data.pop('sms_mode', None) # Выход из режима СМС в любом случае
+            no_records_msg = await update.message.reply_text("Не найдено корректных транзакций для записи из СМС.")
+            context.chat_data.setdefault('transient_bot_message_ids', []).append(no_records_msg.message_id)
+
+        context.user_data.pop('sms_mode', None)
+        sms_done_text = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nВыбери категорию:"
+        await send_or_edit_active_inline_message(context, chat_id, sms_done_text, generate_categories_keyboard(context))
         return
 
-    # Обработка обычного текстового ввода (не СМС)
+    # 4. Regular Manual Input (Amount & Comment)
     category = context.user_data.get('category')
     subcategory = context.user_data.get('subcategory')
 
     error_parts = []
-    if not user_selected_source: # Эта проверка уже была выше, но дублирование не повредит
-        error_parts.append("- Источник")
-    if not category:
-        error_parts.append("- Категорию")
-    # Для ручного ввода подкатегория обязательна, если есть категория
-    if category and not subcategory:
-        error_parts.append("- Подкатегорию")
-
+    if not category: error_parts.append("- Категорию")
+    if category and not subcategory: error_parts.append("- Подкатегорию") # Subcategory is mandatory if category is chosen
 
     if error_parts:
-        error_message = "Пожалуйста, сначала выберите:\n" + "\n".join(error_parts)
-        if user_selected_source: # Добавляем информацию о текущем источнике, если он есть
-            error_message += f'\nТекущий источник: {user_selected_source} (Валюта: {transaction_currency})'
-        else:
-            error_message += f'\nИсточник не выбран. Валюта не определена.'
-        await update.message.reply_text(
-            error_message,
-            reply_markup=generate_categories_keyboard(context) # Возвращаем к выбору категорий
-        )
+        error_message_text = "Пожалуйста, сначала выберите:\n" + "\n".join(error_parts)
+        error_message_text += f'\nТекущий источник: {user_selected_source} (Валюта: {transaction_currency})'
+        error_msg_incomplete = await update.message.reply_text(error_message_text)
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_incomplete.message_id)
+        
+        text_after_incomplete_error = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nВыбери категорию:"
+        # Reset state if fundamentals like category/subcategory are missing for manual input
+        context.user_data.pop('category', None)
+        context.user_data.pop('subcategory', None)
+        await send_or_edit_active_inline_message(context, chat_id, text_after_incomplete_error, generate_categories_keyboard(context))
         return
 
-    message_text = update.message.text
     try:
-        amount_str, *comment_parts = message_text.split(' ', 1)
-        amount = float(amount_str.replace(',', '.'))
+        amount_str, *comment_parts = user_message_text.split(' ', 1)
+        amount = float(amount_str.replace(',', '.')) 
         comment = comment_parts[0] if comment_parts else ""
     except ValueError:
-        await update.message.reply_text(
-            f"Неверный формат суммы. Пожалуйста, введите сумму (число) и комментарий через пробел.\n"
-            f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nКатегория: {category}\nПодкатегория: {subcategory}",
-            reply_markup=generate_subcategories_keyboard(category) # Возвращаем к той же подкатегории
-        )
+        format_error_text = (f"Неверный формат суммы. Пожалуйста, введите сумму (число) и комментарий через пробел.\n"
+                             f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nКатегория: {category}\nПодкатегория: {subcategory}")
+        error_msg_format = await update.message.reply_text(format_error_text)
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_format.message_id)
+        
+        prompt_text_after_format_error = (f"Источник: {user_selected_source}\n"
+                                          f"Категория: {category}\n"
+                                          f"Подкатегория: {subcategory}\n"
+                                          f"Валюта: {transaction_currency}\n\n"
+                                          f"ВНЕСИТЕ СУММУ И КОММЕНТАРИЙ (ЧЕРЕЗ ПРОБЕЛ):")
+        await send_or_edit_active_inline_message(context, chat_id, prompt_text_after_format_error, generate_subcategories_keyboard(category))
         return
 
     fact_sheet_manual = None
@@ -809,95 +851,69 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         fact_sheet_manual = sheet.worksheet("fact")
         all_values = fact_sheet_manual.get_all_values()
-        last_row_idx = len(all_values) # Определяем последнюю строку для формулы
+        last_row_idx = len(all_values) 
     except (ConnectionError, gspread.exceptions.APIError) as e:
         print(f"Ошибка соединения/API при доступе к листу 'fact' (ручной ввод): {e}. Попытка переподключения...")
         try:
-            # Логика переподключения аналогична той, что в блоке SMS
             if GOOGLE_APPLICATION_CREDENTIALS_PATH and os.path.exists(GOOGLE_APPLICATION_CREDENTIALS_PATH):
                 client = gspread.service_account(filename=GOOGLE_APPLICATION_CREDENTIALS_PATH)
-            elif GOOGLE_PRIVATE_KEY and GOOGLE_SERVICE_ACCOUNT_EMAIL:
-                print("Попытка пересоздать аутентификацию gspread для ручного ввода...")
-                creds_info_retry_manual = {
-                     "type": "service_account",
-                    "private_key": GOOGLE_PRIVATE_KEY,
-                    "client_email": GOOGLE_SERVICE_ACCOUNT_EMAIL,
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                    "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{GOOGLE_SERVICE_ACCOUNT_EMAIL.replace('@', '%40')}"
-                }
+            elif GOOGLE_PRIVATE_KEY and GOOGLE_SERVICE_ACCOUNT_EMAIL: 
+                creds_info_retry_manual = {"type": "service_account", "private_key": GOOGLE_PRIVATE_KEY, "client_email": GOOGLE_SERVICE_ACCOUNT_EMAIL, "auth_uri": "https://accounts.google.com/o/oauth2/auth", "token_uri": "https://oauth2.googleapis.com/token", "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs", "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{GOOGLE_SERVICE_ACCOUNT_EMAIL.replace('@', '%40')}"}
                 creds_retry_manual = Credentials.from_service_account_info(creds_info_retry_manual, scopes=["https://www.googleapis.com/auth/spreadsheets"])
-
                 client = gspread.authorize(creds_retry_manual)
-            else:
-                import google.auth
+            else: 
+                import google.auth # type: ignore
                 scopes = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive.file"]
-                creds_retry_manual, _ = google.auth.default(scopes=scopes)
+                creds_retry_manual, _ = google.auth.default(scopes=scopes) # type: ignore
                 client = gspread.authorize(creds_retry_manual)
-
-
             if client and SPREADSHEET_ID:
                 sheet = client.open_by_key(SPREADSHEET_ID)
                 fact_sheet_manual = sheet.worksheet("fact")
-                all_values = fact_sheet_manual.get_all_values() # Пересчитываем last_row_idx
+                all_values = fact_sheet_manual.get_all_values() 
                 last_row_idx = len(all_values)
-            else:
-                raise Exception("Не удалось переинициализировать client или sheet для ручного ввода.")
-
+            else: raise Exception("Не удалось переинициализировать client или sheet для ручного ввода.")
         except Exception as ex_retry:
             print(f"Не удалось переподключиться к Google Sheets (ручной ввод): {ex_retry}")
-            await update.message.reply_text('Ошибка при записи данных. Не удалось подключиться к таблице.')
+            error_msg_gspread_manual = await update.message.reply_text('Ошибка при записи данных. Не удалось подключиться к таблице.')
+            context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_gspread_manual.message_id)
+            text_after_gspread_error_manual = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nВыбери категорию:"
+            await send_or_edit_active_inline_message(context, chat_id, text_after_gspread_error_manual, generate_categories_keyboard(context))
             return
-    except Exception as e_other: # Ловим другие возможные ошибки при работе с fact_sheet
+    except Exception as e_other: 
         print(f"Другая ошибка при работе с fact_sheet (ручной ввод): {e_other}")
-        await update.message.reply_text('Произошла ошибка при подготовке данных для записи.')
+        error_msg_other_gspread = await update.message.reply_text('Произошла ошибка при подготовке данных для записи.')
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_other_gspread.message_id)
+        text_after_other_gspread_error = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nВыбери категорию:"
+        await send_or_edit_active_inline_message(context, chat_id, text_after_other_gspread_error, generate_categories_keyboard(context))
+        return
+    if not fact_sheet_manual: # Safeguard
+        error_msg_fact_sheet_manual = await update.message.reply_text('Критическая ошибка: лист "fact" недоступен для ручного ввода.')
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(error_msg_fact_sheet_manual.message_id)
+        text_after_fact_sheet_error_manual = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nВыбери категорию:"
+        await send_or_edit_active_inline_message(context, chat_id, text_after_fact_sheet_error_manual, generate_categories_keyboard(context))
         return
 
-    if not fact_sheet_manual: # Если fact_sheet_manual все еще None
-        await update.message.reply_text('Критическая ошибка: лист "fact" недоступен для ручного ввода.')
-        return
-
-    next_row_num_for_formula = last_row_idx + 1 # Строка для формулы - следующая за последней существующей
-    balance_formula = (
-        f'=СУММЕСЛИМН($D$2:D{next_row_num_for_formula};'
-        f' $H$2:H{next_row_num_for_formula}; $H{next_row_num_for_formula};'
-        f' $G$2:G{next_row_num_for_formula}; $G{next_row_num_for_formula};'
-        f' $B$2:B{next_row_num_for_formula}; "💰 ДОХОДЫ")'
-        f' - '
-        f'СУММЕСЛИМН($D$2:D{next_row_num_for_formula};'
-        f' $H$2:H{next_row_num_for_formula}; $H{next_row_num_for_formula};'
-        f' $G$2:G{next_row_num_for_formula}; $G{next_row_num_for_formula};'
-        f' $B$2:B{next_row_num_for_formula}; "<>💰 ДОХОДЫ")'
-    )
-
-
-    row_to_append = [
-        update.message.date.strftime('%d.%m.%Y'),
-        category.upper(), # Категория из user_data
-        subcategory,      # Подкатегория из user_data
-        amount,
-        balance_formula,  # Формула баланса
-        comment,
-        transaction_currency, # Валюта из источника
-        user_selected_source  # Источник из user_data
-    ]
+    next_row_num_for_formula = last_row_idx + 1
+    balance_formula = (f'=СУММЕСЛИМН($D$2:D{next_row_num_for_formula}; $H$2:H{next_row_num_for_formula}; $H{next_row_num_for_formula}; $G$2:G{next_row_num_for_formula}; $G{next_row_num_for_formula}; $B$2:B{next_row_num_for_formula}; "💰 ДОХОДЫ") - СУММЕСЛИМН($D$2:D{next_row_num_for_formula}; $H$2:H{next_row_num_for_formula}; $H{next_row_num_for_formula}; $G$2:G{next_row_num_for_formula}; $G{next_row_num_for_formula}; $B$2:B{next_row_num_for_formula}; "<>💰 ДОХОДЫ")')
+    row_to_append = [ update.message.date.strftime('%d.%m.%Y'), category.upper(), subcategory, amount, balance_formula, comment, transaction_currency, user_selected_source]
 
     try:
         fact_sheet_manual.append_row(row_to_append, value_input_option='USER_ENTERED')
-        success_message_text = (f'Данные успешно записаны.\n'
-                                f'Источник: {user_selected_source}\n'
-                                f'Категория: {category}\n'
-                                f'Подкатегория: {subcategory}\n'
-                                f'Сумма: {amount} {transaction_currency}\n'
-                                f'Комментарий: {comment}')
-        await update.message.reply_text(
-            success_message_text,
-            reply_markup=generate_categories_keyboard(context) # Возврат к главному меню
-        )
-    except Exception as e_append:
-        print(f"Ошибка при добавлении строки в Google Sheets (ручной ввод): {e_append}")
-        await update.message.reply_text('Произошла ошибка при записи данных в таблицу.')
+        success_text = (f'Данные успешно записаны.\n'
+                        f'Источник: {user_selected_source}\nКатегория: {category}\n'
+                        f'Подкатегория: {subcategory}\nСумма: {amount} {transaction_currency}\n'
+                        f'Комментарий: {comment}')
+        confirm_msg_manual = await update.message.reply_text(success_text)
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(confirm_msg_manual.message_id)
+    except Exception as e_append_manual:
+        print(f"Ошибка при добавлении строки в Google Sheets (ручной ввод): {e_append_manual}")
+        error_append_manual = await update.message.reply_text(f'Произошла ошибка при записи данных в таблицу.') 
+        context.chat_data.setdefault('transient_bot_message_ids', []).append(error_append_manual.message_id)
+
+    context.user_data.pop('category', None)
+    context.user_data.pop('subcategory', None)
+    manual_done_text = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\nВыбери категорию:"
+    await send_or_edit_active_inline_message(context, chat_id, manual_done_text, generate_categories_keyboard(context))
 
 
 def main():
