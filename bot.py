@@ -1,5 +1,5 @@
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from google.oauth2.service_account import Credentials
 import gspread
@@ -315,16 +315,14 @@ def generate_sources_keyboard():
     keyboard = []
     row_buttons = []
     for idx, src_name in enumerate(SOURCES, 1):
-        row_buttons.append(InlineKeyboardButton(text=src_name, callback_data=f"set_source_{src_name}"))
+        row_buttons.append(KeyboardButton(text=src_name))
         if idx % 2 == 0 or idx == len(SOURCES):
             keyboard.append(row_buttons)
             row_buttons = []
     if row_buttons:
         keyboard.append(row_buttons)
-    keyboard.append([
-        InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_categories_from_source")
-    ])
-    return InlineKeyboardMarkup(keyboard)
+    keyboard.append([KeyboardButton(text="⬅️ Назад")])
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
 
 def generate_subcategories_keyboard(selected_category):
@@ -494,20 +492,19 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
         await query.edit_message_text(
-            text="Выберите источник:",
+            text="Выберите источник (используйте клавиатуру ниже):",
+            reply_markup=None
+        )
+        await query.message.reply_text(
+            "Выберите источник:",
             reply_markup=generate_sources_keyboard()
         )
+        context.user_data['awaiting_source_selection'] = True
 
     elif data.startswith("set_source_"):
-        source_name = data[len("set_source_"):]
-        context.user_data['source'] = source_name
-        new_derived_currency = get_currency_from_source(source_name)
-        context.user_data.pop('category', None)
-        context.user_data.pop('subcategory', None)
-        await query.edit_message_text(
-            text=f"Источник '{source_name}' выбран (Валюта: {new_derived_currency}).\nВыбери категорию:",
-            reply_markup=generate_categories_keyboard(context)
-        )
+        # Старый метод выбора источника через InlineKeyboardMarkup
+        # Теперь мы используем ReplyKeyboardMarkup и обрабатываем выбор в text_handler
+        pass
 
     elif data == "sms":
         if not selected_source:
@@ -532,6 +529,36 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             'Ошибка: Не удалось подключиться к Google Sheets. Данные не могут быть обработаны.')
         return
+
+    # Проверяем, ожидаем ли мы выбор источника
+    if context.user_data.get('awaiting_source_selection', False):
+        source_name = update.message.text
+        if source_name == "⬅️ Назад":
+            # Обрабатываем кнопку "Назад"
+            context.user_data.pop('awaiting_source_selection', None)
+            await update.message.reply_text(
+                "Выбери категорию:",
+                reply_markup=generate_categories_keyboard(context)
+            )
+            return
+        elif source_name in SOURCES:
+            # Устанавливаем выбранный источник
+            context.user_data['source'] = source_name
+            new_derived_currency = get_currency_from_source(source_name)
+            context.user_data.pop('category', None)
+            context.user_data.pop('subcategory', None)
+            context.user_data.pop('awaiting_source_selection', None)
+            await update.message.reply_text(
+                f"Источник '{source_name}' выбран (Валюта: {new_derived_currency}).\nВыбери категорию:",
+                reply_markup=generate_categories_keyboard(context)
+            )
+            return
+        else:
+            await update.message.reply_text(
+                "Неизвестный источник. Пожалуйста, выберите источник из списка или нажмите 'Назад':",
+                reply_markup=generate_sources_keyboard()
+            )
+            return
 
     user_selected_source = context.user_data.get('source')
     transaction_currency = FALLBACK_CURRENCY
