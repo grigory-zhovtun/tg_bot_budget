@@ -299,13 +299,7 @@ def generate_categories_keyboard(context: ContextTypes.DEFAULT_TYPE = None):
         InlineKeyboardButton(text="СМС", callback_data="sms")
     ]
 
-    source_button_text = "Источник (не выбран)"
-    current_source = None
-    if context and context.user_data.get('source'):
-        current_source = context.user_data.get('source')
-        source_button_text = f"Источник: {current_source}"
-
-    action_buttons_row.append(InlineKeyboardButton(text=source_button_text, callback_data="change_source"))
+    # Убираем кнопку "Источник:", так как используем постоянную клавиатуру
     keyboard.append(action_buttons_row)
 
     return InlineKeyboardMarkup(keyboard)
@@ -362,19 +356,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if current_source:
         derived_currency = get_currency_from_source(current_source)
 
-    welcome_message = f'Привет, {update.effective_user.first_name}!\nВыбери действие:'
+    # Сначала отправляем клавиатуру с источниками
+    await update.message.reply_text(
+        "Источники платежей (доступны всегда):",
+        reply_markup=generate_sources_keyboard()
+    )
+    
+    welcome_message = f'Привет, {update.effective_user.first_name}!\nВыбери категорию:'
     if current_source:
         welcome_message += f'\nТекущий источник: {current_source} (Валюта: {derived_currency})'
     else:
         welcome_message += f'\nИсточник не выбран. Валюта не определена.'
-
-    # Сначала отправляем сообщение с постоянной клавиатурой источников
-    await update.message.reply_text(
-        "Доступные источники оплаты:",
-        reply_markup=generate_sources_keyboard()
-    )
+    welcome_message += f'\n\nВы можете изменить источник платежа в любой момент, нажав на соответствующую кнопку на клавиатуре.'
     
-    # Затем отправляем основное сообщение с категориями как inline клавиатуру
+    # Затем отправляем основное сообщение с категориями
     await update.message.reply_text(
         welcome_message,
         reply_markup=generate_categories_keyboard(context)
@@ -492,21 +487,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     elif data == "change_source":
-        if not SOURCES:
-            await query.edit_message_text(
-                text="Список источников пуст. Невозможно выбрать источник. Заполните Google Таблицу.",
-                reply_markup=generate_categories_keyboard(context)
-            )
-            return
-        await query.edit_message_text(
-            text="Выберите источник (используйте клавиатуру ниже):",
-            reply_markup=None
-        )
-        await query.message.reply_text(
-            "Выберите источник:",
-            reply_markup=generate_sources_keyboard()
-        )
-        context.user_data['awaiting_source_selection'] = True
+        # Эта ветка больше не используется, так как кнопка "Источник:" удалена из инлайн-клавиатуры
+        # Выбор источника осуществляется через постоянную клавиатуру
+        pass
 
     elif data.startswith("set_source_"):
         # Старый метод выбора источника через InlineKeyboardMarkup
@@ -567,43 +550,82 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-    # Проверяем, ожидаем ли мы выбор источника
-    if context.user_data.get('awaiting_source_selection', False):
-        source_name = update.message.text
-        if source_name == "⬅️ Назад":
-            # Обрабатываем кнопку "Назад"
-            context.user_data.pop('awaiting_source_selection', None)
-            await update.message.reply_text(
-                "Выбери категорию:",
-                reply_markup=generate_categories_keyboard(context)
-            )
-            return
-        elif source_name in SOURCES:
-            # Устанавливаем выбранный источник
+                # Обработка нажатия на кнопки с источниками (доступны в любой момент)
+                source_name = update.message.text
+                if source_name in SOURCES:
+            previous_source = context.user_data.get('source')
             context.user_data['source'] = source_name
             new_derived_currency = get_currency_from_source(source_name)
+            
+            # Проверяем текущее состояние диалога
+            category = context.user_data.get('category')
+            subcategory = context.user_data.get('subcategory')
+            
+            if context.user_data.get('sms_mode'):
+                # Если мы в режиме СМС, сообщаем о смене источника
+                await update.message.reply_text(
+                    f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\nВставьте скопированные СМС:",
+                    reply_markup=InlineKeyboardMarkup([
+                        [InlineKeyboardButton(text="⬅️ Назад", callback_data="sms_back")]
+                    ])
+                )
+            elif subcategory:
+                # Если выбрана подкатегория, сообщаем о смене источника и предлагаем внести сумму
+                prompt_text = (f"Источник изменен на: {source_name} (было: {previous_source})\n"
+                              f"Категория: {category}\n"
+                              f"Подкатегория: {subcategory}\n"
+                              f"Валюта: {new_derived_currency}\n\n"
+                              f"ВНЕСИТЕ СУММУ И КОММЕНТАРИЙ (ЧЕРЕЗ ПРОБЕЛ):")
+                await update.message.reply_text(
+                    text=prompt_text,
+                    reply_markup=generate_subcategories_keyboard(category)
+                )
+            elif category:
+                # Если выбрана только категория, сообщаем о смене источника и предлагаем выбрать подкатегорию
+                await update.message.reply_text(
+                    text=f"Источник изменен на: {source_name} (было: {previous_source})\n"
+                         f"Категория: {category}\n"
+                         f"Валюта: {new_derived_currency}\n\n"
+                         f"Выберите подкатегорию:",
+                    reply_markup=generate_subcategories_keyboard(category)
+                )
+            else:
+                # Если ничего не выбрано, сообщаем о смене источника и предлагаем выбрать категорию
+                await update.message.reply_text(
+                    f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\nВыбери категорию:",
+                    reply_markup=generate_categories_keyboard(context)
+                )
+            return
+                elif source_name == "⬅️ Категории":
+            # Обрабатываем кнопку "Категории" в клавиатуре источников
+            user_selected_source = context.user_data.get('source')
+            transaction_currency = FALLBACK_CURRENCY
+            if user_selected_source:
+                transaction_currency = get_currency_from_source(user_selected_source)
+                
+            message_text = "Выбери категорию:"
+            if user_selected_source:
+                message_text = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\n{message_text}"
+            else:
+                message_text = f"Источник не выбран. Валюта не определена.\n{message_text}"
+                
             context.user_data.pop('category', None)
             context.user_data.pop('subcategory', None)
-            context.user_data.pop('awaiting_source_selection', None)
+            context.user_data.pop('sms_mode', None)
+            
             await update.message.reply_text(
-                f"Источник '{source_name}' выбран (Валюта: {new_derived_currency}).\nВыбери категорию:",
+                message_text,
                 reply_markup=generate_categories_keyboard(context)
             )
             return
-        else:
+            
+                user_selected_source = context.user_data.get('source')
+                transaction_currency = FALLBACK_CURRENCY
+                if user_selected_source:
+            transaction_currency = get_currency_from_source(user_selected_source)
+                else:
             await update.message.reply_text(
-                "Неизвестный источник. Пожалуйста, выберите источник из списка или нажмите 'Назад':",
-                reply_markup=generate_sources_keyboard()
-            )
-            return
-
-    user_selected_source = context.user_data.get('source')
-    transaction_currency = FALLBACK_CURRENCY
-    if user_selected_source:
-        transaction_currency = get_currency_from_source(user_selected_source)
-    else:
-        await update.message.reply_text(
-            "Ошибка: Источник не выбран. Пожалуйста, выберите источник через меню.",
+                "Ошибка: Источник не выбран. Пожалуйста, выберите источник из клавиатуры ниже.",
             reply_markup=generate_categories_keyboard(context)
         )
         return
