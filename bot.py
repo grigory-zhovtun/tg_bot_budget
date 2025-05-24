@@ -562,85 +562,100 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-                # Обработка нажатия на кнопки с источниками (доступны в любой момент)
-                source_name = update.message.text
-                if source_name in SOURCES:
-            previous_source = context.user_data.get('source')
-            context.user_data['source'] = source_name
-            new_derived_currency = get_currency_from_source(source_name)
-            
-            # Проверяем текущее состояние диалога
-            category = context.user_data.get('category')
-            subcategory = context.user_data.get('subcategory')
-            
-            if context.user_data.get('sms_mode'):
-                # Scenario D: If we are in SMS mode, inform about source change
-                await update.message.reply_text(
-                    f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\nВставьте скопированные СМС:",
-                    reply_markup=InlineKeyboardMarkup([
-                        [InlineKeyboardButton(text="⬅️ Назад", callback_data="sms_back")]
-                    ])
-                )
-            elif subcategory:
-                # Scenario C: If subcategory is selected, inform about source change and prompt for amount
-                prompt_text = (f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\n"
-                              f"Категория: {category}\n"
-                              f"Подкатегория: {subcategory}\n\n"
-                              f"ВНЕСИТЕ СУММУ И КОММЕНТАРИЙ (ЧЕРЕЗ ПРОБЕЛ):")
-                await update.message.reply_text(
-                    text=prompt_text,
-                    reply_markup=generate_subcategories_keyboard(category) # Keyboard for subcategories (allows "Back")
-                )
-            elif category:
-                # Scenario B: If only category is selected, inform about source change and prompt for subcategory
-                await update.message.reply_text(
-                    text=f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\n"
-                         f"Категория: {category}.\n\n"
-                         f"Выберите подкатегорию:",
-                    reply_markup=generate_subcategories_keyboard(category) # Keyboard for subcategories
-                )
-            else:
-                # Scenario A: If nothing is selected (or just after /start), inform about source change and prompt for category
-                await update.message.reply_text(
-                    f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\nВыбери категорию:",
-                    reply_markup=generate_categories_keyboard(context) # Keyboard for categories
-                )
-            return
-                elif source_name == "⬅️ Категории":
-            # Обрабатываем кнопку "Категории" в клавиатуре источников
-            user_selected_source = context.user_data.get('source')
-            transaction_currency = FALLBACK_CURRENCY
-            if user_selected_source:
-                transaction_currency = get_currency_from_source(user_selected_source)
-                
-            message_text = "Выбери категорию:"
-            if user_selected_source:
-                message_text = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\n{message_text}"
-            else:
-                message_text = f"Источник не выбран. Валюта не определена.\n{message_text}"
-                
-            context.user_data.pop('category', None)
-            context.user_data.pop('subcategory', None)
-            context.user_data.pop('sms_mode', None)
-            
+    # Обработка нажатия на кнопки с источниками (доступны в любой момент)
+    source_name = update.message.text
+    if source_name in SOURCES:
+        previous_source = context.user_data.get('source')
+        context.user_data['source'] = source_name
+        new_derived_currency = get_currency_from_source(source_name)
+        
+        # Проверяем текущее состояние диалога
+        category = context.user_data.get('category')
+        subcategory = context.user_data.get('subcategory')
+        
+        if context.user_data.get('sms_mode'):
+            # Scenario D: If we are in SMS mode, inform about source change
             await update.message.reply_text(
-                message_text,
-                reply_markup=generate_categories_keyboard(context)
+                f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\nВставьте скопированные СМС:",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton(text="⬅️ Назад", callback_data="sms_back")]
+                ])
             )
-            return
-            
-                user_selected_source = context.user_data.get('source')
-                transaction_currency = FALLBACK_CURRENCY
-                if user_selected_source:
-            transaction_currency = get_currency_from_source(user_selected_source)
-                else:
+        elif subcategory:
+            # Scenario C: If subcategory is selected, inform about source change and prompt for amount
+            prompt_text = (f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\n"
+                            f"Категория: {category}\n"
+                            f"Подкатегория: {subcategory}\n\n"
+                            f"ВНЕСИТЕ СУММУ И КОММЕНТАРИЙ (ЧЕРЕЗ ПРОБЕЛ):")
             await update.message.reply_text(
-                "Ошибка: Источник не выбран. Пожалуйста, выберите источник из клавиатуры ниже.",
+                text=prompt_text,
+                reply_markup=generate_subcategories_keyboard(category) # Keyboard for subcategories (allows "Back")
+            )
+        elif category:
+            # Scenario B: If only category is selected, inform about source change and prompt for subcategory
+            await update.message.reply_text(
+                text=f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\n"
+                        f"Категория: {category}.\n\n"
+                        f"Выберите подкатегорию:",
+                reply_markup=generate_subcategories_keyboard(category) # Keyboard for subcategories
+            )
+        else:
+            # Scenario A: If nothing is selected (or just after /start), inform about source change and prompt for category
+            await update.message.reply_text(
+                f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\nВыбери категорию:",
+                reply_markup=generate_categories_keyboard(context) # Keyboard for categories
+            )
+        return
+    elif source_name == "⬅️ Категории":
+        # Обрабатываем кнопку "Категории" в клавиатуре источников
+        user_selected_source = context.user_data.get('source')
+        transaction_currency = FALLBACK_CURRENCY
+        if user_selected_source:
+            transaction_currency = get_currency_from_source(user_selected_source)
+            
+        message_text = "Выбери категорию:"
+        if user_selected_source:
+            message_text = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\n{message_text}"
+        else:
+            message_text = f"Источник не выбран. Валюта не определена.\n{message_text}"
+            
+        context.user_data.pop('category', None)
+        context.user_data.pop('subcategory', None)
+        context.user_data.pop('sms_mode', None)
+        
+        await update.message.reply_text(
+            message_text,
             reply_markup=generate_categories_keyboard(context)
+        )
+        return
+        
+    user_selected_source = context.user_data.get('source')
+    transaction_currency = FALLBACK_CURRENCY
+    if user_selected_source:
+        transaction_currency = get_currency_from_source(user_selected_source)
+    else:
+        # This else block handles cases where text input is received, it's not a source button,
+        # it's not "<- Categories", and no source is set. This implies an action is being attempted
+        # without a source selected. The message below might be too generic if we are not yet in sms_mode
+        # or expecting amount input. However, subsequent checks for category/subcategory will refine this.
+        # If sms_mode is true, or category/subcategory are set, this message won't be hit if source is missing,
+        # because the earlier checks (e.g. inside sms_mode block) would trigger first if source is required.
+        # This mainly serves as a catch-all if user types random text when source isn't set.
+        await update.message.reply_text(
+            "Ошибка: Источник не выбран. Пожалуйста, выберите источник из клавиатуры ниже, "
+            "затем выберите категорию/СМС или введите сумму.",
+            reply_markup=generate_categories_keyboard(context) # Directs to categories, assumes source selection is primary next step.
         )
         return
 
     if context.user_data.get('sms_mode'):
+        # Ensure source is selected before processing SMS
+        if not user_selected_source: # Re-check source specifically for SMS mode
+            await update.message.reply_text(
+                "Ошибка: Источник не выбран для СМС. Пожалуйста, выберите источник и попробуйте снова.",
+                reply_markup=generate_categories_keyboard(context)
+            )
+            return
         original_message_id = update.message.message_id
         chat_id = update.message.chat_id
 
@@ -651,10 +666,15 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("Не удалось распознать транзакции в СМС. Пожалуйста, проверьте формат.")
                 context.user_data.pop('sms_mode', None) # Выход из режима СМС
                 message_text_sms_fail = "Выбери категорию:"
-                if user_selected_source: # Используем уже полученный user_selected_source
-                    message_text_sms_fail = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\n{message_text_sms_fail}"
-                await update.message.reply_text(
-                    message_text_sms_fail,
+                # The following lines for message_text_sms_fail seem to be part of an if !records block
+                # that might have been misaligned or is being refactored.
+                # Let's ensure it's correctly placed within the "if not records:"
+                # For now, the transaction_currency for SMS is derived from user_selected_source at the start of this block.
+                # message_text_sms_fail = "Выбери категорию:"
+                # if user_selected_source:
+                #    message_text_sms_fail = f"Источник: {user_selected_source} (Валюта: {transaction_currency})\n{message_text_sms_fail}"
+                await update.message.reply_text( # This is the "Не удалось распознать транзакции" message
+                    "Не удалось распознать транзакции в СМС. Пожалуйста, проверьте формат.",
                     reply_markup=generate_categories_keyboard(context)
                 )
                 return
@@ -780,27 +800,50 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     subcategory = context.user_data.get('subcategory')
 
     error_parts = []
-    if not user_selected_source: # Эта проверка уже была выше, но дублирование не повредит
-        error_parts.append("- Источник")
-    if not category:
+    # Ensure source is selected before processing manual input that requires category/subcategory
+    if not user_selected_source and (category or subcategory): # Only error if trying to log with cat/subcat without source
+        await update.message.reply_text(
+            f"Ошибка: Источник не выбран для Категории '{category}' / Подкатегории '{subcategory}'. "
+            "Пожалуйста, выберите источник.",
+            reply_markup=generate_categories_keyboard(context)
+        )
+        return
+        
+    # If source is selected, OR if category/subcategory are not yet selected (implying user might be typing random text
+    # or trying to select a category via text, which is not supported by this handler for category selection)
+    # proceed to check category/subcategory selection status for manual input.
+
+    error_parts = []
+    # Source check is done above for category/subcategory context.
+    # If user_selected_source is None here, it means category and subcategory must also be None (or we'd have returned).
+    # So, the primary check is now for category/subcategory to determine if we are ready for amount input.
+    if not category: # This implies we are not ready for amount input.
         error_parts.append("- Категорию")
-    # Для ручного ввода подкатегория обязательна, если есть категория
-    if category and not subcategory:
+    elif not subcategory: # Category is present, but subcategory is missing.
         error_parts.append("- Подкатегорию")
 
-
-    if error_parts:
-        error_message = "Пожалуйста, сначала выберите:\n" + "\n".join(error_parts)
-        if user_selected_source: # Добавляем информацию о текущем источнике, если он есть
-            error_message += f'\nТекущий источник: {user_selected_source} (Валюта: {transaction_currency})'
-        else:
-            error_message += f'\nИсточник не выбран. Валюта не определена.'
+    if error_parts: # True if category or subcategory is missing
+        # We are not in SMS mode, and either category or subcategory (or both) are missing.
+        # This means we are not ready to accept an amount.
+        guidance_message = "Пожалуйста, сначала выберите:\n" + "\n".join(error_parts)
+        current_status_message = ""
+        if user_selected_source:
+            current_status_message = f'\nТекущий источник: {user_selected_source} (Валюта: {transaction_currency})'
+            if category: # Category is selected, but subcategory is missing
+                 current_status_message += f'\nКатегория: {category}'
+        else: # Source not selected, and by implication, category/subcategory also not selected
+            current_status_message = '\nИсточник не выбран. Валюта не определена.'
+        
+        # If only category is selected, stay on subcategory keyboard. Otherwise, back to category keyboard.
+        reply_markup_for_error = generate_subcategories_keyboard(category) if category and not subcategory else generate_categories_keyboard(context)
+        
         await update.message.reply_text(
-            error_message,
-            reply_markup=generate_categories_keyboard(context) # Возвращаем к выбору категорий
+            guidance_message + current_status_message,
+            reply_markup=reply_markup_for_error
         )
         return
 
+    # If we reach here, source, category, and subcategory are all selected. Ready for amount.
     message_text = update.message.text
     try:
         amount_str, *comment_parts = message_text.split(' ', 1)
