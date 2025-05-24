@@ -429,11 +429,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_category = data[4:]
         context.user_data['category'] = selected_category
         if not selected_source:
+            # Source not selected, inform the user.
+            message_text_no_source = "Источник не выбран. Валюта не определена.\n" \
+                                     "Сначала выберите ИСТОЧНИК.\nЗатем выберите категорию."
             await query.edit_message_text(
-                text=f"Сначала выберите ИСТОЧНИК.\nЗатем выберите категорию.",
+                text=message_text_no_source,
                 reply_markup=generate_categories_keyboard(context)
             )
             return
+        # Source is selected, proceed.
         await query.edit_message_text(
             text=f"Источник: {selected_source} (Валюта: {derived_currency})\nКатегория: {selected_category}\n\nВыберите подкатегорию:",
             reply_markup=generate_subcategories_keyboard(selected_category)
@@ -471,11 +475,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['subcategory'] = subcategory_name
         category = context.user_data.get('category', 'Не выбрана')
         if not selected_source:
+            # Source not selected, inform the user.
+            message_text_no_source = "Источник не выбран. Валюта не определена.\n" \
+                                     "Ошибка: Источник не выбран. Пожалуйста, вернитесь и выберите источник."
             await query.edit_message_text(
-                text=f"Ошибка: Источник не выбран. Пожалуйста, вернитесь и выберите источник.",
+                text=message_text_no_source,
                 reply_markup=generate_categories_keyboard(context)
             )
             return
+        # Source is selected, proceed.
         prompt_text = (f"Источник: {selected_source}\n"
                        f"Категория: {category}\n"
                        f"Подкатегория: {subcategory_name}\n"
@@ -498,11 +506,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "sms":
         if not selected_source:
+            # Source not selected, inform the user.
+            message_text_no_source = "Источник не выбран. Валюта не определена.\n" \
+                                     "Пожалуйста, сначала выберите ИСТОЧНИК.\nЗатем нажмите кнопку 'СМС' снова."
             await query.edit_message_text(
-                text=f"Пожалуйста, сначала выберите ИСТОЧНИК.\nЗатем нажмите кнопку 'СМС' снова.",
+                text=message_text_no_source,
                 reply_markup=generate_categories_keyboard(context)
             )
             return
+        # Source is selected, proceed to SMS mode.
         context.user_data['sms_mode'] = True
         await query.edit_message_text(
             text=f"Источник: {selected_source} (Валюта: {derived_currency})\nВставьте скопированные СМС:",
@@ -562,7 +574,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             subcategory = context.user_data.get('subcategory')
             
             if context.user_data.get('sms_mode'):
-                # Если мы в режиме СМС, сообщаем о смене источника
+                # Scenario D: If we are in SMS mode, inform about source change
                 await update.message.reply_text(
                     f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\nВставьте скопированные СМС:",
                     reply_markup=InlineKeyboardMarkup([
@@ -570,30 +582,28 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ])
                 )
             elif subcategory:
-                # Если выбрана подкатегория, сообщаем о смене источника и предлагаем внести сумму
-                prompt_text = (f"Источник изменен на: {source_name} (было: {previous_source})\n"
+                # Scenario C: If subcategory is selected, inform about source change and prompt for amount
+                prompt_text = (f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\n"
                               f"Категория: {category}\n"
-                              f"Подкатегория: {subcategory}\n"
-                              f"Валюта: {new_derived_currency}\n\n"
+                              f"Подкатегория: {subcategory}\n\n"
                               f"ВНЕСИТЕ СУММУ И КОММЕНТАРИЙ (ЧЕРЕЗ ПРОБЕЛ):")
                 await update.message.reply_text(
                     text=prompt_text,
-                    reply_markup=generate_subcategories_keyboard(category)
+                    reply_markup=generate_subcategories_keyboard(category) # Keyboard for subcategories (allows "Back")
                 )
             elif category:
-                # Если выбрана только категория, сообщаем о смене источника и предлагаем выбрать подкатегорию
+                # Scenario B: If only category is selected, inform about source change and prompt for subcategory
                 await update.message.reply_text(
-                    text=f"Источник изменен на: {source_name} (было: {previous_source})\n"
-                         f"Категория: {category}\n"
-                         f"Валюта: {new_derived_currency}\n\n"
+                    text=f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\n"
+                         f"Категория: {category}.\n\n"
                          f"Выберите подкатегорию:",
-                    reply_markup=generate_subcategories_keyboard(category)
+                    reply_markup=generate_subcategories_keyboard(category) # Keyboard for subcategories
                 )
             else:
-                # Если ничего не выбрано, сообщаем о смене источника и предлагаем выбрать категорию
+                # Scenario A: If nothing is selected (or just after /start), inform about source change and prompt for category
                 await update.message.reply_text(
                     f"Источник изменен на '{source_name}' (Валюта: {new_derived_currency}).\nВыбери категорию:",
-                    reply_markup=generate_categories_keyboard(context)
+                    reply_markup=generate_categories_keyboard(context) # Keyboard for categories
                 )
             return
                 elif source_name == "⬅️ Категории":
