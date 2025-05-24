@@ -321,8 +321,8 @@ def generate_sources_keyboard():
             row_buttons = []
     if row_buttons:
         keyboard.append(row_buttons)
-    keyboard.append([KeyboardButton(text="⬅️ Назад")])
-    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    keyboard.append([KeyboardButton(text="⬅️ Категории")])
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
 
 def generate_subcategories_keyboard(selected_category):
@@ -368,6 +368,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         welcome_message += f'\nИсточник не выбран. Валюта не определена.'
 
+    # Сначала отправляем сообщение с постоянной клавиатурой источников
+    await update.message.reply_text(
+        "Доступные источники оплаты:",
+        reply_markup=generate_sources_keyboard()
+    )
+    
+    # Затем отправляем основное сообщение с категориями как inline клавиатуру
     await update.message.reply_text(
         welcome_message,
         reply_markup=generate_categories_keyboard(context)
