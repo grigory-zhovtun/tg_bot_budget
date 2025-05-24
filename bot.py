@@ -560,6 +560,36 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+    # Проверяем, ожидаем ли мы выбор источника
+    if context.user_data.get('awaiting_source_selection', False):
+        source_name = update.message.text
+        if source_name == "⬅️ Назад":
+            # Обрабатываем кнопку "Назад"
+            context.user_data.pop('awaiting_source_selection', None)
+            await update.message.reply_text(
+                "Выбери категорию:",
+                reply_markup=generate_categories_keyboard(context)
+            )
+            return
+        elif source_name in SOURCES:
+            # Устанавливаем выбранный источник
+            context.user_data['source'] = source_name
+            new_derived_currency = get_currency_from_source(source_name)
+            context.user_data.pop('category', None)
+            context.user_data.pop('subcategory', None)
+            context.user_data.pop('awaiting_source_selection', None)
+            await update.message.reply_text(
+                f"Источник '{source_name}' выбран (Валюта: {new_derived_currency}).\nВыбери категорию:",
+                reply_markup=generate_categories_keyboard(context)
+            )
+            return
+        else:
+            await update.message.reply_text(
+                "Неизвестный источник. Пожалуйста, выберите источник из списка или нажмите 'Назад':",
+                reply_markup=generate_sources_keyboard()
+            )
+            return
+
     user_selected_source = context.user_data.get('source')
     transaction_currency = FALLBACK_CURRENCY
     if user_selected_source:
