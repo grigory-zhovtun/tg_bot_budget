@@ -6,9 +6,6 @@ import gspread
 import re
 from datetime import datetime
 from requests.exceptions import ConnectionError
-# Импортируем переменные из config.py
-# Обратите внимание, что если переменные не установлены в окружении и LOCAL_RUN=False,
-# они могут быть None после этого импорта, если в config.py нет значений по умолчанию.
 from config import TELEGRAM_TOKEN as CONFIG_TELEGRAM_TOKEN, \
                      GOOGLE_PRIVATE_KEY as CONFIG_GOOGLE_PRIVATE_KEY, \
                      GOOGLE_SERVICE_ACCOUNT_EMAIL as CONFIG_GOOGLE_SERVICE_ACCOUNT_EMAIL, \
@@ -16,12 +13,10 @@ from config import TELEGRAM_TOKEN as CONFIG_TELEGRAM_TOKEN, \
 
 LOCAL_RUN = os.getenv('LOCAL_RUN', 'False').lower() == 'true'
 
-# Переопределяем переменные из .env, если LOCAL_RUN True, или используем из config (которые берутся из os.environ)
 TELEGRAM_TOKEN = CONFIG_TELEGRAM_TOKEN
 GOOGLE_PRIVATE_KEY = CONFIG_GOOGLE_PRIVATE_KEY
 GOOGLE_SERVICE_ACCOUNT_EMAIL = CONFIG_GOOGLE_SERVICE_ACCOUNT_EMAIL
 SPREADSHEET_ID = CONFIG_SPREADSHEET_ID
-# GOOGLE_APPLICATION_CREDENTIALS_PATH - если используется, также должен быть загружен из .env/os.environ
 GOOGLE_APPLICATION_CREDENTIALS_PATH = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_PATH')
 
 
