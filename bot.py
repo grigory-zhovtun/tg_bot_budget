@@ -1,5 +1,5 @@
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from google.oauth2.service_account import Credentials
 import gspread
@@ -298,14 +298,6 @@ def generate_categories_keyboard(context: ContextTypes.DEFAULT_TYPE = None):
     action_buttons_row = [
         InlineKeyboardButton(text="СМС", callback_data="sms")
     ]
-
-    source_button_text = "Источник (не выбран)"
-    current_source = None
-    if context and context.user_data.get('source'):
-        current_source = context.user_data.get('source')
-        source_button_text = f"Источник: {current_source}"
-
-    action_buttons_row.append(InlineKeyboardButton(text=source_button_text, callback_data="change_source"))
     keyboard.append(action_buttons_row)
 
     return InlineKeyboardMarkup(keyboard)
@@ -315,16 +307,14 @@ def generate_sources_keyboard():
     keyboard = []
     row_buttons = []
     for idx, src_name in enumerate(SOURCES, 1):
-        row_buttons.append(InlineKeyboardButton(text=src_name, callback_data=f"set_source_{src_name}"))
-        if idx % 2 == 0 or idx == len(SOURCES):
+        row_buttons.append(KeyboardButton(text=src_name))
+        if idx % 3 == 0 or idx == len(SOURCES):
             keyboard.append(row_buttons)
             row_buttons = []
     if row_buttons:
         keyboard.append(row_buttons)
-    keyboard.append([
-        InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_categories_from_source")
-    ])
-    return InlineKeyboardMarkup(keyboard)
+    keyboard.append([KeyboardButton(text="⬅️ Назад")])
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
 def generate_subcategories_keyboard(selected_category):
@@ -367,13 +357,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_message = f'Привет, {update.effective_user.first_name}!\nВыбери действие:'
     if current_source:
         welcome_message += f'\nТекущий источник: {current_source} (Валюта: {derived_currency})'
+        await update.message.reply_text(
+            welcome_message,
+            reply_markup=generate_categories_keyboard(context)
+        )
     else:
-        welcome_message += f'\nИсточник не выбран. Валюта не определена.'
-
-    await update.message.reply_text(
-        welcome_message,
-        reply_markup=generate_categories_keyboard(context)
-    )
+        welcome_message += f'\nИсточник не выбран. Сначала выберите источник:'
+        await update.message.reply_text(
+            welcome_message,
+            reply_markup=generate_sources_keyboard()
+        )
 
 
 async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -407,10 +400,10 @@ async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['source'] = SOURCES[0] if SOURCES else None
         source_updated = True
 
-    if SOURCES or source_updated : # Условие изменено чтобы сообщение об обновлении появлялось даже если источники были пустыми и остались пустыми
+    if SOURCES or source_updated:
         await update.message.reply_text('Данные клавиатуры (категории, подкатегории, источники) успешно обновлены.')
-        await start(update, context) # Передаем update и context в start
-    elif not SOURCES: # Это условие теперь избыточно, т.к. предыдущее его покрывает
+        await start(update, context)
+    elif not SOURCES:
         await update.message.reply_text(
              "Данные клавиатуры обновлены, но список источников пуст. Пожалуйста, заполните их в Google Таблице.")
 
@@ -430,8 +423,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['category'] = selected_category
         if not selected_source:
             await query.edit_message_text(
-                text=f"Сначала выберите ИСТОЧНИК.\nЗатем выберите категорию.",
-                reply_markup=generate_categories_keyboard(context)
+                text=f"Сначала выберите ИСТОЧНИК (используйте кнопки внизу экрана).\nЗатем выберите категорию."
+            )
+            await query.message.reply_text(
+                "Выберите источник:",
+                reply_markup=generate_sources_keyboard()
             )
             return
         await query.edit_message_text(
@@ -486,34 +482,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=generate_subcategories_keyboard(category) # Здесь остаётся клавиатура подкатегорий для навигации "Назад"
         )
 
-    elif data == "change_source":
-        if not SOURCES:
-            await query.edit_message_text(
-                text="Список источников пуст. Невозможно выбрать источник. Заполните Google Таблицу.",
-                reply_markup=generate_categories_keyboard(context)
-            )
-            return
-        await query.edit_message_text(
-            text="Выберите источник:",
-            reply_markup=generate_sources_keyboard()
-        )
-
-    elif data.startswith("set_source_"):
-        source_name = data[len("set_source_"):]
-        context.user_data['source'] = source_name
-        new_derived_currency = get_currency_from_source(source_name)
-        context.user_data.pop('category', None)
-        context.user_data.pop('subcategory', None)
-        await query.edit_message_text(
-            text=f"Источник '{source_name}' выбран (Валюта: {new_derived_currency}).\nВыбери категорию:",
-            reply_markup=generate_categories_keyboard(context)
-        )
 
     elif data == "sms":
         if not selected_source:
             await query.edit_message_text(
-                text=f"Пожалуйста, сначала выберите ИСТОЧНИК.\nЗатем нажмите кнопку 'СМС' снова.",
-                reply_markup=generate_categories_keyboard(context)
+                text=f"Пожалуйста, сначала выберите ИСТОЧНИК (используйте кнопки внизу экрана).\nЗатем нажмите кнопку 'СМС' снова."
+            )
+            await query.message.reply_text(
+                "Выберите источник:",
+                reply_markup=generate_sources_keyboard()
             )
             return
         context.user_data['sms_mode'] = True
@@ -531,6 +508,34 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not sheet: # Проверяем sheet в начале
         await update.message.reply_text(
             'Ошибка: Не удалось подключиться к Google Sheets. Данные не могут быть обработаны.')
+        return
+
+    # Проверяем, не является ли текст выбором источника
+    message_text = update.message.text
+    if message_text in SOURCES:
+        context.user_data['source'] = message_text
+        new_derived_currency = get_currency_from_source(message_text)
+        context.user_data.pop('category', None)
+        context.user_data.pop('subcategory', None)
+        await update.message.reply_text(
+            f"Источник '{message_text}' выбран (Валюта: {new_derived_currency}).\nВыбери категорию:",
+            reply_markup=generate_categories_keyboard(context)
+        )
+        return
+    elif message_text == "⬅️ Назад":
+        context.user_data.pop('category', None)
+        context.user_data.pop('subcategory', None)
+        selected_source = context.user_data.get('source')
+        message_text_back = "Выбери категорию:"
+        if selected_source:
+            derived_currency = get_currency_from_source(selected_source)
+            message_text_back = f"Источник: {selected_source} (Валюта: {derived_currency})\n{message_text_back}"
+        else:
+            message_text_back = f"Источник не выбран. Валюта не определена.\n{message_text_back}"
+        await update.message.reply_text(
+            message_text_back,
+            reply_markup=generate_categories_keyboard(context)
+        )
         return
 
     user_selected_source = context.user_data.get('source')
