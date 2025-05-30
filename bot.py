@@ -1,5 +1,5 @@
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 from google.oauth2.service_account import Credentials
 import gspread
@@ -274,6 +274,10 @@ def load_keyboard_data():
     CATEGORIES = temp_categories
     SUBCATEGORIES = temp_subcategories
     SOURCES = temp_sources
+    
+    print(f"Загружено источников: {len(SOURCES)}")
+    if SOURCES:
+        print(f"Источники: {', '.join(SOURCES)}")
 
     return CATEGORIES, SUBCATEGORIES, SOURCES
 
@@ -306,13 +310,19 @@ def generate_categories_keyboard(context: ContextTypes.DEFAULT_TYPE = None):
 def generate_sources_keyboard():
     keyboard = []
     row_buttons = []
-    for idx, src_name in enumerate(SOURCES, 1):
-        row_buttons.append(KeyboardButton(text=src_name))
-        if idx % 3 == 0 or idx == len(SOURCES):
+    
+    if not SOURCES:
+        print("ВНИМАНИЕ: Список источников пуст при генерации клавиатуры!")
+        keyboard.append([KeyboardButton(text="Нет доступных источников")])
+    else:
+        for idx, src_name in enumerate(SOURCES, 1):
+            row_buttons.append(KeyboardButton(text=src_name))
+            if idx % 3 == 0 or idx == len(SOURCES):
+                keyboard.append(row_buttons)
+                row_buttons = []
+        if row_buttons:
             keyboard.append(row_buttons)
-            row_buttons = []
-    if row_buttons:
-        keyboard.append(row_buttons)
+    
     keyboard.append([KeyboardButton(text="⬅️ Назад")])
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
@@ -354,14 +364,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if current_source:
         derived_currency = get_currency_from_source(current_source)
 
-    welcome_message = f'Привет, {update.effective_user.first_name}!\nВыбери действие:'
     if current_source:
+        welcome_message = f'Привет, {update.effective_user.first_name}!\nВыбери действие:'
         welcome_message += f'\nТекущий источник: {current_source} (Валюта: {derived_currency})'
+        # Сначала скрываем любую reply keyboard
         await update.message.reply_text(
             welcome_message,
+            reply_markup=ReplyKeyboardRemove()
+        )
+        # Затем показываем inline keyboard с категориями
+        await update.message.reply_text(
+            "Выбери категорию:",
             reply_markup=generate_categories_keyboard(context)
         )
     else:
+        welcome_message = f'Привет, {update.effective_user.first_name}!'
         welcome_message += f'\nИсточник не выбран. Сначала выберите источник:'
         await update.message.reply_text(
             welcome_message,
@@ -422,13 +439,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         selected_category = data[4:]
         context.user_data['category'] = selected_category
         if not selected_source:
-            await query.edit_message_text(
-                text=f"Сначала выберите ИСТОЧНИК (используйте кнопки внизу экрана).\nЗатем выберите категорию."
-            )
-            await query.message.reply_text(
-                "Выберите источник:",
-                reply_markup=generate_sources_keyboard()
-            )
+            await query.answer()
+            if query.message:
+                await query.message.reply_text(
+                    text="Сначала выберите ИСТОЧНИК.\nЗатем выберите категорию.\n\nВыберите источник:",
+                    reply_markup=generate_sources_keyboard()
+                )
             return
         await query.edit_message_text(
             text=f"Источник: {selected_source} (Валюта: {derived_currency})\nКатегория: {selected_category}\n\nВыберите подкатегорию:",
@@ -485,13 +501,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif data == "sms":
         if not selected_source:
-            await query.edit_message_text(
-                text=f"Пожалуйста, сначала выберите ИСТОЧНИК (используйте кнопки внизу экрана).\nЗатем нажмите кнопку 'СМС' снова."
-            )
-            await query.message.reply_text(
-                "Выберите источник:",
-                reply_markup=generate_sources_keyboard()
-            )
+            await query.answer()
+            if query.message:
+                await query.message.reply_text(
+                    text="Пожалуйста, сначала выберите ИСТОЧНИК.\nЗатем нажмите кнопку 'СМС' снова.\n\nВыберите источник:",
+                    reply_markup=generate_sources_keyboard()
+                )
             return
         context.user_data['sms_mode'] = True
         await query.edit_message_text(
@@ -517,8 +532,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         new_derived_currency = get_currency_from_source(message_text)
         context.user_data.pop('category', None)
         context.user_data.pop('subcategory', None)
+        # Сначала скрываем reply keyboard
         await update.message.reply_text(
-            f"Источник '{message_text}' выбран (Валюта: {new_derived_currency}).\nВыбери категорию:",
+            f"Источник '{message_text}' выбран (Валюта: {new_derived_currency}).",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        # Затем показываем inline keyboard с категориями
+        await update.message.reply_text(
+            "Выбери категорию:",
             reply_markup=generate_categories_keyboard(context)
         )
         return
@@ -526,16 +547,24 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop('category', None)
         context.user_data.pop('subcategory', None)
         selected_source = context.user_data.get('source')
-        message_text_back = "Выбери категорию:"
         if selected_source:
+            # Скрываем reply keyboard
+            await update.message.reply_text(
+                "Возврат к категориям...",
+                reply_markup=ReplyKeyboardRemove()
+            )
+            # Показываем inline keyboard с категориями
             derived_currency = get_currency_from_source(selected_source)
-            message_text_back = f"Источник: {selected_source} (Валюта: {derived_currency})\n{message_text_back}"
+            await update.message.reply_text(
+                f"Источник: {selected_source} (Валюта: {derived_currency})\nВыбери категорию:",
+                reply_markup=generate_categories_keyboard(context)
+            )
         else:
-            message_text_back = f"Источник не выбран. Валюта не определена.\n{message_text_back}"
-        await update.message.reply_text(
-            message_text_back,
-            reply_markup=generate_categories_keyboard(context)
-        )
+            # Если источник не выбран, показываем выбор источников
+            await update.message.reply_text(
+                "Источник не выбран. Выберите источник:",
+                reply_markup=generate_sources_keyboard()
+            )
         return
 
     user_selected_source = context.user_data.get('source')
