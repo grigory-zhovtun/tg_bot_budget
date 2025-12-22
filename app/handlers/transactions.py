@@ -2,7 +2,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 import logging
 from app import config
-from app.handlers.common import get_currency_from_source
+from app.handlers.common import get_currency_from_source, track_message
 from app.utils.keyboards import generate_subcategories_keyboard, generate_categories_keyboard, generate_sources_keyboard
 
 logger = logging.getLogger(__name__)
@@ -24,10 +24,11 @@ async def transaction_button_handler(update: Update, context: ContextTypes.DEFAU
         if not selected_source:
              # If source somehow lost or not selected (though UI tries to prevent)
              if query.message:
-                await query.message.reply_text(
+                msg = await query.message.reply_text(
                     text="Сначала выберите ИСТОЧНИК.\nЗатем выберите категорию.",
                     reply_markup=generate_sources_keyboard(context.bot_data.get("sources", []))
                 )
+                track_message(context, msg)
              return
 
         # Fetch subcategories from bot_data

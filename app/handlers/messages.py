@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from app import config
 from app.services.google_sheets import GoogleSheetsService
-from app.handlers.common import get_currency_from_source
+from app.handlers.common import get_currency_from_source, track_message, clear_tracked_messages, show_main_menu
 from app.utils.keyboards import generate_sources_keyboard, generate_categories_keyboard, generate_subcategories_keyboard
 
 logger = logging.getLogger(__name__)
@@ -32,14 +32,16 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data['source'] = clean_text
             derived_currency = get_currency_from_source(clean_text)
             resp_text = f"Источник '{clean_text}' выбран (Валюта: {derived_currency})."
-            await update.message.reply_text(
+            msg1 = await update.message.reply_text(
                  resp_text,
                  reply_markup=generate_sources_keyboard(sources, clean_text)
             )
-            await update.message.reply_text(
+            track_message(context, msg1)
+            msg2 = await update.message.reply_text(
                 "Выбери категорию или отправь описание траты:",
                 reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
             )
+            track_message(context, msg2)
             return
 
         # 2. Check for "Back"
@@ -48,15 +50,17 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop('subcategory', None)
             current_source = context.user_data.get('source')
             if current_source:
-                 await update.message.reply_text(
+                 msg = await update.message.reply_text(
                     f"Источник: {current_source}. Выбери категорию:",
                     reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
                 )
+                 track_message(context, msg)
             else:
-                 await update.message.reply_text(
+                 msg = await update.message.reply_text(
                     "Источник не выбран.",
                     reply_markup=generate_sources_keyboard(sources)
                 )
+                 track_message(context, msg)
             return
 
     # 3. Decision Logic: Manual Entry (Strict) vs AI Parsing
@@ -104,7 +108,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         import PIL.Image
         image_part = PIL.Image.open(file_path)
 
-    await update.message.reply_text("🔍 Анализирую...")
+    analyzing_msg = await update.message.reply_text("🔍 Анализирую...")
+    track_message(context, analyzing_msg)
 
     try:
         known_cats = context.bot_data.get("categories", [])
@@ -176,15 +181,17 @@ async def _save_transaction(update, context, source, category, subcategory, amou
     ]
     
     if gs_service.add_transaction(row_data):
-        await update.message.reply_text(
-            f"✅ AI Записал:\n{amount} {currency} - {category} ({subcategory})\n{comment}\n(Источник: {source})",
-            reply_markup=generate_sources_keyboard(context.bot_data.get("sources", []), source)
-        )
         # Clear specific manual selection state
         context.user_data.pop('category', None)
         context.user_data.pop('subcategory', None)
-        # Ensure source is synced if AI changed it (optional, maybe keep user choice?)
-        # Let's update context source to whatever was used
-        context.user_data['source'] = source 
+        context.user_data['source'] = source
+
+        # Clear previous bot messages
+        chat_id = update.effective_chat.id
+        await clear_tracked_messages(context, chat_id)
+
+        # Show success message with main menu
+        success_msg = f"✅ Записано:\n{amount} {currency} - {category} ({subcategory})\n{comment}\n(Источник: {source})"
+        await show_main_menu(update, context, success_msg)
     else:
         await update.message.reply_text("❌ Ошибка при записи в Google Таблицу.")
