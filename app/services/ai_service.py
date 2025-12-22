@@ -15,7 +15,7 @@ class GeminiService:
     def _setup_client(self):
         if config.GEMINI_API_KEY:
             genai.configure(api_key=config.GEMINI_API_KEY)
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
+            self.model = genai.GenerativeModel('gemini-1.5-flash-001')
             logger.info("Gemini AI client configured.")
         else:
             logger.warning("GEMINI_API_KEY not found. AI features will be disabled.")
