@@ -16,16 +16,6 @@ class GeminiService:
         if config.GEMINI_API_KEY:
             genai.configure(api_key=config.GEMINI_API_KEY)
             
-            # Debug: List available models
-            try:
-                logger.info("Listing available Gemini models:")
-                for m in genai.list_models():
-                    if 'generateContent' in m.supported_generation_methods:
-                        logger.info(f"- {m.name}")
-            except Exception as e:
-                logger.error(f"Failed to list models: {e}")
-
-            # Fallback to stable 'gemini-pro' if 1.5 is having issues, or we can try to pick from list.
             # Based on logs, 'gemini-flash-latest' is available and safe.
             self.model = genai.GenerativeModel('gemini-flash-latest') 
             logger.info("Gemini AI client configured with 'gemini-flash-latest'.")
