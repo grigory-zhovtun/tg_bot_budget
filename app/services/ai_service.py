@@ -124,3 +124,32 @@ class GeminiService:
             if "safety" in str(e).lower():
                 raise ValueError("AI blocked the content for safety reasons.")
             raise ValueError(f"Could not understand transaction: {e}")
+
+    async def analyze_finances(self, custom_context: str = None) -> str:
+        """
+        Analyzes the user's transaction history and provides financial advice.
+        """
+        if not self.model:
+            raise ValueError("AI Service not configured.")
+
+        # Fetch history (default 5000 is good for deep analysis)
+        context = custom_context if custom_context else self.get_history_context(limit=1000)
+        
+        prompt = [
+            "You are a professional financial advisor. Analyze the User's transaction history below.",
+            f"\nHISTORY:\n{context}\n",
+            "INSTRUCTIONS:",
+            "1. Identify the top 3 spending categories.",
+            "2. Spot any unusual spending anomalies or recent spikes.",
+            "3. Provide 3 specific, actionable tips to save money based on these habits.",
+            "4. Keep the tone friendly, encouraging, but professional.",
+            "5. Reply in Russian language.",
+            "6. Use Markdown formatting (bold, lists) for readability."
+        ]
+        
+        try:
+            response = self.model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            logger.error(f"Analysis Error: {e}")
+            return "Не удалось провести анализ. Попробуйте позже."

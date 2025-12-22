@@ -3,7 +3,7 @@ import sys
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from app import config
 from app.services.google_sheets import GoogleSheetsService
-from app.handlers import common, admin, transactions, messages
+from app.handlers import common, admin, transactions, messages, analytics
 
 # Setup Logging
 logging.basicConfig(
@@ -26,11 +26,6 @@ def main():
         # We might want to exit or let it run with empty data (waiting for reboot)
         logger.warning("Starting bot with empty data. Please fix credentials and /reboot.")
         gs_service = None # Logic should handle None?
-        # Handlers expect gs_service in bot_data. 
-        # If it failed, reboot command needs to re-init it.
-        # Impl supported re-init? Not effectively.
-        # Ideally we crash if config is wrong, but if network is down, we retry.
-        # GoogleSheetsService constructor raises exception if credentials fail.
         sys.exit(1)
 
     # Build App
@@ -55,6 +50,8 @@ def main():
     # Handlers
     app.add_handler(CommandHandler("start", common.start))
     app.add_handler(CommandHandler("reboot", admin.reboot))
+    app.add_handler(CommandHandler("advice", analytics.advice_command))
+    
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages.text_handler))
 
