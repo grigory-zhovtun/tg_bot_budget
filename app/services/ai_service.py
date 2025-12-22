@@ -38,18 +38,8 @@ class GeminiService:
             # But that pulls ALL rows. Inefficient for large history.
             # We'll do it for now or assume recent rows.
             
-            if not self.gs_service.sheet:
-                self.gs_service._authenticate()
-                
-            fact_sheet = self.gs_service.sheet.worksheet(config.FACT_SHEET_NAME)
-            
-            # Optimization: get last N rows. 
-            # GSpread doesn't have "tail", so we get total count then get range.
-            total_rows = len(fact_sheet.get_all_values()) # Expensive call unfortunately, unless we use something else.
-            # Actually, we can assume the user has < 10k rows? 
-            # Or just fetch all values. 
-            
-            all_values = fact_sheet.get_all_values()
+            # Use the robust service method with retry logic
+            all_values = self.gs_service.get_all_records(config.FACT_SHEET_NAME)
             headers = all_values[0]
             # Assuming standard columns: Date, Category, Subcategory, Amount, ..., Comment, ...
             # We want Date, Category, Subcat, Amount, Comment, Source

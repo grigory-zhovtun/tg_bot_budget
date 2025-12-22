@@ -107,14 +107,37 @@ class GoogleSheetsService:
                 logger.error(f"Retry failed: {retry_e}")
                 return False
 
-    def get_last_row_index(self) -> int:
-        """Returns the number of rows in the fact sheet."""
-        if not self.sheet:
-            self._authenticate()
-        
-        try:
-            fact_sheet = self.sheet.worksheet(config.FACT_SHEET_NAME)
             return len(fact_sheet.get_all_values())
         except Exception as e:
             logger.error(f"Error getting last row index: {e}")
             return 0
+
+    def get_all_records(self, worksheet_name: str) -> List[List[Any]]:
+        """Retrieves all records from a worksheet with retry logic."""
+        if not self.sheet:
+            self._authenticate()
+        
+        retries = 3
+        for attempt in range(retries):
+            try:
+                # Re-auth if client session expired
+                if not self.sheet:
+                    self._authenticate()
+
+                ws = self.sheet.worksheet(worksheet_name)
+                return ws.get_all_values()
+                
+            except Exception as e:
+                logger.warning(f"Attempt {attempt+1}/{retries} failed to fetch records from {worksheet_name}: {e}")
+                # 401/403 -> Force refresh auth
+                if "401" in str(e) or "403" in str(e) or "Connection aborted" in str(e):
+                    logger.info("Forcing re-authentication...")
+                    try:
+                        self._authenticate()
+                    except Exception as auth_e:
+                        logger.error(f"Re-auth failed: {auth_e}")
+                
+                if attempt == retries - 1:
+                    logger.error(f"Final failure fetching records: {e}")
+                    raise e
+        return []
