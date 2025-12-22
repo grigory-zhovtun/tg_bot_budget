@@ -22,10 +22,21 @@ async def advice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Call AI service
         advice_text = await ai_service.analyze_finances()
         
-        # Delete status message and send report
+        # Delete status message
         await status_msg.delete()
-        await update.message.reply_text(advice_text, parse_mode="Markdown")
+        
+        # Try sending with Markdown
+        try:
+            await update.message.reply_text(advice_text, parse_mode="Markdown")
+        except Exception as e:
+            logger.warning(f"Markdown parsing failed: {e}. Sending plain text.")
+            # Fallback to plain text if Markdown fails
+            await update.message.reply_text(advice_text, parse_mode=None)
         
     except Exception as e:
         logger.error(f"Advice handling error: {e}")
-        await status_msg.edit_text(f"Произошла ошибка при анализе: {e}")
+        # If status_msg still exists/accessible, edit it
+        try:
+            await status_msg.edit_text(f"Произошла ошибка при анализе: {e}")
+        except:
+            await update.message.reply_text(f"Произошла ошибка при анализе: {e}")
