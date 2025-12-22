@@ -198,3 +198,135 @@ async def _save_transaction(update, context, source, category, subcategory, amou
         await show_main_menu(update, context, success_msg)
     else:
         await update.message.reply_text("❌ Ошибка при записи в Google Таблицу.")
+
+
+async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles document uploads (PDF, Excel, CSV)."""
+    document = update.message.document
+    if not document:
+        return
+
+    file_name = document.file_name.lower()
+    mime_type = document.mime_type or ""
+
+    # Determine file type
+    is_pdf = file_name.endswith('.pdf') or 'pdf' in mime_type
+    is_excel = file_name.endswith(('.xlsx', '.xls')) or 'spreadsheet' in mime_type or 'excel' in mime_type
+    is_csv = file_name.endswith('.csv') or 'csv' in mime_type
+
+    if not (is_pdf or is_excel or is_csv):
+        await update.message.reply_text("❌ Поддерживаются только PDF, Excel (.xlsx/.xls) и CSV файлы.")
+        return
+
+    ai_service = context.bot_data.get("ai_service")
+    if not ai_service or not config.GEMINI_API_KEY:
+        await update.message.reply_text("AI сервис не настроен.")
+        return
+
+    analyzing_msg = await update.message.reply_text("📄 Загружаю и анализирую файл...")
+    track_message(context, analyzing_msg)
+
+    try:
+        # Download file
+        file = await document.get_file()
+        file_path = f"/tmp/{document.file_id}_{file_name}"
+        await file.download_to_drive(file_path)
+
+        # Extract content based on file type
+        extracted_text = ""
+        image_part = None
+
+        if is_pdf:
+            # For PDF, pass directly to Gemini as image (it handles PDFs well)
+            import PIL.Image
+            try:
+                # Try to use pdf2image if available
+                from pdf2image import convert_from_path
+                images = convert_from_path(file_path, first_page=1, last_page=5)  # Limit to first 5 pages
+                if images:
+                    image_part = images[0]  # Use first page as image
+                    extracted_text = "PDF document with transaction history"
+            except ImportError:
+                # Fallback: try to extract text with PyPDF2
+                try:
+                    import PyPDF2
+                    with open(file_path, 'rb') as f:
+                        reader = PyPDF2.PdfReader(f)
+                        for page in reader.pages[:10]:  # Limit to 10 pages
+                            extracted_text += page.extract_text() or ""
+                except ImportError:
+                    await update.message.reply_text("❌ Для обработки PDF установите pdf2image или PyPDF2.")
+                    return
+
+        elif is_excel:
+            try:
+                import pandas as pd
+                df = pd.read_excel(file_path)
+                # Convert to string representation
+                extracted_text = df.head(500).to_string()  # Limit rows
+            except ImportError:
+                await update.message.reply_text("❌ Для обработки Excel установите pandas и openpyxl.")
+                return
+
+        elif is_csv:
+            try:
+                import pandas as pd
+                df = pd.read_csv(file_path)
+                extracted_text = df.head(500).to_string()
+            except ImportError:
+                # Fallback without pandas
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    extracted_text = f.read()[:50000]  # Limit size
+
+        if not extracted_text and not image_part:
+            await update.message.reply_text("❌ Не удалось извлечь данные из файла.")
+            return
+
+        # Send to AI for parsing
+        current_source = context.user_data.get('source')
+        known_cats = context.bot_data.get("categories", [])
+        known_srcs = context.bot_data.get("sources", [])
+
+        result = await ai_service.parse_transaction(
+            user_input=extracted_text or "Document with transactions",
+            image_part=image_part,
+            known_categories=known_cats,
+            known_sources=known_srcs
+        )
+
+        # Handle results (same logic as text_handler)
+        transactions = result if isinstance(result, list) else [result]
+
+        if not transactions:
+            await update.message.reply_text("Не удалось распознать транзакции в файле.")
+            return
+
+        saved_count = 0
+        for txn in transactions:
+            ai_amount = txn.get('amount')
+            ai_cat = txn.get('category')
+            ai_sub = txn.get('subcategory')
+            ai_comment = txn.get('comment') or "From document"
+            ai_source = txn.get('source') or current_source
+
+            if not ai_amount:
+                continue
+
+            if not ai_source:
+                continue
+
+            if not ai_cat or ai_cat not in known_cats:
+                ai_cat = "Прочее"
+                ai_sub = "AI (Не распознано)"
+            if not ai_sub:
+                ai_sub = "Общее"
+
+            await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment)
+            saved_count += 1
+
+        if saved_count == 0:
+            await update.message.reply_text("❌ Не удалось сохранить транзакции. Проверьте, что выбран источник.")
+
+    except Exception as e:
+        logger.error(f"Document processing error: {e}")
+        await update.message.reply_text(f"❌ Ошибка обработки файла: {e}")

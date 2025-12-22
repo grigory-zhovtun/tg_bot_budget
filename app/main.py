@@ -62,7 +62,10 @@ def main():
     app.add_handler(CommandHandler("advice", analytics.advice_command))
     
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
+    # Text, Photo, and Document handlers
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages.text_handler))
+    app.add_handler(MessageHandler(filters.PHOTO, messages.text_handler))
+    app.add_handler(MessageHandler(filters.Document.ALL, messages.document_handler))
 
     # Run
     if config.LOCAL_RUN:
