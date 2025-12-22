@@ -117,31 +117,58 @@ class GeminiService:
 
     async def analyze_finances(self, custom_context: str = None) -> str:
         """
-        Analyzes the user's transaction history and provides financial advice.
+        Analyzes the user's transaction history with budget comparison and forecasting.
         """
         if not self.model:
             raise ValueError("AI Service not configured.")
 
-        # Fetch history (default 5000 is good for deep analysis)
-        context = custom_context if custom_context else self.get_history_context(limit=1000)
+        # 1. Fetch History (Fact)
+        context = custom_context if custom_context else self.get_history_context(limit=2000)
         
+        # 2. Fetch Budget (Plan)
+        # Format: "Dec 25" (English Month + Year)
+        import datetime
+        now = datetime.datetime.now()
+        # English month names mapping
+        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        current_month_sheet = f"{months[now.month - 1]} {now.strftime('%y')}"
+        
+        budget_data = "No budget sheet found for this month."
+        try:
+            budget_rows = self.gs_service.get_all_records(current_month_sheet)
+            if budget_rows:
+                # Convert rows to string representation
+                budget_data = "\n".join([str(row) for row in budget_rows[:50]]) # Limit to first 50 rows of budget to save tokens
+            else:
+                 budget_data = "Budget sheet exists but is empty."
+        except Exception:
+             # It's okay if the sheet doesn't exist, we just note it.
+             pass
+
         prompt = [
-            "You are a professional financial advisor. Analyze the User's transaction history below.",
-            f"\nHISTORY:\n{context}\n",
+            "You are a strict and concise financial analyst.",
+            f"\nCURRENT DATE: {now.strftime('%d.%m.%Y')}",
+            f"\nTRANSACTION HISTORY (FACT):\n{context}\n",
+            f"\nBUDGET PLAN FOR {current_month_sheet} (PLAN):\n{budget_data}\n",
             "INSTRUCTIONS:",
-            "Analyze the data and Structure your response exactly as follows:",
-            "1. **Summary**: Total spending amount and the single biggest expense category (with %).",
-            "2. **Top 3 Categories**: List top 3 categories with amounts and brief comments.",
-            "3. **Anomalies**: Briefly mention 1-2 unusual spikes or trends (if any).",
-            "4. **Recommendations**: Provide exactly 3 short, actionable tips.",
-            "5. Tone: Professional but friendly.",
-            "6. Language: Russian.",
-            "7. Formatting: Use Markdown (bold, lists). Keep it under 3000 chars."
+            "1. **3-Month Analysis**: accurately calculate if current spending deviates from the average of the last 3 months.",
+            "2. **Plan vs Fact**: Check the 'Budget Plan' data. Report categories where ACTUAL spending exceeds PLANNED values.",
+            "3. **Forecast**: Estimate total expenses by month-end based on current daily average and remaining days.",
+            "4. **Recommendations**: Short, practical steps to stay within budget.",
+            "CONSTRAINTS:",
+            "- Max 300 words total. STRICTLY.",
+            "- Simple, clear Russian language.",
+            "- Structure: '📊 Анализ', '⚠️ Перерасход', '🔮 Прогноз', '💡 Совет'.",
+            "- No intro/outro fluff."
         ]
         
         try:
             response = self.model.generate_content(prompt)
-            return response.text
+            text = response.text
+             # Enforce hard length limit if AI hallucinates long text
+            if len(text) > 4000:
+                text = text[:3900] + "..."
+            return text
         except Exception as e:
             logger.error(f"Analysis Error: {e}")
-            return "Не удалось провести анализ. Попробуйте позже."
+            return "Не удалось провести анализ. Проверьте, создан ли лист с бюджетом (например, 'Dec 25')."
