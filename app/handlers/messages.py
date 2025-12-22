@@ -114,41 +114,44 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         known_cats = context.bot_data.get("categories", [])
         known_srcs = context.bot_data.get("sources", [])
-        
+
         result = await ai_service.parse_transaction(
             user_input=msg_text or "Image Input",
             image_part=image_part,
             known_categories=known_cats,
             known_sources=known_srcs
         )
-        
-        # Logic to handle results
-        # Needs: amount, category, subcategory, comment, source
-        ai_amount = result.get('amount')
-        ai_cat = result.get('category')
-        ai_sub = result.get('subcategory')
-        ai_comment = result.get('comment') or "AI Recognized"
-        ai_source = result.get('source') or current_source # Use inferred source or fallback to selected
 
-        if not ai_amount:
-            await update.message.reply_text("Не удалось определить сумму транзакции.")
+        # Handle both single transaction (dict) and multiple transactions (list)
+        transactions = result if isinstance(result, list) else [result]
+
+        if not transactions:
+            await update.message.reply_text("Не удалось распознать транзакции.")
             return
 
-        if not ai_source:
-            await update.message.reply_text("Не удалось определить источник. Выберите источник вручную и повторите.")
-            return
+        # Process each transaction
+        for txn in transactions:
+            ai_amount = txn.get('amount')
+            ai_cat = txn.get('category')
+            ai_sub = txn.get('subcategory')
+            ai_comment = txn.get('comment') or "AI Recognized"
+            ai_source = txn.get('source') or current_source
 
-        # Auto-save or Confirm?
-        # User requested convenience. Let's Auto-save if confident (all fields present).
-        
-        # Check defaults if missing
-        if not ai_cat or ai_cat not in known_cats:
-            ai_cat = "Прочее" # Fallback
-            ai_sub = "AI (Не распознано)"
-        if not ai_sub:
-             ai_sub = "Общее"
+            if not ai_amount:
+                continue  # Skip transactions without amount
 
-        await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment)
+            if not ai_source:
+                await update.message.reply_text(f"Пропущено (нет источника): {ai_comment}")
+                continue
+
+            # Check defaults if missing
+            if not ai_cat or ai_cat not in known_cats:
+                ai_cat = "Прочее"
+                ai_sub = "AI (Не распознано)"
+            if not ai_sub:
+                ai_sub = "Общее"
+
+            await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment)
 
     except Exception as e:
         logger.error(f"AI Error: {e}")

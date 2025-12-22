@@ -93,9 +93,11 @@ class GeminiService:
             f"2. Use the History Context to predict the Category and Subcategory based on the Comment/Merchant name.",
             f"3. IMPORTANT: The 'Comment' field MUST contain the Merchant Name, Sender Name, or the raw description of the transaction (e.g. 'IP IVANOV', 'Uber', 'Vkusvill'). Do NOT leave it empty if there is any text identifier.",
             f"4. If Source is not explicitly mentioned in input, try to infer it from context, otherwise return null.",
-            f"4. If exact Date is not in input, use today's date.",
-            f"5. Return ONLY valid JSON. No markdown formatting.",
-            f"JSON Schema: {{'amount': float, 'currency': str, 'date': str, 'category': str, 'subcategory': str, 'comment': str, 'source': str}}",
+            f"5. If exact Date is not in input, use today's date.",
+            f"6. Return ONLY valid JSON. No markdown formatting.",
+            f"7. If input contains MULTIPLE transactions, return a JSON ARRAY of objects. If single transaction, return a single object.",
+            f"JSON Schema for single: {{'amount': float, 'currency': str, 'date': str, 'category': str, 'subcategory': str, 'comment': str, 'source': str}}",
+            f"JSON Schema for multiple: [{{'amount': float, ...}}, {{'amount': float, ...}}]",
             f"\nINPUT: {user_input}"
         ]
         
