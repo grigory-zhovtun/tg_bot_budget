@@ -107,6 +107,13 @@ class GoogleSheetsService:
                 logger.error(f"Retry failed: {retry_e}")
                 return False
 
+    def get_last_row_index(self) -> int:
+        """Returns the number of rows in the fact sheet."""
+        if not self.sheet:
+            self._authenticate()
+        
+        try:
+            fact_sheet = self.sheet.worksheet(config.FACT_SHEET_NAME)
             return len(fact_sheet.get_all_values())
         except Exception as e:
             logger.error(f"Error getting last row index: {e}")
