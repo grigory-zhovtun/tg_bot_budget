@@ -26,12 +26,20 @@ async def advice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.delete()
         
         # Try sending with Markdown
+        # Try sending with Markdown
         try:
-            await update.message.reply_text(advice_text, parse_mode="Markdown")
+            # Split message if too long (Telegram limit 4096)
+            # We use a slightly smaller chunk size to be safe
+            chunk_size = 4000
+            for i in range(0, len(advice_text), chunk_size):
+                chunk = advice_text[i:i + chunk_size]
+                await update.message.reply_text(chunk, parse_mode="Markdown")
         except Exception as e:
             logger.warning(f"Markdown parsing failed: {e}. Sending plain text.")
             # Fallback to plain text if Markdown fails
-            await update.message.reply_text(advice_text, parse_mode=None)
+            for i in range(0, len(advice_text), chunk_size):
+                chunk = advice_text[i:i + chunk_size]
+                await update.message.reply_text(chunk, parse_mode=None)
         
     except Exception as e:
         logger.error(f"Advice handling error: {e}")

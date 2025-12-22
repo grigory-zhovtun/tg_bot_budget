@@ -134,7 +134,8 @@ class GeminiService:
             "3. Provide 3 specific, actionable tips to save money based on these habits.",
             "4. Keep the tone friendly, encouraging, but professional.",
             "5. Reply in Russian language.",
-            "6. Use Markdown formatting (bold, lists) for readability."
+            "6. Use Markdown formatting (bold, lists) for readability.",
+            "7. IMPORTANT: Keep the response concise and under 3500 characters to fit in one Telegram message."
         ]
         
         try:
