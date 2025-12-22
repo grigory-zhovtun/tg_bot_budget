@@ -15,8 +15,20 @@ class GeminiService:
     def _setup_client(self):
         if config.GEMINI_API_KEY:
             genai.configure(api_key=config.GEMINI_API_KEY)
-            self.model = genai.GenerativeModel('gemini-1.5-flash-001')
-            logger.info("Gemini AI client configured.")
+            
+            # Debug: List available models
+            try:
+                logger.info("Listing available Gemini models:")
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        logger.info(f"- {m.name}")
+            except Exception as e:
+                logger.error(f"Failed to list models: {e}")
+
+            # Fallback to stable 'gemini-pro' if 1.5 is having issues, or we can try to pick from list.
+            # For now, let's set it to 'gemini-pro' to verify connectivity, then we can switch back.
+            self.model = genai.GenerativeModel('gemini-1.5-flash') 
+            logger.info("Gemini AI client configured with 'gemini-1.5-flash'. Check logs if it fails again.")
         else:
             logger.warning("GEMINI_API_KEY not found. AI features will be disabled.")
             self.model = None
