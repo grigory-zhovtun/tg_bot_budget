@@ -129,13 +129,14 @@ class GeminiService:
             "You are a professional financial advisor. Analyze the User's transaction history below.",
             f"\nHISTORY:\n{context}\n",
             "INSTRUCTIONS:",
-            "1. Identify the top 3 spending categories.",
-            "2. Spot any unusual spending anomalies or recent spikes.",
-            "3. Provide 3 specific, actionable tips to save money based on these habits.",
-            "4. Keep the tone friendly, encouraging, but professional.",
-            "5. Reply in Russian language.",
-            "6. Use Markdown formatting (bold, lists) for readability.",
-            "7. IMPORTANT: Keep the response concise and under 3500 characters to fit in one Telegram message."
+            "Analyze the data and Structure your response exactly as follows:",
+            "1. **Summary**: Total spending amount and the single biggest expense category (with %).",
+            "2. **Top 3 Categories**: List top 3 categories with amounts and brief comments.",
+            "3. **Anomalies**: Briefly mention 1-2 unusual spikes or trends (if any).",
+            "4. **Recommendations**: Provide exactly 3 short, actionable tips.",
+            "5. Tone: Professional but friendly.",
+            "6. Language: Russian.",
+            "7. Formatting: Use Markdown (bold, lists). Keep it under 3000 chars."
         ]
         
         try:
