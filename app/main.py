@@ -29,7 +29,16 @@ def main():
         sys.exit(1)
 
     # Build App
-    app = ApplicationBuilder().token(config.TELEGRAM_TOKEN).build()
+    app_builder = ApplicationBuilder().token(config.TELEGRAM_TOKEN)
+    
+    async def post_init(application):
+        await application.bot.set_my_commands([
+            ("start", "Начать работу 🚀"),
+            ("advice", "Финансовый совет 🧠"),
+            ("reboot", "Обновить настройки 🔄")
+        ])
+
+    app = app_builder.post_init(post_init).build()
 
     # Inject Dependencies
     app.bot_data["gs_service"] = gs_service
