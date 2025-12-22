@@ -26,9 +26,9 @@ class GeminiService:
                 logger.error(f"Failed to list models: {e}")
 
             # Fallback to stable 'gemini-pro' if 1.5 is having issues, or we can try to pick from list.
-            # For now, let's set it to 'gemini-pro' to verify connectivity, then we can switch back.
-            self.model = genai.GenerativeModel('gemini-1.5-flash') 
-            logger.info("Gemini AI client configured with 'gemini-1.5-flash'. Check logs if it fails again.")
+            # Based on logs, 'gemini-flash-latest' is available and safe.
+            self.model = genai.GenerativeModel('gemini-flash-latest') 
+            logger.info("Gemini AI client configured with 'gemini-flash-latest'.")
         else:
             logger.warning("GEMINI_API_KEY not found. AI features will be disabled.")
             self.model = None
