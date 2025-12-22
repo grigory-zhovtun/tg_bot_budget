@@ -42,7 +42,15 @@ def main():
     app.bot_data["subcategories"] = subcategories
     app.bot_data["sources"] = sources
     
+    # AI Service
+    from app.services.ai_service import GeminiService
+    ai_service = GeminiService(gs_service)
+    app.bot_data["ai_service"] = ai_service
+    
     logger.info(f"Loaded {len(sources)} sources and {len(categories)} categories.")
+    if config.GEMINI_API_KEY:
+        logger.info("AI Service enabled.")
+
 
     # Handlers
     app.add_handler(CommandHandler("start", common.start))

@@ -40,3 +40,9 @@ FALLBACK_CURRENCY = "XXX"
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 PORT = int(os.getenv("PORT", "8443"))
 LOCAL_RUN = os.getenv("LOCAL_RUN", "False").lower() == "true"
+
+# AI
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# We don't raise error immediately to allow bot to start if key is missing (feature flag logic), 
+# but for this specific request, it's critical. 
+# However, user might deploy first then add key.

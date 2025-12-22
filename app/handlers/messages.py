@@ -10,120 +10,181 @@ from app.utils.keyboards import generate_sources_keyboard, generate_categories_k
 logger = logging.getLogger(__name__)
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles text messages (Source selection or Transaction entry)."""
-    msg_text = update.message.text
+    """Handles text messages and photos (Source selection, Manual Entry, or AI Parsing)."""
+    
+    # Check if this is a Photo message
+    is_photo = bool(update.message.photo)
+    msg_text = update.message.caption if is_photo else update.message.text
+    
+    # If photo but no caption, treat text as empty string (still proceed to AI if photo exists)
+    if is_photo and not msg_text:
+        msg_text = ""
+        
+    if not msg_text and not is_photo:
+        return # Ignore empty updates
+
     sources = context.bot_data.get("sources", [])
     
-    # 1. Check if text is a Source Selection
-    selected_source_name = None
-    # Normalize check (handle ✅ if present)
-    clean_text = msg_text.replace("✅ ", "") if msg_text.startswith("✅ ") else msg_text
-    
-    if clean_text in sources:
-        selected_source_name = clean_text
-    
-    if selected_source_name:
-        context.user_data['source'] = selected_source_name
-        derived_currency = get_currency_from_source(selected_source_name)
-        category = context.user_data.get('category')
-        
-        resp_text = f"Источник '{selected_source_name}' выбран (Валюта: {derived_currency})."
-        
-        await update.message.reply_text(
-             resp_text,
-             reply_markup=generate_sources_keyboard(sources, selected_source_name)
-        )
-        # Always encourage selecting category next
-        await update.message.reply_text(
-            "Выбери категорию:",
-            reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
-        )
-        return
-
-    # 2. Check for "Back"
-    if msg_text == "⬅️ Назад":
-        context.user_data.pop('category', None)
-        context.user_data.pop('subcategory', None)
-        current_source = context.user_data.get('source')
-        if current_source:
-             await update.message.reply_text(
-                f"Источник: {current_source}. Выбери категорию:",
+    # 1. Check if text is a Source Selection (Only if text exists)
+    if msg_text:
+        clean_text = msg_text.replace("✅ ", "") if msg_text.startswith("✅ ") else msg_text
+        if clean_text in sources:
+            context.user_data['source'] = clean_text
+            derived_currency = get_currency_from_source(clean_text)
+            resp_text = f"Источник '{clean_text}' выбран (Валюта: {derived_currency})."
+            await update.message.reply_text(
+                 resp_text,
+                 reply_markup=generate_sources_keyboard(sources, clean_text)
+            )
+            await update.message.reply_text(
+                "Выбери категорию или отправь описание траты:",
                 reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
             )
-        else:
-             await update.message.reply_text(
-                "Источник не выбран.",
-                reply_markup=generate_sources_keyboard(sources)
-            )
-        return
+            return
 
-    # 3. Manual Transaction Entry (Amount + Comment)
+        # 2. Check for "Back"
+        if msg_text == "⬅️ Назад":
+            context.user_data.pop('category', None)
+            context.user_data.pop('subcategory', None)
+            current_source = context.user_data.get('source')
+            if current_source:
+                 await update.message.reply_text(
+                    f"Источник: {current_source}. Выбери категорию:",
+                    reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
+                )
+            else:
+                 await update.message.reply_text(
+                    "Источник не выбран.",
+                    reply_markup=generate_sources_keyboard(sources)
+                )
+            return
+
+    # 3. Decision Logic: Manual Entry (Strict) vs AI Parsing
+    # Manual Entry requires: Source + Category + Subcategory + Text matches "float string" pattern.
     current_source = context.user_data.get('source')
     category = context.user_data.get('category')
     subcategory = context.user_data.get('subcategory')
     
-    # Validation
-    errors = []
-    if not current_source: errors.append("- Источник")
-    if not category: errors.append("- Категория")
-    if not subcategory: errors.append("- Подкатегория")
+    is_manual_candidate = (current_source and category and subcategory and msg_text and not is_photo)
+    manual_success = False
     
-    if errors:
-        # Placeholder for AI or error
-        await update.message.reply_text(
-            "Для ручного ввода выберите сначала:\n" + "\n".join(errors) + 
-            "\n\n(Скоро здесь заработает AI!)",
-            reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
-        )
+    if is_manual_candidate:
+        try:
+            parts = msg_text.split(' ', 1)
+            amount = float(parts[0].replace(',', '.'))
+            comment = parts[1] if len(parts) > 1 else ""
+            
+            # Execute Manual Entry logic
+            await _save_transaction(update, context, current_source, category, subcategory, amount, comment)
+            manual_success = True
+        except ValueError:
+            # Not a simple number, so fall through to AI
+            manual_success = False
+    
+    if manual_success:
         return
 
-    # Try to parse Amount + Comment
-    try:
-        parts = msg_text.split(' ', 1)
-        amount_str = parts[0].replace(',', '.')
-        amount = float(amount_str)
-        comment = parts[1] if len(parts) > 1 else ""
-        
-        gs_service: GoogleSheetsService = context.bot_data.get("gs_service")
-        
-        last_row = gs_service.get_last_row_index()
-        next_row = last_row + 1
-        
-        # Russian formula as per original requirement
-        balance_formula_ru = (
-             f'=СУММЕСЛИМН($D$2:D{next_row}; $H$2:H{next_row}; $H{next_row}; $G$2:G{next_row}; $G{next_row}; $B$2:B{next_row}; "💰 ДОХОДЫ")'
-             f' - '
-             f'СУММЕСЛИМН($D$2:D{next_row}; $H$2:H{next_row}; $H{next_row}; $G$2:G{next_row}; $G{next_row}; $B$2:B{next_row}; "<>💰 ДОХОДЫ")'
-        )
-
-        currency = get_currency_from_source(current_source)
-        
-        row_data = [
-            datetime.now().strftime('%d.%m.%Y'),
-            category.upper(),
-            subcategory,
-            amount,
-            balance_formula_ru,
-            comment,
-            currency,
-            current_source
-        ]
-        
-        success = gs_service.add_transaction(row_data)
-        
-        if success:
-            await update.message.reply_text(
-                f"✅ Записано:\n{amount} {currency} - {category} ({subcategory})\n{comment}",
-                reply_markup=generate_sources_keyboard(sources, current_source)
-            )
-            await update.message.reply_text(
-                "Выбери категорию для следующей:",
-                reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
-            )
+    # 4. AI Parsing (Fallthrough)
+    ai_service = context.bot_data.get("ai_service")
+    if not ai_service or not config.GEMINI_API_KEY:
+        if is_manual_candidate:
+             await update.message.reply_text("Неверный формат суммы для ручного ввода. AI сервис недоступен.")
         else:
-             await update.message.reply_text("❌ Ошибка при записи в Google Таблицу.")
+             await update.message.reply_text("AI сервис не настроен. Пожалуйста, используйте кнопки для ручного ввода.")
+        return
+
+    # Prepare Image if photo
+    image_part = None
+    if is_photo:
+        photo_file = await update.message.photo[-1].get_file()
+        file_path = f"/tmp/{photo_file.file_id}.jpg"
+        await photo_file.download_to_drive(file_path)
         
-    except ValueError:
-        await update.message.reply_text(
-             "Неверный формат суммы. Введите число и комментарий.\nПример: 15000 Обед"
+        # We need to read it back for genai. Or pass PIL image.
+        import PIL.Image
+        image_part = PIL.Image.open(file_path)
+
+    await update.message.reply_text("🔍 Анализирую...")
+
+    try:
+        known_cats = context.bot_data.get("categories", [])
+        known_srcs = context.bot_data.get("sources", [])
+        
+        result = await ai_service.parse_transaction(
+            user_input=msg_text or "Image Input",
+            image_part=image_part,
+            known_categories=known_cats,
+            known_sources=known_srcs
         )
+        
+        # Logic to handle results
+        # Needs: amount, category, subcategory, comment, source
+        ai_amount = result.get('amount')
+        ai_cat = result.get('category')
+        ai_sub = result.get('subcategory')
+        ai_comment = result.get('comment') or "AI Recognized"
+        ai_source = result.get('source') or current_source # Use inferred source or fallback to selected
+
+        if not ai_amount:
+            await update.message.reply_text("Не удалось определить сумму транзакции.")
+            return
+
+        if not ai_source:
+            await update.message.reply_text("Не удалось определить источник. Выберите источник вручную и повторите.")
+            return
+
+        # Auto-save or Confirm?
+        # User requested convenience. Let's Auto-save if confident (all fields present).
+        
+        # Check defaults if missing
+        if not ai_cat or ai_cat not in known_cats:
+            ai_cat = "Прочее" # Fallback
+            ai_sub = "AI (Не распознано)"
+        if not ai_sub:
+             ai_sub = "Общее"
+
+        await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment)
+
+    except Exception as e:
+        logger.error(f"AI Error: {e}")
+        await update.message.reply_text(f"Ошибка AI: {e}")
+
+
+async def _save_transaction(update, context, source, category, subcategory, amount, comment):
+    """Helper to save to Google Sheets."""
+    gs_service: GoogleSheetsService = context.bot_data.get("gs_service")
+    last_row = gs_service.get_last_row_index()
+    next_row = last_row + 1
+    
+    balance_formula_ru = (
+            f'=СУММЕСЛИМН($D$2:D{next_row}; $H$2:H{next_row}; $H{next_row}; $G$2:G{next_row}; $G{next_row}; $B$2:B{next_row}; "💰 ДОХОДЫ")'
+            f' - '
+            f'СУММЕСЛИМН($D$2:D{next_row}; $H$2:H{next_row}; $H{next_row}; $G$2:G{next_row}; $G{next_row}; $B$2:B{next_row}; "<>💰 ДОХОДЫ")'
+    )
+    
+    currency = get_currency_from_source(source)
+    
+    row_data = [
+        datetime.now().strftime('%d.%m.%Y'),
+        category.upper(),
+        subcategory,
+        amount,
+        balance_formula_ru,
+        comment,
+        currency,
+        source
+    ]
+    
+    if gs_service.add_transaction(row_data):
+        await update.message.reply_text(
+            f"✅ AI Записал:\n{amount} {currency} - {category} ({subcategory})\n{comment}\n(Источник: {source})",
+            reply_markup=generate_sources_keyboard(context.bot_data.get("sources", []), source)
+        )
+        # Clear specific manual selection state
+        context.user_data.pop('category', None)
+        context.user_data.pop('subcategory', None)
+        # Ensure source is synced if AI changed it (optional, maybe keep user choice?)
+        # Let's update context source to whatever was used
+        context.user_data['source'] = source 
+    else:
+        await update.message.reply_text("❌ Ошибка при записи в Google Таблицу.")
