@@ -86,7 +86,9 @@ class GeminiService:
         if not self.model:
             raise ValueError("AI Service not configured (missing API Key).")
 
-        history_context = self.get_history_context(limit=30)
+        # Increase context to 400 transactions (~1-2 months) for better few-shot learning
+        # Gemini 1.5 Flash has a large context window, so this is safe and fast.
+        history_context = self.get_history_context(limit=400)
         
         cats_str = ", ".join(known_categories)
         sources_str = ", ".join(known_sources)
