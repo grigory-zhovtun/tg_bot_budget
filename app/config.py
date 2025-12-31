@@ -43,6 +43,14 @@ LOCAL_RUN = os.getenv("LOCAL_RUN", "False").lower() == "true"
 
 # AI
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# We don't raise error immediately to allow bot to start if key is missing (feature flag logic), 
-# but for this specific request, it's critical. 
+# We don't raise error immediately to allow bot to start if key is missing (feature flag logic),
+# but for this specific request, it's critical.
 # However, user might deploy first then add key.
+
+# Daily Analytics
+# Chat ID for daily analytics reports (your Telegram user ID)
+ANALYTICS_CHAT_ID = os.getenv("ANALYTICS_CHAT_ID")
+# Time for daily report (24h format, e.g., "07:00" for 7 AM)
+ANALYTICS_TIME = os.getenv("ANALYTICS_TIME", "07:00")
+# Timezone for scheduling (e.g., "Asia/Tashkent", "Europe/Moscow")
+ANALYTICS_TIMEZONE = os.getenv("ANALYTICS_TIMEZONE", "Asia/Tashkent")

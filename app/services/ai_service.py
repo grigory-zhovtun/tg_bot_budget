@@ -83,19 +83,24 @@ class GeminiService:
         cats_str = ", ".join(known_categories)
         sources_str = ", ".join(known_sources)
 
+        # Get today's date for fallback
+        from datetime import datetime
+        today_str = datetime.now().strftime('%d.%m.%Y')
+
         prompt_parts = [
             f"You are a personal finance assistant. Analyze the input and extract transaction details.",
             f"Allowed Categories: {cats_str}",
             f"Allowed Sources: {sources_str}",
             f"\nCONTEXT (User's habits):\n{history_context}\n",
             f"INSTRUCTION:",
-            f"1. Extract: Amount (float), Currency (ISO code if found, else null), Date (DD.MM.YYYY), Category, Subcategory, Comment, Source.",
+            f"1. Extract: Amount (float, ALWAYS POSITIVE), Currency (ISO code if found, else null), Date (DD.MM.YYYY), Category, Subcategory, Comment, Source.",
             f"2. Use the History Context to predict the Category and Subcategory based on the Comment/Merchant name.",
             f"3. IMPORTANT: The 'Comment' field MUST contain the Merchant Name, Sender Name, or the raw description of the transaction (e.g. 'IP IVANOV', 'Uber', 'Vkusvill'). Do NOT leave it empty if there is any text identifier.",
             f"4. If Source is not explicitly mentioned in input, try to infer it from context, otherwise return null.",
-            f"5. If exact Date is not in input, use today's date.",
-            f"6. Return ONLY valid JSON. No markdown formatting.",
-            f"7. If input contains MULTIPLE transactions, return a JSON ARRAY of objects. If single transaction, return a single object.",
+            f"5. DATE EXTRACTION (CRITICAL): Look carefully for the transaction date on receipts, bank statements, screenshots. Extract the ACTUAL date shown (formats: DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, 'January 15, 2025', etc). Convert to DD.MM.YYYY format. Only use today's date ({today_str}) if NO date is visible anywhere in the input.",
+            f"6. AMOUNT (CRITICAL): Always return POSITIVE amount. If the receipt/statement shows negative number (e.g. -1500, -$50), remove the minus sign and return positive value (1500, 50). Expenses are recorded as positive numbers.",
+            f"7. Return ONLY valid JSON. No markdown formatting.",
+            f"8. If input contains MULTIPLE transactions, return a JSON ARRAY of objects. If single transaction, return a single object.",
             f"JSON Schema for single: {{'amount': float, 'currency': str, 'date': str, 'category': str, 'subcategory': str, 'comment': str, 'source': str}}",
             f"JSON Schema for multiple: [{{'amount': float, ...}}, {{'amount': float, ...}}]",
             f"\nINPUT: {user_input}"

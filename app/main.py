@@ -1,8 +1,13 @@
 import logging
 import sys
+import asyncio
+from datetime import datetime, time
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from app import config
 from app.services.google_sheets import GoogleSheetsService
+from app.services.analytics_service import AnalyticsService
 from app.handlers import common, admin, transactions, messages, analytics
 
 # Setup Logging
@@ -11,6 +16,9 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Scheduler for daily reports
+scheduler = AsyncIOScheduler()
 
 def main():
     if not config.TELEGRAM_TOKEN:
@@ -34,6 +42,7 @@ def main():
     async def post_init(application):
         await application.bot.set_my_commands([
             ("start", "Начать работу 🚀"),
+            ("analytics", "Аналитика за 3 дня 📊"),
             ("advice", "Финансовый совет 🧠"),
             ("reboot", "Обновить настройки 🔄")
         ])
@@ -50,22 +59,61 @@ def main():
     from app.services.ai_service import GeminiService
     ai_service = GeminiService(gs_service)
     app.bot_data["ai_service"] = ai_service
-    
+
+    # Analytics Service
+    analytics_service = AnalyticsService(gs_service)
+    app.bot_data["analytics_service"] = analytics_service
+
     logger.info(f"Loaded {len(sources)} sources and {len(categories)} categories.")
     if config.GEMINI_API_KEY:
         logger.info("AI Service enabled.")
+    logger.info("Analytics Service enabled.")
 
 
     # Handlers
     app.add_handler(CommandHandler("start", common.start))
     app.add_handler(CommandHandler("reboot", admin.reboot))
     app.add_handler(CommandHandler("advice", analytics.advice_command))
+    app.add_handler(CommandHandler("analytics", analytics.analytics_command))
     
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
     # Text, Photo, and Document handlers
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages.text_handler))
     app.add_handler(MessageHandler(filters.PHOTO, messages.text_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, messages.document_handler))
+
+    # Setup daily analytics scheduler
+    if config.ANALYTICS_CHAT_ID:
+        try:
+            # Parse time from config (format: "HH:MM")
+            hour, minute = map(int, config.ANALYTICS_TIME.split(':'))
+
+            async def scheduled_analytics_job():
+                """Job to send daily analytics."""
+                try:
+                    await analytics.send_daily_analytics(
+                        bot=app.bot,
+                        chat_id=int(config.ANALYTICS_CHAT_ID),
+                        analytics_service=analytics_service
+                    )
+                except Exception as e:
+                    logger.error(f"Scheduled analytics job failed: {e}")
+
+            # Add job to scheduler - runs daily at specified time
+            scheduler.add_job(
+                scheduled_analytics_job,
+                CronTrigger(hour=hour, minute=minute, timezone=config.ANALYTICS_TIMEZONE),
+                id='daily_analytics',
+                replace_existing=True
+            )
+
+            scheduler.start()
+            logger.info(f"Daily analytics scheduled for {config.ANALYTICS_TIME} ({config.ANALYTICS_TIMEZONE})")
+
+        except Exception as e:
+            logger.error(f"Failed to setup analytics scheduler: {e}")
+    else:
+        logger.info("ANALYTICS_CHAT_ID not set. Daily analytics disabled.")
 
     # Run
     if config.LOCAL_RUN:

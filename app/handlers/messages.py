@@ -136,6 +136,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ai_sub = txn.get('subcategory')
             ai_comment = txn.get('comment') or "AI Recognized"
             ai_source = txn.get('source') or current_source
+            ai_date = txn.get('date')  # Date extracted by AI from receipt/screenshot
 
             if not ai_amount:
                 continue  # Skip transactions without amount
@@ -151,32 +152,42 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not ai_sub:
                 ai_sub = "Общее"
 
-            await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment)
+            await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment, ai_date)
 
     except Exception as e:
         logger.error(f"AI Error: {e}")
         await update.message.reply_text(f"Ошибка AI: {e}")
 
 
-async def _save_transaction(update, context, source, category, subcategory, amount, comment):
-    """Helper to save to Google Sheets."""
+async def _save_transaction(update, context, source, category, subcategory, amount, comment, date_str=None):
+    """Helper to save to Google Sheets.
+
+    Args:
+        date_str: Optional date string in DD.MM.YYYY format. If None, uses today's date.
+    """
     gs_service: GoogleSheetsService = context.bot_data.get("gs_service")
     last_row = gs_service.get_last_row_index()
     next_row = last_row + 1
-    
+
     balance_formula_ru = (
             f'=СУММЕСЛИМН($D$2:D{next_row}; $H$2:H{next_row}; $H{next_row}; $G$2:G{next_row}; $G{next_row}; $B$2:B{next_row}; "💰 ДОХОДЫ")'
             f' - '
             f'СУММЕСЛИМН($D$2:D{next_row}; $H$2:H{next_row}; $H{next_row}; $G$2:G{next_row}; $G{next_row}; $B$2:B{next_row}; "<>💰 ДОХОДЫ")'
     )
-    
+
     currency = get_currency_from_source(source)
-    
+
+    # Use provided date or fallback to today
+    transaction_date = date_str if date_str else datetime.now().strftime('%d.%m.%Y')
+
+    # Ensure amount is positive (remove minus sign from expenses)
+    positive_amount = abs(float(amount))
+
     row_data = [
-        datetime.now().strftime('%d.%m.%Y'),
+        transaction_date,
         category.upper(),
         subcategory,
-        amount,
+        positive_amount,
         balance_formula_ru,
         comment,
         currency,
@@ -308,6 +319,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ai_sub = txn.get('subcategory')
             ai_comment = txn.get('comment') or "From document"
             ai_source = txn.get('source') or current_source
+            ai_date = txn.get('date')  # Date extracted by AI from document
 
             if not ai_amount:
                 continue
@@ -321,7 +333,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not ai_sub:
                 ai_sub = "Общее"
 
-            await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment)
+            await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment, ai_date)
             saved_count += 1
 
         if saved_count == 0:
