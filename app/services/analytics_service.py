@@ -64,7 +64,25 @@ class AnalyticsService:
             df['date'] = pd.to_datetime(df['date'], format='%d.%m.%Y', errors='coerce')
 
             # Convert amount to float
-            df['amount'] = pd.to_numeric(df['amount'], errors='coerce').fillna(0)
+            # Handle various formats: "63 000" (space as thousands separator), "(650)" (negative in parentheses)
+            def parse_amount(val):
+                if pd.isna(val) or val == '':
+                    return 0.0
+                s = str(val).strip()
+                # Handle parentheses as negative numbers: (650) -> -650
+                is_negative = s.startswith('(') and s.endswith(')')
+                if is_negative:
+                    s = s[1:-1]
+                # Remove spaces and other non-numeric chars except minus and dot/comma
+                s = s.replace(' ', '').replace('\u00a0', '')  # regular space and non-breaking space
+                s = s.replace(',', '.')  # comma as decimal separator
+                try:
+                    result = float(s)
+                    return -result if is_negative else abs(result)  # abs() for expenses
+                except ValueError:
+                    return 0.0
+
+            df['amount'] = df['amount'].apply(parse_amount)
 
             # Filter by date range
             cutoff_date = datetime.now() - timedelta(days=days)
