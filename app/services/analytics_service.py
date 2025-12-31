@@ -30,10 +30,35 @@ class AnalyticsService:
             if len(all_values) < 2:
                 return pd.DataFrame()
 
-            headers = ['date', 'category', 'subcategory', 'amount', 'balance', 'comment', 'currency', 'source']
             data = all_values[1:]  # Skip header row
+            if not data:
+                return pd.DataFrame()
 
-            df = pd.DataFrame(data, columns=headers[:len(data[0])] if data else headers)
+            # Create DataFrame without predefined headers
+            df = pd.DataFrame(data)
+
+            # Map columns by index (based on actual sheet structure)
+            # 0:Date, 1:Category, 2:Subcategory, 3:Amount, 4:Balance, 5:Comment, 6:Currency, 7:Source
+            column_mapping = {
+                0: 'date',
+                1: 'category',
+                2: 'subcategory',
+                3: 'amount',
+                4: 'balance',
+                5: 'comment',
+                6: 'currency',
+                7: 'source'
+            }
+
+            # Rename only the columns we need
+            df = df.rename(columns={k: v for k, v in column_mapping.items() if k < len(df.columns)})
+
+            # Ensure required columns exist
+            required_cols = ['date', 'category', 'subcategory', 'amount']
+            for col in required_cols:
+                if col not in df.columns:
+                    logger.error(f"Missing required column: {col}")
+                    return pd.DataFrame()
 
             # Parse dates
             df['date'] = pd.to_datetime(df['date'], format='%d.%m.%Y', errors='coerce')
