@@ -88,6 +88,9 @@ class AnalyticsService:
             cutoff_date = datetime.now() - timedelta(days=days)
             df = df[df['date'] >= cutoff_date]
 
+            # Exclude internal transfers (СЧЕТА) - these are movements between own accounts
+            df = df[~df['category'].str.contains('СЧЕТА', case=False, na=False)]
+
             return df
 
         except Exception as e:
