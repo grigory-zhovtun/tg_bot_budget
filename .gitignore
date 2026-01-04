@@ -28,4 +28,4 @@ __pycache__/
 parameters.txt
 
 # Игнорирование файлов, связанных с работой Git
-!.gitignore
+!.gitignore.obsidian/
