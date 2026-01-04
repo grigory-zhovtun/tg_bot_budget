@@ -86,14 +86,20 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parts = msg_text.split(' ', 1)
             amount = float(parts[0].replace(',', '.'))
             comment = parts[1] if len(parts) > 1 else ""
-            
+
+            # Delete user's message
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
+
             # Execute Manual Entry logic
             await _save_transaction(update, context, current_source, category, subcategory, amount, comment)
             manual_success = True
         except ValueError:
             # Not a simple number, so fall through to AI
             manual_success = False
-    
+
     if manual_success:
         return
 
@@ -112,12 +118,17 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo_file = await update.message.photo[-1].get_file()
         file_path = f"/tmp/{photo_file.file_id}.jpg"
         await photo_file.download_to_drive(file_path)
-        
-        # We need to read it back for genai. Or pass PIL image.
+
         import PIL.Image
         image_part = PIL.Image.open(file_path)
 
-    analyzing_msg = await update.message.reply_text("🔍 Анализирую...")
+    # Delete user's message (text/SMS/photo) to keep chat clean
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    analyzing_msg = await update.effective_chat.send_message("🔍")
     track_message(context, analyzing_msg)
 
     try:
@@ -256,7 +267,13 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("AI сервис не настроен.")
         return
 
-    analyzing_msg = await update.message.reply_text("📄 Загружаю и анализирую файл...")
+    # Delete user's document message to keep chat clean
+    try:
+        await update.message.delete()
+    except Exception:
+        pass
+
+    analyzing_msg = await update.effective_chat.send_message("📄")
     track_message(context, analyzing_msg)
 
     try:
