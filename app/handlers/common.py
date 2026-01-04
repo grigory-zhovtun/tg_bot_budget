@@ -30,7 +30,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, suc
     sources = context.bot_data.get("sources", [])
     current_source = context.user_data.get('source')
 
-    # Send success message if provided, otherwise just show keyboards silently
+    # Send success message if provided, otherwise minimal text
     if success_message:
         msg1 = await update.effective_message.reply_text(
             success_message,
@@ -38,9 +38,8 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, suc
         )
         track_message(context, msg1)
     else:
-        # Just update keyboard without text
         msg1 = await update.effective_message.reply_text(
-            "👇",
+            "ㅤ",  # Invisible character
             reply_markup=generate_sources_keyboard(sources, current_source)
         )
         track_message(context, msg1)
@@ -48,7 +47,7 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, suc
     # Send categories keyboard if source is selected
     if current_source:
         msg2 = await update.effective_message.reply_text(
-            "👇",
+            "Категория:",
             reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
         )
         track_message(context, msg2)
@@ -84,7 +83,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if current_source:
         msg2 = await update.message.reply_text(
-            "👇",
+            "Категория:",
             reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
         )
         track_message(context, msg2)

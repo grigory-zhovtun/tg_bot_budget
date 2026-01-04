@@ -30,14 +30,19 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clean_text = msg_text.replace("✅ ", "") if msg_text.startswith("✅ ") else msg_text
         if clean_text in sources:
             context.user_data['source'] = clean_text
-            # Silent update - just show keyboards without verbose text
-            msg1 = await update.message.reply_text(
-                "👇",
+            # Delete user's source selection message to keep chat clean
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
+            # Silent update - just show keyboards
+            msg1 = await update.effective_chat.send_message(
+                "ㅤ",  # Invisible character for minimal text
                 reply_markup=generate_sources_keyboard(sources, clean_text)
             )
             track_message(context, msg1)
-            msg2 = await update.message.reply_text(
-                "👇",
+            msg2 = await update.effective_chat.send_message(
+                "Категория:",
                 reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
             )
             track_message(context, msg2)
@@ -47,16 +52,21 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if msg_text == "⬅️ Назад":
             context.user_data.pop('category', None)
             context.user_data.pop('subcategory', None)
+            # Delete user's back message
+            try:
+                await update.message.delete()
+            except Exception:
+                pass
             current_source = context.user_data.get('source')
             if current_source:
-                msg = await update.message.reply_text(
-                    "👇",
+                msg = await update.effective_chat.send_message(
+                    "Категория:",
                     reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
                 )
                 track_message(context, msg)
             else:
-                msg = await update.message.reply_text(
-                    "👇",
+                msg = await update.effective_chat.send_message(
+                    "ㅤ",
                     reply_markup=generate_sources_keyboard(sources)
                 )
                 track_message(context, msg)
