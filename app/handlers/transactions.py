@@ -20,22 +20,19 @@ async def transaction_button_handler(update: Update, context: ContextTypes.DEFAU
     if data.startswith("cat_"):
         selected_category = data[4:]
         context.user_data['category'] = selected_category
-        
+
         if not selected_source:
-             # If source somehow lost or not selected (though UI tries to prevent)
-             if query.message:
+            if query.message:
                 msg = await query.message.reply_text(
-                    text="Сначала выберите ИСТОЧНИК.\nЗатем выберите категорию.",
+                    text="⚠️ Выберите источник",
                     reply_markup=generate_sources_keyboard(context.bot_data.get("sources", []))
                 )
                 track_message(context, msg)
-             return
+            return
 
-        # Fetch subcategories from bot_data
         subcategories = context.bot_data.get("subcategories", {})
-        
         await query.edit_message_text(
-            text=f"Источник: {selected_source} (Валюта: {derived_currency})\nКатегория: {selected_category}\n\nВыберите подкатегорию:",
+            text=f"{selected_category} →",
             reply_markup=generate_subcategories_keyboard(subcategories, selected_category)
         )
 
@@ -43,28 +40,19 @@ async def transaction_button_handler(update: Update, context: ContextTypes.DEFAU
         context.user_data.pop('category', None)
         context.user_data.pop('subcategory', None)
 
-        msg = "Выбери категорию:"
-        if selected_source:
-            msg = f"Источник: {selected_source} (Валюта: {derived_currency})\n{msg}"
-
         await query.edit_message_text(
-            text=msg,
+            text="👇",
             reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
         )
 
     elif data.startswith("sub_"):
         subcategory_name = data[4:]
         context.user_data['subcategory'] = subcategory_name
-        category = context.user_data.get('category', 'Не выбрана')
-        
-        prompt_text = (f"Источник: {selected_source}\n"
-                       f"Категория: {category}\n"
-                       f"Подкатегория: {subcategory_name}\n"
-                       f"Валюта: {derived_currency}\n\n"
-                       f"ВНЕСИТЕ СУММУ И КОММЕНТАРИЙ (ЧЕРЕЗ ПРОБЕЛ):")
-        
-        # We keep the subcategories keyboard to allow "Back" functionality logic to remain simple
-        # or we could show a "Cancel" button. Original showed subcategories.
+        category = context.user_data.get('category', '')
+
+        # Short prompt for amount entry
+        prompt_text = f"💰 {category} → {subcategory_name}\nСумма комментарий:"
+
         subcategories = context.bot_data.get("subcategories", {})
         await query.edit_message_text(
             text=prompt_text,

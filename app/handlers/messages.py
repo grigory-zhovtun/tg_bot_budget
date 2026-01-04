@@ -30,15 +30,14 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         clean_text = msg_text.replace("✅ ", "") if msg_text.startswith("✅ ") else msg_text
         if clean_text in sources:
             context.user_data['source'] = clean_text
-            derived_currency = get_currency_from_source(clean_text)
-            resp_text = f"Источник '{clean_text}' выбран (Валюта: {derived_currency})."
+            # Silent update - just show keyboards without verbose text
             msg1 = await update.message.reply_text(
-                 resp_text,
-                 reply_markup=generate_sources_keyboard(sources, clean_text)
+                "👇",
+                reply_markup=generate_sources_keyboard(sources, clean_text)
             )
             track_message(context, msg1)
             msg2 = await update.message.reply_text(
-                "Выбери категорию или отправь описание траты:",
+                "👇",
                 reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
             )
             track_message(context, msg2)
@@ -50,17 +49,17 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop('subcategory', None)
             current_source = context.user_data.get('source')
             if current_source:
-                 msg = await update.message.reply_text(
-                    f"Источник: {current_source}. Выбери категорию:",
+                msg = await update.message.reply_text(
+                    "👇",
                     reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
                 )
-                 track_message(context, msg)
+                track_message(context, msg)
             else:
-                 msg = await update.message.reply_text(
-                    "Источник не выбран.",
+                msg = await update.message.reply_text(
+                    "👇",
                     reply_markup=generate_sources_keyboard(sources)
                 )
-                 track_message(context, msg)
+                track_message(context, msg)
             return
 
     # 3. Decision Logic: Manual Entry (Strict) vs AI Parsing
@@ -210,19 +209,15 @@ async def _save_transaction(update, context, source, category, subcategory, amou
             cell = config.CARD_BALANCE_CELLS.get(card_identifier)
             if cell:
                 if gs_service.update_cell(config.FACT_SHEET_NAME, cell, balance):
-                    balance_msg = f"\n💳 Остаток карты *{card_identifier}: {balance:,.2f}"
+                    balance_msg = f" | 💳 {balance:,.0f}"
                     logger.info(f"Updated balance for card {card_identifier}: {balance}")
-                else:
-                    balance_msg = f"\n⚠️ Не удалось обновить остаток карты {card_identifier}"
-            else:
-                logger.warning(f"Unknown card identifier: {card_identifier}")
 
         # Clear previous bot messages
         chat_id = update.effective_chat.id
         await clear_tracked_messages(context, chat_id)
 
-        # Show success message with main menu
-        success_msg = f"✅ Записано:\n{amount} {currency} - {category} ({subcategory})\n{comment}\n(Источник: {source}){balance_msg}"
+        # Concise success message: amount Category (subcategory) • Source
+        success_msg = f"✅ {positive_amount:,.0f} {currency} • {category} ({subcategory}) • {source}{balance_msg}"
         await show_main_menu(update, context, success_msg)
     else:
         await update.message.reply_text("❌ Ошибка при записи в Google Таблицу.")
