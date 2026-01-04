@@ -99,9 +99,10 @@ class GeminiService:
             f"4. If Source is not explicitly mentioned in input, try to infer it from context, otherwise return null.",
             f"5. DATE EXTRACTION (CRITICAL): Look carefully for the transaction date on receipts, bank statements, screenshots. Extract the ACTUAL date shown (formats: DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, 'January 15, 2025', etc). Convert to DD.MM.YYYY format. Only use today's date ({today_str}) if NO date is visible anywhere in the input.",
             f"6. AMOUNT (CRITICAL): Always return POSITIVE amount. If the receipt/statement shows negative number (e.g. -1500, -$50), remove the minus sign and return positive value (1500, 50). Expenses are recorded as positive numbers.",
-            f"7. Return ONLY valid JSON. No markdown formatting.",
-            f"8. If input contains MULTIPLE transactions, return a JSON ARRAY of objects. If single transaction, return a single object.",
-            f"JSON Schema for single: {{'amount': float, 'currency': str, 'date': str, 'category': str, 'subcategory': str, 'comment': str, 'source': str}}",
+            f"7. BALANCE EXTRACTION (ONLY IF EXPLICITLY PRESENT): Extract 'balance' (float) and 'card_identifier' (last 4 digits) ONLY if the input explicitly contains balance/remaining amount keywords like: 'Остаток', 'Ostatok', 'Balance', 'Баланс', 'Available', 'Доступно', 'Qoldiq'. If NO such keywords found - return null for both fields. NEVER guess or calculate balance.",
+            f"8. Return ONLY valid JSON. No markdown formatting.",
+            f"9. If input contains MULTIPLE transactions, return a JSON ARRAY of objects. If single transaction, return a single object.",
+            f"JSON Schema for single: {{'amount': float, 'currency': str, 'date': str, 'category': str, 'subcategory': str, 'comment': str, 'source': str, 'balance': float|null, 'card_identifier': str|null}}",
             f"JSON Schema for multiple: [{{'amount': float, ...}}, {{'amount': float, ...}}]",
             f"\nINPUT: {user_input}"
         ]

@@ -148,3 +148,26 @@ class GoogleSheetsService:
                     logger.error(f"Final failure fetching records: {e}")
                     raise e
         return []
+
+    def update_cell(self, worksheet_name: str, cell: str, value: Any) -> bool:
+        """Updates a specific cell in a worksheet."""
+        if not self.sheet:
+            self._authenticate()
+
+        try:
+            ws = self.sheet.worksheet(worksheet_name)
+            ws.update_acell(cell, value)
+            logger.info(f"Updated {worksheet_name}!{cell} to {value}")
+            return True
+        except Exception as e:
+            logger.error(f"Error updating cell {cell}: {e}")
+            # Try to reconnect and retry once
+            try:
+                self._authenticate()
+                ws = self.sheet.worksheet(worksheet_name)
+                ws.update_acell(cell, value)
+                logger.info(f"Updated {worksheet_name}!{cell} to {value} (after retry)")
+                return True
+            except Exception as retry_e:
+                logger.error(f"Retry failed: {retry_e}")
+                return False

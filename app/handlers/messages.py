@@ -137,6 +137,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ai_comment = txn.get('comment') or "AI Recognized"
             ai_source = txn.get('source') or current_source
             ai_date = txn.get('date')  # Date extracted by AI from receipt/screenshot
+            ai_balance = txn.get('balance')  # Card balance if mentioned
+            ai_card_id = txn.get('card_identifier')  # Last 4 digits of card
 
             if not ai_amount:
                 continue  # Skip transactions without amount
@@ -152,18 +154,20 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not ai_sub:
                 ai_sub = "Общее"
 
-            await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment, ai_date)
+            await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment, ai_date, ai_balance, ai_card_id)
 
     except Exception as e:
         logger.error(f"AI Error: {e}")
         await update.message.reply_text(f"Ошибка AI: {e}")
 
 
-async def _save_transaction(update, context, source, category, subcategory, amount, comment, date_str=None):
+async def _save_transaction(update, context, source, category, subcategory, amount, comment, date_str=None, balance=None, card_identifier=None):
     """Helper to save to Google Sheets.
 
     Args:
         date_str: Optional date string in DD.MM.YYYY format. If None, uses today's date.
+        balance: Optional card balance to update in the sheet.
+        card_identifier: Last 4 digits of card number for balance update.
     """
     gs_service: GoogleSheetsService = context.bot_data.get("gs_service")
     last_row = gs_service.get_last_row_index()
@@ -200,12 +204,25 @@ async def _save_transaction(update, context, source, category, subcategory, amou
         context.user_data.pop('subcategory', None)
         context.user_data['source'] = source
 
+        # Update card balance if provided
+        balance_msg = ""
+        if balance is not None and card_identifier:
+            cell = config.CARD_BALANCE_CELLS.get(card_identifier)
+            if cell:
+                if gs_service.update_cell(config.FACT_SHEET_NAME, cell, balance):
+                    balance_msg = f"\n💳 Остаток карты *{card_identifier}: {balance:,.2f}"
+                    logger.info(f"Updated balance for card {card_identifier}: {balance}")
+                else:
+                    balance_msg = f"\n⚠️ Не удалось обновить остаток карты {card_identifier}"
+            else:
+                logger.warning(f"Unknown card identifier: {card_identifier}")
+
         # Clear previous bot messages
         chat_id = update.effective_chat.id
         await clear_tracked_messages(context, chat_id)
 
         # Show success message with main menu
-        success_msg = f"✅ Записано:\n{amount} {currency} - {category} ({subcategory})\n{comment}\n(Источник: {source})"
+        success_msg = f"✅ Записано:\n{amount} {currency} - {category} ({subcategory})\n{comment}\n(Источник: {source}){balance_msg}"
         await show_main_menu(update, context, success_msg)
     else:
         await update.message.reply_text("❌ Ошибка при записи в Google Таблицу.")
@@ -320,6 +337,8 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ai_comment = txn.get('comment') or "From document"
             ai_source = txn.get('source') or current_source
             ai_date = txn.get('date')  # Date extracted by AI from document
+            ai_balance = txn.get('balance')  # Card balance if mentioned
+            ai_card_id = txn.get('card_identifier')  # Last 4 digits of card
 
             if not ai_amount:
                 continue
@@ -333,7 +352,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not ai_sub:
                 ai_sub = "Общее"
 
-            await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment, ai_date)
+            await _save_transaction(update, context, ai_source, ai_cat, ai_sub, ai_amount, ai_comment, ai_date, ai_balance, ai_card_id)
             saved_count += 1
 
         if saved_count == 0:
