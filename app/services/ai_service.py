@@ -114,7 +114,37 @@ class GeminiService:
         try:
             response = self.model.generate_content(content)
             text_resp = response.text.replace("```json", "").replace("```", "").strip()
-            data = json.loads(text_resp)
+
+            try:
+                data = json.loads(text_resp)
+            except json.JSONDecodeError as json_err:
+                # Handle case when Gemini returns multiple JSON objects without array wrapper
+                if "Extra data" in str(json_err):
+                    # Parse concatenated JSON objects: {...}{...}{...} -> [{...}, {...}, {...}]
+                    import re
+                    objects = []
+                    decoder = json.JSONDecoder()
+                    pos = 0
+                    text_resp = text_resp.strip()
+                    while pos < len(text_resp):
+                        # Skip whitespace
+                        while pos < len(text_resp) and text_resp[pos] in ' \t\n\r':
+                            pos += 1
+                        if pos >= len(text_resp):
+                            break
+                        try:
+                            obj, end_pos = decoder.raw_decode(text_resp, pos)
+                            objects.append(obj)
+                            pos += end_pos
+                        except json.JSONDecodeError:
+                            break
+                    if objects:
+                        data = objects if len(objects) > 1 else objects[0]
+                    else:
+                        raise json_err
+                else:
+                    raise json_err
+
             return data
         except Exception as e:
             logger.error(f"Gemini API Error: {e}")
