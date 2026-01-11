@@ -121,7 +121,6 @@ class GeminiService:
                 # Handle case when Gemini returns multiple JSON objects without array wrapper
                 if "Extra data" in str(json_err):
                     # Parse concatenated JSON objects: {...}{...}{...} -> [{...}, {...}, {...}]
-                    import re
                     objects = []
                     decoder = json.JSONDecoder()
                     pos = 0
@@ -135,7 +134,7 @@ class GeminiService:
                         try:
                             obj, end_pos = decoder.raw_decode(text_resp, pos)
                             objects.append(obj)
-                            pos += end_pos
+                            pos = end_pos  # end_pos is absolute position, not relative
                         except json.JSONDecodeError:
                             break
                     if objects:
