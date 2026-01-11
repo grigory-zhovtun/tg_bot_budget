@@ -149,6 +149,11 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("Не удалось распознать транзакции.")
             return
 
+        # Для скриншотов разворачиваем порядок: нижняя транзакция → первая запись
+        # Для SMS оставляем как есть: верхняя транзакция → первая запись
+        if is_photo and len(transactions) > 1:
+            transactions = transactions[::-1]
+
         # Process each transaction
         for txn in transactions:
             ai_amount = txn.get('amount')
