@@ -181,3 +181,113 @@ def test_reload_forgets_cached_balance_cells() -> None:
 
 def test_module_constants() -> None:
     assert google_sheets.BALANCE_BLOCK == "I2:I30"
+
+
+class RangeWorksheet(FakeWorksheet):
+    """Лист, который отвечает по диапазону и помнит, что у него спрашивали."""
+
+    def __init__(self, ranges: dict[str, list[list[Any]]], sheet_id: int = 0) -> None:
+        super().__init__(sheet_id)
+        self.ranges = ranges
+        self.asked: list[tuple[str, dict[str, Any]]] = []
+
+    def get(self, range_name: str, **options: Any) -> list[list[Any]]:
+        self.asked.append((range_name, options))
+        return self.ranges.get(range_name, [])
+
+    def batch_get(self, ranges: list[str]) -> list[list[list[Any]]]:
+        return [self.ranges.get(name, []) for name in ranges]
+
+
+def test_statement_marks_are_read_as_serial_or_text_dates() -> None:
+    ws = RangeWorksheet(
+        {
+            "F1:G60": [
+                ["", "выписка по"],
+                ["VISA 9120 UZS", 46300],  # 05.10.2026
+                ["UZCARD 5837 UZS", "04.10.2026"],
+                ["HUMO 6845 UZS"],
+                ["VISA 4058 USD", "позже"],
+            ]
+        }
+    )
+    service = make_service(ws)
+    assert service.get_statement_marks() == {
+        "VISA 9120 UZS": date(2026, 10, 5),
+        "UZCARD 5837 UZS": date(2026, 10, 4),
+    }
+    [(_, options)] = ws.asked
+    assert options["value_render_option"] == "UNFORMATTED_VALUE"
+
+
+def test_statement_marks_are_written_next_to_their_cards(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ws = RangeWorksheet({"F1:F60": [[], ["VISA 9120 UZS"], ["HUMO 6845 UZS"]]})
+    service = make_service(ws)
+    service.set_statement_marks(
+        {"HUMO 6845 UZS": date(2026, 11, 9), "CASH UZS": date(2026, 11, 9)}
+    )
+    [body] = service.sheet.values_batch
+    assert body["valueInputOption"] == "USER_ENTERED"
+    assert body["data"] == [
+        {"range": "system!G1", "values": [["выписка по"]]},
+        {"range": "system!G3", "values": [["09.11.2026"]]},
+    ]
+    assert "CASH UZS" in caplog.text
+
+
+def test_fact_amounts_are_updated_with_raw_values() -> None:
+    service = make_service(FakeWorksheet())
+    service.update_fact_amounts([(4100, 9.51, "AI: Cafe; сумма по выписке")])
+    [body] = service.sheet.values_batch
+    assert body == {
+        "valueInputOption": "RAW",
+        "data": [
+            {"range": "fact!D4100", "values": [[9.51]]},
+            {"range": "fact!F4100", "values": [["AI: Cafe; сумма по выписке"]]},
+        ],
+    }
+
+
+def test_only_rows_that_still_hold_the_mark_are_deleted_bottom_up() -> None:
+    ws = RangeWorksheet(
+        {
+            "F10": [["AI: выравнивание. ВРЕМЕННАЯ"]],
+            "F20": [["AI: кофе"]],  # строку успели заменить — не трогаем
+            "F30": [["временная строка"]],
+        },
+        sheet_id=5,
+    )
+    service = make_service(ws)
+    assert service.delete_fact_rows([10, 20, 30], must_contain="ВРЕМЕННАЯ") == [30, 10]
+    [batch] = service.sheet.batch
+    ranges = [r["deleteDimension"]["range"] for r in batch["requests"]]
+    assert ranges == [
+        {"sheetId": 5, "dimension": "ROWS", "startIndex": 29, "endIndex": 30},
+        {"sheetId": 5, "dimension": "ROWS", "startIndex": 9, "endIndex": 10},
+    ]
+
+
+def test_nothing_to_delete_sends_nothing() -> None:
+    service = make_service(RangeWorksheet({"F10": [["AI: кофе"]]}))
+    assert service.delete_fact_rows([10], must_contain="ВРЕМЕННАЯ") == []
+    assert service.delete_fact_rows([], must_contain="ВРЕМЕННАЯ") == []
+    assert service.sheet.batch == []
+
+
+def test_table_balances() -> None:
+    ws = RangeWorksheet(
+        {
+            "I2:J30": [
+                ["VISA 9120 UZS", 14982569.45],
+                ["UZCARD 5837 UZS", ""],
+                [],
+                ["VISA 4058 USD", 1273.5],
+            ]
+        }
+    )
+    assert make_service(ws).get_table_balances() == {
+        "VISA 9120 UZS": 14982569.45,
+        "VISA 4058 USD": 1273.5,
+    }

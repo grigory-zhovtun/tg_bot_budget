@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from collections.abc import Callable, Sequence
+from datetime import date, timedelta
 from typing import Any, TypeVar
 
 import gspread
@@ -32,9 +33,16 @@ BALANCE_FORMULA = (
     "=" + _BALANCE_PART.format(op="") + " - " + _BALANCE_PART.format(op="<>")
 )
 
-# Блок остатков карт на листе fact: I — название источника, N — остаток из банка
+# Блок остатков карт на листе fact: I — название источника, J — остаток по
+# таблице, N — остаток из банка
 BALANCE_BLOCK = "I2:I30"
 BALANCE_COLUMN = "N"
+TABLE_BALANCES = "I2:J30"
+# Лист system: F — источники, G рядом — по какой день загружены выписки
+MARKS_RANGE = "F1:G60"
+SOURCES_RANGE = "F1:F60"
+MARKS_HEADER = "выписка по"
+SERIAL_ZERO = date(1899, 12, 30)
 
 
 def row_values(row: SheetRow) -> list[Any]:
@@ -272,3 +280,121 @@ class GoogleSheetsService:
         except Exception:
             logger.exception("Could not read currency rates from the system sheet")
         return Rates(rates)
+
+    def get_table_balances(self) -> dict[str, float]:
+        """Остатки карт по таблице (fact, колонка J блока остатков)."""
+        values = self._with_retry(
+            "Reading table balances",
+            lambda: self._worksheet(config.FACT_SHEET_NAME).get(
+                TABLE_BALANCES, value_render_option=ValueRenderOption.unformatted
+            ),
+        )
+        return {
+            str(row[0]).strip(): float(row[1])
+            for row in values
+            if len(row) >= 2 and str(row[0]).strip() and isinstance(row[1], int | float)
+        }
+
+    def get_statement_marks(self) -> dict[str, date]:
+        """По какой день загружены выписки каждой карты (system, колонка G)."""
+        values = self._with_retry(
+            "Reading statement marks",
+            lambda: self._worksheet(config.SYSTEM_SHEET_NAME).get(
+                MARKS_RANGE, value_render_option=ValueRenderOption.unformatted
+            ),
+        )
+        marks: dict[str, date] = {}
+        for row in values[1:]:
+            if len(row) < 2 or not str(row[0]).strip():
+                continue
+            source, mark = str(row[0]).strip(), row[1]
+            if isinstance(mark, int | float) and not isinstance(mark, bool):
+                marks[source] = SERIAL_ZERO + timedelta(days=int(mark))
+            elif isinstance(mark, str) and re.fullmatch(r"\d\d\.\d\d\.\d{4}", mark):
+                day, month, year = map(int, mark.split("."))
+                marks[source] = date(year, month, day)
+        return marks
+
+    def set_statement_marks(self, marks: dict[str, date]) -> None:
+        """Записать отметки «выписка по» рядом с картами в system!G."""
+        sheet = self._worksheet(config.SYSTEM_SHEET_NAME)
+        names = self._with_retry("Reading sources", lambda: sheet.get(SOURCES_RANGE))
+        rows = {
+            str(row[0]).strip(): number
+            for number, row in enumerate(names, start=1)
+            if row and str(row[0]).strip()
+        }
+        data = [{"range": f"{config.SYSTEM_SHEET_NAME}!G1", "values": [[MARKS_HEADER]]}]
+        for source, day in marks.items():
+            if source not in rows:
+                logger.warning("No row for source %r in the system sheet", source)
+                continue
+            data.append(
+                {
+                    "range": f"{config.SYSTEM_SHEET_NAME}!G{rows[source]}",
+                    "values": [[day.strftime("%d.%m.%Y")]],
+                }
+            )
+        self._with_retry(
+            "Writing statement marks",
+            lambda: self.sheet.values_batch_update(
+                {"valueInputOption": "USER_ENTERED", "data": data}
+            ),
+        )
+
+    def update_fact_amounts(self, changes: Sequence[tuple[int, float, str]]) -> None:
+        """Поправить сумму (D) и комментарий (F) в строках fact: (номер, сумма, текст)."""
+        data = []
+        for number, amount, comment in changes:
+            data.append(
+                {"range": f"{config.FACT_SHEET_NAME}!D{number}", "values": [[amount]]}
+            )
+            data.append(
+                {"range": f"{config.FACT_SHEET_NAME}!F{number}", "values": [[comment]]}
+            )
+        if data:
+            self._with_retry(
+                "Updating fact amounts",
+                lambda: self.sheet.values_batch_update(
+                    {"valueInputOption": "RAW", "data": data}
+                ),
+            )
+
+    def delete_fact_rows(self, numbers: Sequence[int], must_contain: str) -> list[int]:
+        """Удалить строки fact, в комментарии которых есть must_contain.
+
+        Перед удалением строки перечитываются: если таблицу успели поправить
+        и на этом месте уже другая строка, она не тронется.
+        """
+        if not numbers:
+            return []
+        worksheet = self._worksheet(config.FACT_SHEET_NAME)
+        comments = self._with_retry(
+            "Reading rows to delete",
+            lambda: worksheet.batch_get([f"F{n}" for n in numbers]),
+        )
+        confirmed = sorted(
+            (
+                number
+                for number, cell in zip(numbers, comments, strict=True)
+                if cell and cell[0] and must_contain in str(cell[0][0]).upper()
+            ),
+            reverse=True,  # снизу вверх: номера строк выше не сдвигаются
+        )
+        if confirmed:
+            requests = [
+                {
+                    "deleteDimension": {
+                        "range": {
+                            "sheetId": worksheet.id,
+                            "dimension": "ROWS",
+                            "startIndex": number - 1,
+                            "endIndex": number,
+                        }
+                    }
+                }
+                for number in confirmed
+            ]
+            # без повтора: если ответ потерялся, второй запрос снёс бы другие строки
+            self.sheet.batch_update({"requests": requests})
+        return confirmed

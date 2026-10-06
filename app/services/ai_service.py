@@ -3,16 +3,21 @@
 import asyncio
 import json
 import logging
-import re
 import time
 from typing import Any, Literal
 
 from google import genai
 from google.genai import errors, types
-from pydantic import BaseModel, TypeAdapter
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from app import config
-from app.domain import local_today
+from app.domain import (
+    FALLBACK_CATEGORY,
+    Catalog,
+    local_today,
+    merchant_key,
+    resolve_category,
+)
 from app.services.google_sheets import GoogleSheetsService
 
 logger = logging.getLogger(__name__)
@@ -26,6 +31,9 @@ RETRY = types.HttpRetryOptions(
     attempts=4, initial_delay=2.0, max_delay=20.0, http_status_codes=sorted(OVERLOADED)
 )
 TIMEOUT_MS = 120_000
+MAX_MERCHANTS = 60  # магазинов в одном запросе на раскладку
+# Нам не нужны вызовы функций: без этого SDK пишет в лог предупреждение об AFC
+NO_AFC = types.AutomaticFunctionCallingConfig(disable=True)
 
 
 class AiTransaction(BaseModel):
@@ -45,22 +53,16 @@ class AiTransaction(BaseModel):
 
 RESPONSE_SCHEMA = TypeAdapter(list[AiTransaction]).json_schema()
 
-# Комментарии, по которым не понять магазин: служебные строки бюджета
-_GENERIC = re.compile(
-    r"^(без мерчанта|humo, тсп|выравнивание|перевод|конвертация|снятие|внесение|"
-    r"комиссия|остаток|наличные|←|→|ai$|\?\?)",
-    re.IGNORECASE,
-)
+
+class MerchantCategory(BaseModel):
+    """Категория магазина из выписки (ответ Gemini)."""
+
+    name: str
+    category: str
+    subcategory: str
 
 
-def merchant_key(comment: str) -> str | None:
-    """«AI: Ip Ooo Anglesey Food (Сингапур); ≈ 3 USD» → «IP OOO ANGLESEY FOOD»."""
-    text = re.sub(r"^(AI|SMS):\s*", "", (comment or "").strip(), flags=re.IGNORECASE)
-    if not text or _GENERIC.match(text):
-        return None
-    text = re.split(r"[;(,]| ≈ ", text, maxsplit=1)[0]
-    text = re.sub(r"\s+", " ", text).strip().upper()[:40]
-    return text if len(text) >= 3 and not text.isdigit() else None
+MERCHANTS_SCHEMA = TypeAdapter(list[MerchantCategory]).json_schema()
 
 
 def merchant_hints(rows: list[list[Any]], limit: int = MAX_HINTS) -> list[str]:
@@ -128,6 +130,35 @@ Input:
 {user_input}"""
 
 
+def build_merchants_prompt(
+    names: list[str],
+    categories: list[str],
+    subcategories: dict[str, list[str]],
+    hints: list[str],
+) -> str:
+    tree = "\n".join(
+        f"- {cat}: {', '.join(subcategories.get(cat, []))}" for cat in categories
+    )
+    known = "\n".join(hints) or "(пока нет)"
+    shops = "\n".join(f"{i}. {name}" for i, name in enumerate(names, start=1))
+    return f"""You categorize shops from a bank statement for a family budget
+(Tashkent, Uzbekistan; trips abroad happen). MCHJ, OOO, QK, XK, YATT, IP are
+legal forms, not part of the shop type.
+
+Categories and their subcategories — copy the strings exactly, emoji included:
+{tree}
+
+How the owner categorized shops before (newest first):
+{known}
+
+Shops:
+{shops}
+
+Return one object per shop: "name" copied exactly from the list, "category"
+and "subcategory". If you cannot tell what the shop sells, use
+"{FALLBACK_CATEGORY}" with its subcategory."""
+
+
 class GeminiService:
     def __init__(self, gs_service: GoogleSheetsService) -> None:
         self.gs_service = gs_service
@@ -168,7 +199,10 @@ class GeminiService:
     ) -> types.GenerateContentResponse:
         if self.client is None:
             raise ValueError("AI сервис не настроен (нет GEMINI_API_KEY)")
-        config_args: dict[str, Any] = {"temperature": 0}
+        config_args: dict[str, Any] = {
+            "temperature": 0,
+            "automatic_function_calling": NO_AFC,
+        }
         if schema is not None:
             config_args |= {
                 "response_mime_type": "application/json",
@@ -248,6 +282,39 @@ class GeminiService:
                 logger.exception("Gemini self-check failed")
         except Exception:
             logger.exception("Gemini self-check failed")
+
+    async def categorize_merchants(
+        self, names: list[str], catalog: Catalog
+    ) -> dict[str, tuple[str, str]]:
+        """Новые магазины из выписки → категория и подкатегория из справочника.
+
+        Неуверенные ответы («РАЗНОЕ» и всё, чего нет в system) не возвращаются:
+        такие строки владелец проверит сам.
+        """
+        names = names[:MAX_MERCHANTS]
+        if not names or not self.enabled:
+            return {}
+        hints = await asyncio.to_thread(self._load_hints)
+        prompt = build_merchants_prompt(
+            names, catalog.categories, catalog.subcategories, hints[:150]
+        )
+        response = await self._generate([prompt], MERCHANTS_SCHEMA)
+        data = json.loads(response.text or "[]")
+        result: dict[str, tuple[str, str]] = {}
+        for item in data if isinstance(data, list) else []:
+            try:
+                answer = MerchantCategory.model_validate(item)
+            except ValidationError:
+                continue
+            if answer.name not in names:
+                continue
+            category, subcategory, note = resolve_category(
+                answer.category, answer.subcategory, catalog
+            )
+            if note is None and category != FALLBACK_CATEGORY:
+                result[answer.name] = (category, subcategory)
+        logger.info("Gemini categorized %d of %d merchant(s)", len(result), len(names))
+        return result
 
     async def analyze_finances(self, numbers: str) -> str:
         """Выводы по готовым цифрам (/advice): считает Python, модель — объясняет."""

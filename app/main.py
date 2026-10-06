@@ -21,7 +21,14 @@ from telegram.ext import (
 from app import config
 from app.auth import make_gatekeeper
 from app.errors import on_error
-from app.handlers import admin, analytics, common, messages, transactions
+from app.handlers import (
+    admin,
+    analytics,
+    common,
+    messages,
+    statement_import,
+    transactions,
+)
 from app.services.ai_service import GeminiService
 from app.services.analytics_service import AnalyticsService
 from app.services.google_sheets import GoogleSheetsService
@@ -113,6 +120,8 @@ def build_application(
     app.add_handler(CommandHandler("reboot", admin.reboot))
     app.add_handler(CommandHandler("advice", analytics.advice_command))
     app.add_handler(CommandHandler("analytics", analytics.analytics_command))
+    # Кнопки импорта выписок — раньше общего обработчика кнопок без фильтра
+    app.add_handler(CallbackQueryHandler(statement_import.button, pattern=r"^import:"))
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, messages.text_handler)

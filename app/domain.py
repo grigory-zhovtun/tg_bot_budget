@@ -180,6 +180,24 @@ def _letters(text: str) -> str:
     return re.sub(r"[^a-zа-яё0-9 ]", "", text.lower()).strip()
 
 
+# Комментарии, по которым не понять магазин: служебные строки бюджета
+_GENERIC = re.compile(
+    r"^(без мерчанта|humo, тсп|выравнивание|перевод|конвертация|снятие|внесение|"
+    r"комиссия|остаток|наличные|←|→|ai$|\?\?)",
+    re.IGNORECASE,
+)
+
+
+def merchant_key(comment: str) -> str | None:
+    """«AI: Ip Ooo Anglesey Food (Сингапур); ≈ 3 USD» → «IP OOO ANGLESEY FOOD»."""
+    text = re.sub(r"^(AI|SMS):\s*", "", (comment or "").strip(), flags=re.IGNORECASE)
+    if not text or _GENERIC.match(text):
+        return None
+    text = re.split(r"[;(,]| ≈ ", text, maxsplit=1)[0]
+    text = re.sub(r"\s+", " ", text).strip().upper()[:40]
+    return text if len(text) >= 3 and not text.isdigit() else None
+
+
 def resolve_source(
     raw_source: str | None,
     card_identifier: str | None,
