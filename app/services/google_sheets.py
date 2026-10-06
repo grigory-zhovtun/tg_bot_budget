@@ -240,6 +240,15 @@ class GoogleSheetsService:
             lambda: self._worksheet(worksheet_name).get_all_values(),
         )
 
+    def get_values(self, worksheet_name: str) -> list[list[Any]]:
+        """Значения листа как есть: числа — числами, даты — серийными номерами."""
+        return self._with_retry(
+            f"Reading {worksheet_name}",
+            lambda: self._worksheet(worksheet_name).get_all_values(
+                value_render_option=ValueRenderOption.unformatted
+            ),
+        )
+
     def get_rates(self) -> Rates:
         """Курсы к суму из system!H2:I10: код валюты в H, курс (GOOGLEFINANCE) в I.
 

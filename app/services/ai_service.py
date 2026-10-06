@@ -238,57 +238,22 @@ class GeminiService:
         except Exception:
             logger.exception("Gemini self-check failed")
 
-    def get_history_context(self, limit: int = 2000) -> str:
-        """Последние операции для финансового анализа (/advice)."""
-        all_values = self.gs_service.get_all_records(config.FACT_SHEET_NAME)
-        recent = all_values[-limit:] if len(all_values) > limit else all_values[1:]
-        columns = (0, 1, 2, 3, 5, 6, 7)
-        lines = [
-            " | ".join(str(row[i]) if len(row) > i else "" for i in columns)
-            for row in recent
-        ]
-        return (
-            "History (Date | Category | Subcategory | Amount | Comment | Currency"
-            " | Source):\n" + "\n".join(lines)
-        )
-
-    async def analyze_finances(self, custom_context: str | None = None) -> str:
-        """Анализ трат с планом месяца и прогнозом (/advice)."""
-        context = custom_context or await asyncio.to_thread(
-            self.get_history_context, 2000
-        )
-        now = local_today(config.ANALYTICS_TIMEZONE)
-        month_sheet = f"{MONTHS[now.month - 1]} {now:%y}"
-
-        budget_data = "No budget sheet found for this month."
-        try:
-            budget_rows = await asyncio.to_thread(
-                self.gs_service.get_all_records, month_sheet
-            )
-            budget_data = "\n".join(str(row) for row in budget_rows[:50]) or (
-                "Budget sheet exists but is empty."
-            )
-        except Exception:
-            logger.info("No budget sheet %s", month_sheet)
-
+    async def analyze_finances(self, numbers: str) -> str:
+        """Выводы по готовым цифрам (/advice): считает Python, модель — объясняет."""
         prompt = "\n".join(
             [
-                "You are a strict and concise financial analyst.",
-                f"CURRENT DATE: {now.strftime('%d.%m.%Y')}",
-                f"TRANSACTION HISTORY (FACT):\n{context}\n",
-                f"BUDGET PLAN FOR {month_sheet} (PLAN):\n{budget_data}\n",
-                "INSTRUCTIONS:",
-                "1. 3-Month Analysis: does current spending deviate from the "
-                "average of the last 3 months?",
-                "2. Plan vs Fact: report categories where ACTUAL spending exceeds "
-                "PLANNED values.",
-                "3. Forecast: estimate total expenses by month-end.",
-                "4. Recommendations: short, practical steps to stay within budget.",
-                "CONSTRAINTS:",
-                "- Max 300 words total. STRICTLY.",
-                "- Simple, clear Russian language.",
-                "- Structure: '📊 Анализ', '⚠️ Перерасход', '🔮 Прогноз', '💡 Совет'.",
-                "- No intro/outro fluff.",
+                "You are a strict and concise financial analyst for a family budget.",
+                "All numbers below are already calculated; do not recalculate them.",
+                "",
+                numbers,
+                "",
+                "Write in simple Russian, max 250 words, with sections:",
+                "'📊 Анализ' — how this month compares with the 3-month average;",
+                "'⚠️ Перерасход' — plan lines where fact exceeds plan or that are"
+                " outside the plan, biggest first;",
+                "'🔮 Прогноз' — the month forecast vs the average month;",
+                "'💡 Совет' — 2-3 concrete steps for the rest of the month.",
+                "Use the category names as given. No intro or outro.",
             ]
         )
         response = await self._generate([prompt])

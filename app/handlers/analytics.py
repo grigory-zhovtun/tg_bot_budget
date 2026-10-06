@@ -14,7 +14,6 @@ from app.errors import user_message
 logger = logging.getLogger(__name__)
 
 CHUNK_SIZE = 4000  # лимит Telegram — 4096 символов
-CAPTIONS = ("📈 Расходы по категориям", "📊 Динамика по дням")
 
 Send = Callable[..., Awaitable[Message]]
 
@@ -51,10 +50,10 @@ async def send_markdown(send: Send, text: str) -> None:
             await send(chunk, parse_mode=None)
 
 
-async def _send_charts(send_photo: Send, charts: list[BytesIO]) -> None:
-    for index, chart in enumerate(charts):
+async def _send_charts(send_photo: Send, charts: list[tuple[str, BytesIO]]) -> None:
+    for caption, chart in charts:
         with chart:
-            await send_photo(photo=chart, caption=CAPTIONS[min(index, 1)])
+            await send_photo(photo=chart, caption=caption)
 
 
 async def _delete_quietly(message: Message) -> None:
@@ -67,7 +66,8 @@ async def _delete_quietly(message: Message) -> None:
 async def advice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handler for /advice command: AI analysis of the transaction history."""
     ai_service = context.bot_data.get("ai_service")
-    if not ai_service:
+    analytics_service = context.bot_data.get("analytics_service")
+    if not ai_service or not analytics_service:
         await update.message.reply_text("AI сервис не доступен.")
         return
 
@@ -75,7 +75,8 @@ async def advice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🤖 Анализирую ваши финансы... Это займет пару секунд."
     )
     try:
-        advice_text = await ai_service.analyze_finances()
+        numbers = await asyncio.to_thread(analytics_service.advice_context)
+        advice_text = await ai_service.analyze_finances(numbers)
     except Exception as e:
         logger.exception("Advice failed")
         await status_msg.edit_text(f"Произошла ошибка при анализе: {user_message(e)}")
