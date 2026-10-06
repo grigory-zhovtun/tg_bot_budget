@@ -20,6 +20,7 @@ from telegram.ext import (
 
 from app import config
 from app.auth import make_gatekeeper
+from app.errors import on_error
 from app.handlers import admin, analytics, common, messages, transactions
 from app.services.ai_service import GeminiService
 from app.services.analytics_service import AnalyticsService
@@ -118,6 +119,7 @@ def build_application(
     app.add_handler(MessageHandler(filters.PHOTO, messages.text_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, messages.document_handler))
 
+    app.add_error_handler(on_error)
     _schedule_daily_report(app)
     return app
 

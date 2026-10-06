@@ -21,6 +21,7 @@ from app.domain import (
     local_today,
     manual_row,
 )
+from app.errors import user_message
 from app.handlers.common import (
     clear_tracked_messages,
     show_main_menu,
@@ -192,7 +193,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.exception("AI parsing failed")
-        await update.effective_chat.send_message(f"Ошибка AI: {e}")
+        await update.effective_chat.send_message(f"Ошибка AI: {user_message(e)}")
     finally:
         if image_part is not None:
             image_part.close()
@@ -335,7 +336,9 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         logger.exception("Document processing failed")
-        await update.effective_chat.send_message(f"❌ Ошибка обработки файла: {e}")
+        await update.effective_chat.send_message(
+            f"❌ Ошибка обработки файла: {user_message(e)}"
+        )
 
 
 def _extract_text(path: Path, *, is_pdf: bool, is_excel: bool) -> str:
