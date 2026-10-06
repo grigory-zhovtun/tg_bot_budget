@@ -1,8 +1,12 @@
 import logging
-from collections.abc import Sequence
+import tempfile
+from collections.abc import AsyncIterator, Sequence
+from contextlib import asynccontextmanager
+from pathlib import Path
 
+import PIL.Image
 from pydantic import ValidationError
-from telegram import Message, Update
+from telegram import File, Message, Update
 from telegram.ext import ContextTypes
 
 from app import config
@@ -34,6 +38,25 @@ BALANCE_FORMULA = (
     " - "
     'СУММЕСЛИМН($D$2:D{r}; $H$2:H{r}; $H{r}; $G$2:G{r}; $G{r}; $B$2:B{r}; "<>💰 ДОХОДЫ")'
 )
+
+
+@asynccontextmanager
+async def _downloaded(file: File, suffix: str) -> AsyncIterator[Path]:
+    """Скачать файл Telegram во временную папку, которая удалится после блока.
+
+    Имя файла от пользователя в путь не попадает — только расширение.
+    """
+    with tempfile.TemporaryDirectory(prefix="tg-budget-") as folder:
+        path = Path(folder) / f"upload{suffix}"
+        await file.download_to_drive(path)
+        yield path
+
+
+def _load_image(path: Path) -> PIL.Image.Image:
+    """Прочитать картинку в память, чтобы файл можно было сразу удалить."""
+    image = PIL.Image.open(path)
+    image.load()
+    return image
 
 
 async def _delete_quietly(message: Message | None) -> None:
@@ -144,12 +167,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     image_part = None
     if is_photo:
         photo_file = await update.message.photo[-1].get_file()
-        file_path = f"/tmp/{photo_file.file_id}.jpg"
-        await photo_file.download_to_drive(file_path)
-
-        import PIL.Image
-
-        image_part = PIL.Image.open(file_path)
+        async with _downloaded(photo_file, ".jpg") as path:
+            image_part = _load_image(path)
 
     # Delete user's message (text/SMS/photo) to keep chat clean
     await _delete_quietly(update.message)
@@ -179,6 +198,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.exception("AI parsing failed")
         await update.effective_chat.send_message(f"Ошибка AI: {e}")
+    finally:
+        if image_part is not None:
+            image_part.close()
 
 
 def _to_rows(
@@ -274,7 +296,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not document:
         return
 
-    file_name = document.file_name.lower()
+    file_name = (document.file_name or "").lower()
     mime_type = document.mime_type or ""
 
     # Determine file type
@@ -303,49 +325,11 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     track_message(context, analyzing_msg)
 
     try:
-        # Download file
         file = await document.get_file()
-        file_path = f"/tmp/{document.file_id}_{file_name}"
-        await file.download_to_drive(file_path)
+        async with _downloaded(file, Path(file_name).suffix) as path:
+            extracted_text = _extract_text(path, is_pdf=is_pdf, is_excel=is_excel)
 
-        # Extract content based on file type
-        extracted_text = ""
-        image_part = None
-
-        if is_pdf:
-            # For PDF, pass directly to Gemini as image (it handles PDFs well)
-
-            try:
-                # Try to use pdf2image if available
-                from pdf2image import convert_from_path
-
-                images = convert_from_path(
-                    file_path, first_page=1, last_page=5
-                )  # Limit to first 5 pages
-                if images:
-                    image_part = images[0]  # Use first page as image
-                    extracted_text = "PDF document with transaction history"
-            except ImportError:
-                # Fallback: extract text with pypdf (PyPDF2 is abandoned, CVE-2023-36464)
-                from pypdf import PdfReader
-
-                reader = PdfReader(file_path)
-                for page in reader.pages[:10]:  # Limit to 10 pages
-                    extracted_text += page.extract_text() or ""
-
-        elif is_excel:
-            import pandas as pd
-
-            df = pd.read_excel(file_path)
-            extracted_text = df.head(500).to_string()  # Limit rows
-
-        elif is_csv:
-            import pandas as pd
-
-            df = pd.read_csv(file_path)
-            extracted_text = df.head(500).to_string()
-
-        if not extracted_text and not image_part:
+        if not extracted_text.strip():
             await update.effective_chat.send_message(
                 "❌ Не удалось извлечь данные из файла."
             )
@@ -353,8 +337,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         catalog = _catalog(context)
         result = await ai_service.parse_transaction(
-            user_input=extracted_text or "Document with transactions",
-            image_part=image_part,
+            user_input=extracted_text,
             known_categories=catalog.categories,
             known_sources=catalog.sources,
             known_subcategories=catalog.subcategories,
@@ -366,3 +349,17 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.exception("Document processing failed")
         await update.effective_chat.send_message(f"❌ Ошибка обработки файла: {e}")
+
+
+def _extract_text(path: Path, *, is_pdf: bool, is_excel: bool) -> str:
+    """Текст документа для AI: PDF — первые 10 страниц, таблицы — 500 строк."""
+    if is_pdf:
+        from pypdf import PdfReader  # PyPDF2 заброшен, CVE-2023-36464
+
+        reader = PdfReader(path)
+        return "".join(page.extract_text() or "" for page in reader.pages[:10])
+
+    import pandas as pd
+
+    frame = pd.read_excel(path) if is_excel else pd.read_csv(path)
+    return frame.head(500).to_string()
