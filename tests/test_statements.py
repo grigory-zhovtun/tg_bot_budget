@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import pytest
 
 from app import statements as st
-from app.domain import Catalog
+from app.domain import Catalog, MerchantBook, merchant_core
 
 SOURCES = ["VISA 9120 UZS", "UZCARD 5837 UZS", "HUMO 6845 UZS", "VISA 4058 USD"]
 CATALOG = Catalog(
@@ -159,27 +159,25 @@ def test_merge_statements_drops_repeated_operations() -> None:
 
 # --- категории ------------------------------------------------------------------
 
-BOOK = st.MerchantBook(
-    st.fact_rows(
-        fact_values(
-            [
-                46000,
-                "🏚️ ДОМ",
-                "продукты",
-                1,
-                "",
-                "AI: Ip Ooo Anglesey Food",
-                "UZS",
-                "X",
-            ],
-            [46001, "🍔 ЕДА", "кофе", 1, "", "AI: Ooo Shavi Cafe", "UZS", "X"],
-            [46002, "🍔 ЕДА", "кафе", 1, "", "AI: Pie Point Mchdj", "UZS", "X"],
-            [46003, "🏚️ ДОМ", "инвентарь", 1, "", "AI: Yandex.go", "UZS", "X"],
-            [46004, "🍔 ЕДА", "кафе", 1, "", "AI: Yandex Lavka", "UZS", "X"],
-            [46005, "🏚️ ДОМ", "продукты", 1, "", "AI: Havas Food", "UZS", "X"],
-            [46006, "🏚️ ДОМ", "продукты", 1, "", "AI: Havas Market", "UZS", "X"],
-            [46007, "🍔 ЕДА", "кофе", 1, "", "AI: без мерчанта (QR/Payme)", "UZS", "X"],
-        )
+BOOK = MerchantBook.from_sheet(
+    fact_values(
+        [
+            46000,
+            "🏚️ ДОМ",
+            "продукты",
+            1,
+            "",
+            "AI: Ip Ooo Anglesey Food",
+            "UZS",
+            "X",
+        ],
+        [46001, "🍔 ЕДА", "кофе", 1, "", "AI: Ooo Shavi Cafe", "UZS", "X"],
+        [46002, "🍔 ЕДА", "кафе", 1, "", "AI: Pie Point Mchdj", "UZS", "X"],
+        [46003, "🏚️ ДОМ", "инвентарь", 1, "", "AI: Yandex.go", "UZS", "X"],
+        [46004, "🍔 ЕДА", "кафе", 1, "", "AI: Yandex Lavka", "UZS", "X"],
+        [46005, "🏚️ ДОМ", "продукты", 1, "", "AI: Havas Food", "UZS", "X"],
+        [46006, "🏚️ ДОМ", "продукты", 1, "", "AI: Havas Market", "UZS", "X"],
+        [46007, "🍔 ЕДА", "кофе", 1, "", "AI: без мерчанта (QR/Payme)", "UZS", "X"],
     )
 )
 
@@ -207,8 +205,8 @@ def test_title_matches_existing_rows() -> None:
 
 
 def test_merchant_core() -> None:
-    assert st.merchant_core("Markthof MCHJ QK") == "MARKTHOF"
-    assert st.merchant_core("Transit 30750615172966") == "TRANSIT"
+    assert merchant_core("Markthof MCHJ QK") == "MARKTHOF"
+    assert merchant_core("Transit 30750615172966") == "TRANSIT"
 
 
 @pytest.mark.parametrize(

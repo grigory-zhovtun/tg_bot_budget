@@ -8,9 +8,12 @@
 """
 
 import re
+from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from enum import StrEnum
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -218,6 +221,63 @@ def merchant_key(comment: str) -> str | None:
     text = re.split(r"[;(,]| ≈ ", text, maxsplit=1)[0]
     text = re.sub(r"\s+", " ", text).strip().upper()[:40]
     return text if len(text) >= 3 and not text.isdigit() else None
+
+
+# Организационно-правовые формы и служебные слова в названиях магазинов
+LEGAL_WORDS = frozenset(
+    "OOO ООО MCHJ MCHDJ QK XK IP ИП ЧП CHP YATT YTT LLC LTD PTE CO INC AJ AO SP THE".split()
+)
+
+
+def merchant_core(name: str) -> str:
+    """«Markthof MCHJ QK» → «MARKTHOF», «Transit 3075061…» → «TRANSIT»."""
+    words = re.sub(r"[^0-9A-ZА-ЯЁ]+", " ", name.upper()).split()
+    return " ".join(w for w in words if w not in LEGAL_WORDS and not w.isdigit())
+
+
+class MerchantBook:
+    """Как владелец раньше разносил магазины в fact (свежие строки важнее).
+
+    entries — (категория, подкатегория, комментарий) от старых строк к новым.
+    Магазин ищется по точному имени, по имени без правовой формы и по первому
+    слову, если все такие магазины в одной категории.
+    """
+
+    def __init__(self, entries: Iterable[tuple[str, str, str]]) -> None:
+        self.exact: dict[str, tuple[str, str]] = {}
+        self.core: dict[str, tuple[str, str]] = {}
+        self.first: dict[str, set[tuple[str, str]]] = defaultdict(set)
+        for category, subcategory, comment in reversed(list(entries)):
+            key = merchant_key(comment)
+            if not key or not category or not subcategory:
+                continue
+            target = (category, subcategory)
+            self.exact.setdefault(key, target)
+            if core := merchant_core(key):
+                self.core.setdefault(core, target)
+                self.first[core.split()[0]].add(target)
+
+    @classmethod
+    def from_sheet(cls, rows: list[list[Any]]) -> "MerchantBook":
+        """Лист fact как есть (первая строка — заголовок): B, C и комментарий F."""
+        cells = (list(row[:6]) + [""] * (6 - len(row[:6])) for row in rows[1:])
+        return cls((str(c[1]).strip(), str(c[2]).strip(), str(c[5])) for c in cells)
+
+    def find(self, name: str) -> tuple[str, str] | None:
+        key = merchant_key(name)
+        if not key:
+            return None
+        if key in self.exact:
+            return self.exact[key]
+        core = merchant_core(key)
+        if not core:
+            return None
+        if core in self.core:
+            return self.core[core]
+        word = core.split()[0]
+        targets = self.first.get(word, set())
+        # по первому слову — только если все такие магазины в одной категории
+        return next(iter(targets)) if len(word) >= 4 and len(targets) == 1 else None
 
 
 def resolve_source(

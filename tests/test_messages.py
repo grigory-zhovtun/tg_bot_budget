@@ -347,3 +347,55 @@ async def test_undo_keeps_rows_changed_in_the_sheet() -> None:
     await undo.undo(command, context)
     assert "уже изменились" in command.message.reply_text.await_args.args[0]
     assert "last_write" not in context.user_data
+
+
+# Символы, которые выглядят как пробел: сообщение из них Telegram считает пустым
+INVISIBLE = "ㅤ⠀​‌‍⁠﻿"
+
+
+def visible(text: str) -> bool:
+    return bool(text.strip(" \n\t" + INVISIBLE))
+
+
+async def test_source_button_confirms_the_card_and_shows_categories() -> None:
+    update, context, _ = make_chat("VISA 9120 UZS", {})
+    await messages.text_handler(update, context)
+
+    first, second = update.effective_chat.send_message.await_args_list
+    assert first.args[0] == "💳 VISA 9120 UZS"
+    assert second.args[0] == "Категория:"
+    assert context.user_data["source"] == "VISA 9120 UZS"
+    keyboard = first.kwargs["reply_markup"].keyboard
+    assert any(button.text == "✅ VISA 9120 UZS" for row in keyboard for button in row)
+
+
+async def test_back_without_a_card_asks_to_choose_one() -> None:
+    update, context, _ = make_chat("⬅️ Назад", {})
+    await messages.text_handler(update, context)
+    [call] = update.effective_chat.send_message.await_args_list
+    assert call.args[0] == "Выберите карту:"
+
+
+@pytest.mark.parametrize(
+    ("user_data", "expected"),
+    [({"source": "UZCARD 5837 UZS"}, "💳 UZCARD 5837 UZS"), ({}, "Выберите карту:")],
+)
+async def test_menu_without_a_summary_still_has_text(
+    user_data: dict[str, Any], expected: str
+) -> None:
+    from app.handlers.common import show_main_menu
+
+    update, context, _ = make_chat("", user_data)
+    await show_main_menu(update, context)
+    assert update.effective_message.reply_text.await_args_list[0].args[0] == expected
+
+
+def test_no_invisible_message_texts_in_the_code() -> None:
+    """«ㅤ» вместо текста: Telegram отвечает Message_empty и кнопка молчит."""
+    from pathlib import Path
+
+    for path in Path("app").rglob("*.py"):
+        source = path.read_text(encoding="utf-8")
+        found = [hex(ord(ch)) for ch in INVISIBLE if ch in source]
+        assert not found, f"{path}: {found}"
+    assert not visible("ㅤ") and visible("💳 VISA 9120 UZS")
