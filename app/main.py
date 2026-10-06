@@ -1,24 +1,30 @@
 import logging
 import sys
-import asyncio
-from datetime import datetime, time
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from telegram.ext import (
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    filters,
+)
+
 from app import config
-from app.services.google_sheets import GoogleSheetsService
+from app.handlers import admin, analytics, common, messages, transactions
 from app.services.analytics_service import AnalyticsService
-from app.handlers import common, admin, transactions, messages, analytics
+from app.services.google_sheets import GoogleSheetsService
 
 # Setup Logging
 logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
 # Scheduler for daily reports
 scheduler = AsyncIOScheduler()
+
 
 def main():
     if not config.TELEGRAM_TOKEN:
@@ -32,20 +38,24 @@ def main():
     except Exception as e:
         logger.critical(f"Failed to initialize Google Sheets Service: {e}")
         # We might want to exit or let it run with empty data (waiting for reboot)
-        logger.warning("Starting bot with empty data. Please fix credentials and /reboot.")
-        gs_service = None # Logic should handle None?
+        logger.warning(
+            "Starting bot with empty data. Please fix credentials and /reboot."
+        )
+        gs_service = None  # Logic should handle None?
         sys.exit(1)
 
     # Build App
     app_builder = ApplicationBuilder().token(config.TELEGRAM_TOKEN)
-    
+
     async def post_init(application):
-        await application.bot.set_my_commands([
-            ("start", "Начать работу 🚀"),
-            ("analytics", "Аналитика за 3 дня 📊"),
-            ("advice", "Финансовый совет 🧠"),
-            ("reboot", "Обновить настройки 🔄")
-        ])
+        await application.bot.set_my_commands(
+            [
+                ("start", "Начать работу 🚀"),
+                ("analytics", "Аналитика за 3 дня 📊"),
+                ("advice", "Финансовый совет 🧠"),
+                ("reboot", "Обновить настройки 🔄"),
+            ]
+        )
 
     app = app_builder.post_init(post_init).build()
 
@@ -54,9 +64,10 @@ def main():
     app.bot_data["categories"] = categories
     app.bot_data["subcategories"] = subcategories
     app.bot_data["sources"] = sources
-    
+
     # AI Service
     from app.services.ai_service import GeminiService
+
     ai_service = GeminiService(gs_service)
     app.bot_data["ai_service"] = ai_service
 
@@ -69,16 +80,17 @@ def main():
         logger.info("AI Service enabled.")
     logger.info("Analytics Service enabled.")
 
-
     # Handlers
     app.add_handler(CommandHandler("start", common.start))
     app.add_handler(CommandHandler("reboot", admin.reboot))
     app.add_handler(CommandHandler("advice", analytics.advice_command))
     app.add_handler(CommandHandler("analytics", analytics.analytics_command))
-    
+
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
     # Text, Photo, and Document handlers
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, messages.text_handler))
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, messages.text_handler)
+    )
     app.add_handler(MessageHandler(filters.PHOTO, messages.text_handler))
     app.add_handler(MessageHandler(filters.Document.ALL, messages.document_handler))
 
@@ -86,7 +98,7 @@ def main():
     if config.ANALYTICS_CHAT_ID:
         try:
             # Parse time from config (format: "HH:MM")
-            hour, minute = map(int, config.ANALYTICS_TIME.split(':'))
+            hour, minute = map(int, config.ANALYTICS_TIME.split(":"))
 
             async def scheduled_analytics_job():
                 """Job to send daily analytics."""
@@ -94,7 +106,7 @@ def main():
                     await analytics.send_daily_analytics(
                         bot=app.bot,
                         chat_id=int(config.ANALYTICS_CHAT_ID),
-                        analytics_service=analytics_service
+                        analytics_service=analytics_service,
                     )
                 except Exception as e:
                     logger.error(f"Scheduled analytics job failed: {e}")
@@ -102,13 +114,17 @@ def main():
             # Add job to scheduler - runs daily at specified time
             scheduler.add_job(
                 scheduled_analytics_job,
-                CronTrigger(hour=hour, minute=minute, timezone=config.ANALYTICS_TIMEZONE),
-                id='daily_analytics',
-                replace_existing=True
+                CronTrigger(
+                    hour=hour, minute=minute, timezone=config.ANALYTICS_TIMEZONE
+                ),
+                id="daily_analytics",
+                replace_existing=True,
             )
 
             scheduler.start()
-            logger.info(f"Daily analytics scheduled for {config.ANALYTICS_TIME} ({config.ANALYTICS_TIMEZONE})")
+            logger.info(
+                f"Daily analytics scheduled for {config.ANALYTICS_TIME} ({config.ANALYTICS_TIMEZONE})"
+            )
 
         except Exception as e:
             logger.error(f"Failed to setup analytics scheduler: {e}")
@@ -122,7 +138,9 @@ def main():
     else:
         # Webhook mode
         if not config.WEBHOOK_URL:
-            logger.warning("WEBHOOK_URL not set in production. Falling back to polling.")
+            logger.warning(
+                "WEBHOOK_URL not set in production. Falling back to polling."
+            )
             app.run_polling()
         else:
             logger.info(f"Starting webhook on port {config.PORT}...")
@@ -130,8 +148,9 @@ def main():
                 listen="0.0.0.0",
                 port=config.PORT,
                 url_path=config.TELEGRAM_TOKEN,
-                webhook_url=f"{config.WEBHOOK_URL}/{config.TELEGRAM_TOKEN}"
+                webhook_url=f"{config.WEBHOOK_URL}/{config.TELEGRAM_TOKEN}",
             )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

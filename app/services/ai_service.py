@@ -1,11 +1,14 @@
-import google.generativeai as genai
-import logging
 import json
-from typing import List, Dict, Optional, Any
+import logging
+from typing import Any
+
+import google.generativeai as genai
+
 from app import config
 from app.services.google_sheets import GoogleSheetsService
 
 logger = logging.getLogger(__name__)
+
 
 class GeminiService:
     def __init__(self, gs_service: GoogleSheetsService):
@@ -15,9 +18,9 @@ class GeminiService:
     def _setup_client(self):
         if config.GEMINI_API_KEY:
             genai.configure(api_key=config.GEMINI_API_KEY)
-            
+
             # Based on logs, 'gemini-flash-latest' is available and safe.
-            self.model = genai.GenerativeModel('gemini-flash-latest') 
+            self.model = genai.GenerativeModel("gemini-flash-latest")
             logger.info("Gemini AI client configured with 'gemini-flash-latest'.")
         else:
             logger.warning("GEMINI_API_KEY not found. AI features will be disabled.")
@@ -29,7 +32,7 @@ class GeminiService:
         Returns a formatted string for the prompt.
         """
         try:
-            # We need to access the sheet directly. 
+            # We need to access the sheet directly.
             # Assuming gs_service has a method or we access client.
             # Ideally GS service should expose 'get_recent_rows'.
             # For now, we will use the internal sheet object if available or add a method to GS service.
@@ -37,16 +40,17 @@ class GeminiService:
             # Better: use gs_service.sheet.worksheet(config.FACT_SHEET_NAME).get_all_values()
             # But that pulls ALL rows. Inefficient for large history.
             # We'll do it for now or assume recent rows.
-            
+
             # Use the robust service method with retry logic
             all_values = self.gs_service.get_all_records(config.FACT_SHEET_NAME)
-            headers = all_values[0]
             # Assuming standard columns: Date, Category, Subcategory, Amount, ..., Comment, ...
             # We want Date, Category, Subcat, Amount, Comment, Source
-            
+
             # Take last 'limit' rows
-            recent_rows = all_values[-limit:] if len(all_values) > limit else all_values[1:]
-            
+            recent_rows = (
+                all_values[-limit:] if len(all_values) > limit else all_values[1:]
+            )
+
             context_str = "History of recent user transactions (Format: Date | Category | Subcategory | Amount | Comment | Source):\n"
             for row in recent_rows:
                 # Safe index access
@@ -62,51 +66,60 @@ class GeminiService:
                     context_str += f"{d} | {c} | {s} | {a} | {cmt} | {src}\n"
                 except IndexError:
                     continue
-            
+
             return context_str
-            
+
         except Exception as e:
             logger.error(f"Failed to fetch history context: {e}")
             return "No history available."
 
-    async def parse_transaction(self, user_input: str, image_part: Any = None, known_categories: List[str] = [], known_sources: List[str] = []) -> Dict[str, Any]:
+    async def parse_transaction(
+        self,
+        user_input: str,
+        image_part: Any = None,
+        known_categories: list[str] | None = None,
+        known_sources: list[str] | None = None,
+    ) -> dict[str, Any]:
         """
         Parses text or image input using Gemini to extract transaction details.
         """
         if not self.model:
             raise ValueError("AI Service not configured (missing API Key).")
+        known_categories = known_categories or []
+        known_sources = known_sources or []
 
         # Increase context to 5000 transactions as requested.
         # Gemini 1.5 Flash (1M tokens) can easily handle this (~100k-150k tokens).
         history_context = self.get_history_context(limit=5000)
-        
+
         cats_str = ", ".join(known_categories)
         sources_str = ", ".join(known_sources)
 
         # Get today's date for fallback
         from datetime import datetime
-        today_str = datetime.now().strftime('%d.%m.%Y')
+
+        today_str = datetime.now().strftime("%d.%m.%Y")
 
         prompt_parts = [
-            f"You are a personal finance assistant. Analyze the input and extract transaction details.",
+            "You are a personal finance assistant. Analyze the input and extract transaction details.",
             f"Allowed Categories: {cats_str}",
             f"Allowed Sources: {sources_str}",
             f"\nCONTEXT (User's habits):\n{history_context}\n",
-            f"INSTRUCTION:",
-            f"1. Extract: Amount (float, ALWAYS POSITIVE), Currency (ISO code if found, else null), Date (DD.MM.YYYY), Category, Subcategory, Comment, Source.",
-            f"2. Use the History Context to predict the Category and Subcategory based on the Comment/Merchant name.",
-            f"3. IMPORTANT: The 'Comment' field MUST contain the Merchant Name, Sender Name, or the raw description of the transaction (e.g. 'IP IVANOV', 'Uber', 'Vkusvill'). Do NOT leave it empty if there is any text identifier.",
-            f"4. If Source is not explicitly mentioned in input, try to infer it from context, otherwise return null.",
+            "INSTRUCTION:",
+            "1. Extract: Amount (float, ALWAYS POSITIVE), Currency (ISO code if found, else null), Date (DD.MM.YYYY), Category, Subcategory, Comment, Source.",
+            "2. Use the History Context to predict the Category and Subcategory based on the Comment/Merchant name.",
+            "3. IMPORTANT: The 'Comment' field MUST contain the Merchant Name, Sender Name, or the raw description of the transaction (e.g. 'IP IVANOV', 'Uber', 'Vkusvill'). Do NOT leave it empty if there is any text identifier.",
+            "4. If Source is not explicitly mentioned in input, try to infer it from context, otherwise return null.",
             f"5. DATE EXTRACTION (CRITICAL): Look carefully for the transaction date on receipts, bank statements, screenshots. Extract the ACTUAL date shown (formats: DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, 'January 15, 2025', etc). Convert to DD.MM.YYYY format. Only use today's date ({today_str}) if NO date is visible anywhere in the input.",
-            f"6. AMOUNT (CRITICAL): Always return POSITIVE amount. If the receipt/statement shows negative number (e.g. -1500, -$50), remove the minus sign and return positive value (1500, 50). Expenses are recorded as positive numbers.",
-            f"7. BALANCE EXTRACTION (ONLY IF EXPLICITLY PRESENT): Extract 'balance' (float) and 'card_identifier' (last 4 digits) ONLY if the input explicitly contains balance/remaining amount keywords like: 'Остаток', 'Ostatok', 'Balance', 'Баланс', 'Available', 'Доступно', 'Qoldiq'. If NO such keywords found - return null for both fields. NEVER guess or calculate balance.",
-            f"8. Return ONLY valid JSON. No markdown formatting.",
-            f"9. If input contains MULTIPLE transactions, return a JSON ARRAY of objects. If single transaction, return a single object.",
-            f"JSON Schema for single: {{'amount': float, 'currency': str, 'date': str, 'category': str, 'subcategory': str, 'comment': str, 'source': str, 'balance': float|null, 'card_identifier': str|null}}",
-            f"JSON Schema for multiple: [{{'amount': float, ...}}, {{'amount': float, ...}}]",
-            f"\nINPUT: {user_input}"
+            "6. AMOUNT (CRITICAL): Always return POSITIVE amount. If the receipt/statement shows negative number (e.g. -1500, -$50), remove the minus sign and return positive value (1500, 50). Expenses are recorded as positive numbers.",
+            "7. BALANCE EXTRACTION (ONLY IF EXPLICITLY PRESENT): Extract 'balance' (float) and 'card_identifier' (last 4 digits) ONLY if the input explicitly contains balance/remaining amount keywords like: 'Остаток', 'Ostatok', 'Balance', 'Баланс', 'Available', 'Доступно', 'Qoldiq'. If NO such keywords found - return null for both fields. NEVER guess or calculate balance.",
+            "8. Return ONLY valid JSON. No markdown formatting.",
+            "9. If input contains MULTIPLE transactions, return a JSON ARRAY of objects. If single transaction, return a single object.",
+            "JSON Schema for single: {'amount': float, 'currency': str, 'date': str, 'category': str, 'subcategory': str, 'comment': str, 'source': str, 'balance': float|null, 'card_identifier': str|null}",
+            "JSON Schema for multiple: [{'amount': float, ...}, {'amount': float, ...}]",
+            f"\nINPUT: {user_input}",
         ]
-        
+
         content = prompt_parts
         if image_part:
             content.append(image_part)
@@ -127,7 +140,7 @@ class GeminiService:
                     text_resp = text_resp.strip()
                     while pos < len(text_resp):
                         # Skip whitespace
-                        while pos < len(text_resp) and text_resp[pos] in ' \t\n\r':
+                        while pos < len(text_resp) and text_resp[pos] in " \t\n\r":
                             pos += 1
                         if pos >= len(text_resp):
                             break
@@ -149,8 +162,8 @@ class GeminiService:
             logger.error(f"Gemini API Error: {e}")
             # Identify if it was a safety block or parsing error
             if "safety" in str(e).lower():
-                raise ValueError("AI blocked the content for safety reasons.")
-            raise ValueError(f"Could not understand transaction: {e}")
+                raise ValueError("AI blocked the content for safety reasons.") from e
+            raise ValueError(f"Could not understand transaction: {e}") from e
 
     async def analyze_finances(self, custom_context: str = None) -> str:
         """
@@ -160,27 +173,45 @@ class GeminiService:
             raise ValueError("AI Service not configured.")
 
         # 1. Fetch History (Fact)
-        context = custom_context if custom_context else self.get_history_context(limit=2000)
-        
+        context = (
+            custom_context if custom_context else self.get_history_context(limit=2000)
+        )
+
         # 2. Fetch Budget (Plan)
         # Format: "Dec 25" (English Month + Year)
         import datetime
+
         now = datetime.datetime.now()
         # English month names mapping
-        months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        months = [
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ]
         current_month_sheet = f"{months[now.month - 1]} {now.strftime('%y')}"
-        
+
         budget_data = "No budget sheet found for this month."
         try:
             budget_rows = self.gs_service.get_all_records(current_month_sheet)
             if budget_rows:
                 # Convert rows to string representation
-                budget_data = "\n".join([str(row) for row in budget_rows[:50]]) # Limit to first 50 rows of budget to save tokens
+                budget_data = "\n".join(
+                    [str(row) for row in budget_rows[:50]]
+                )  # Limit to first 50 rows of budget to save tokens
             else:
-                 budget_data = "Budget sheet exists but is empty."
+                budget_data = "Budget sheet exists but is empty."
         except Exception:
-             # It's okay if the sheet doesn't exist, we just note it.
-             pass
+            # It's okay if the sheet doesn't exist, we just note it.
+            pass
 
         prompt = [
             "You are a strict and concise financial analyst.",
@@ -196,13 +227,13 @@ class GeminiService:
             "- Max 300 words total. STRICTLY.",
             "- Simple, clear Russian language.",
             "- Structure: '📊 Анализ', '⚠️ Перерасход', '🔮 Прогноз', '💡 Совет'.",
-            "- No intro/outro fluff."
+            "- No intro/outro fluff.",
         ]
-        
+
         try:
             response = self.model.generate_content(prompt)
             text = response.text
-             # Enforce hard length limit if AI hallucinates long text
+            # Enforce hard length limit if AI hallucinates long text
             if len(text) > 4000:
                 text = text[:3900] + "..."
             return text

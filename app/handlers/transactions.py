@@ -1,57 +1,70 @@
+import logging
+
 from telegram import Update
 from telegram.ext import ContextTypes
-import logging
-from app import config
-from app.handlers.common import get_currency_from_source, track_message
-from app.utils.keyboards import generate_subcategories_keyboard, generate_categories_keyboard, generate_sources_keyboard
+
+from app.handlers.common import track_message
+from app.utils.keyboards import (
+    generate_categories_keyboard,
+    generate_sources_keyboard,
+    generate_subcategories_keyboard,
+)
 
 logger = logging.getLogger(__name__)
 
-async def transaction_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+async def transaction_button_handler(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     """Handles callback queries from inline keyboards."""
     query = update.callback_query
     await query.answer()
     data = query.data
 
     # User state
-    selected_source = context.user_data.get('source')
-    derived_currency = get_currency_from_source(selected_source)
+    selected_source = context.user_data.get("source")
 
     if data.startswith("cat_"):
         selected_category = data[4:]
-        context.user_data['category'] = selected_category
+        context.user_data["category"] = selected_category
 
         if not selected_source:
             if query.message:
                 msg = await query.message.reply_text(
                     text="⚠️ Выберите источник",
-                    reply_markup=generate_sources_keyboard(context.bot_data.get("sources", []))
+                    reply_markup=generate_sources_keyboard(
+                        context.bot_data.get("sources", [])
+                    ),
                 )
                 track_message(context, msg)
             return
 
         subcategories = context.bot_data.get("subcategories", {})
         await query.edit_message_text(
-            text=f"Подкатегория:",
-            reply_markup=generate_subcategories_keyboard(subcategories, selected_category)
+            text="Подкатегория:",
+            reply_markup=generate_subcategories_keyboard(
+                subcategories, selected_category
+            ),
         )
 
     elif data in ["back_to_categories"]:
-        context.user_data.pop('category', None)
-        context.user_data.pop('subcategory', None)
+        context.user_data.pop("category", None)
+        context.user_data.pop("subcategory", None)
 
         await query.edit_message_text(
             text="Категория:",
-            reply_markup=generate_categories_keyboard(context.bot_data.get("categories", []))
+            reply_markup=generate_categories_keyboard(
+                context.bot_data.get("categories", [])
+            ),
         )
 
     elif data.startswith("sub_"):
         subcategory_name = data[4:]
-        context.user_data['subcategory'] = subcategory_name
-        category = context.user_data.get('category', '')
+        context.user_data["subcategory"] = subcategory_name
+        category = context.user_data.get("category", "")
 
         subcategories = context.bot_data.get("subcategories", {})
         await query.edit_message_text(
-            text=f"Сумма:",
-            reply_markup=generate_subcategories_keyboard(subcategories, category)
+            text="Сумма:",
+            reply_markup=generate_subcategories_keyboard(subcategories, category),
         )
