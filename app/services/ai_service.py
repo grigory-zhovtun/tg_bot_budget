@@ -6,6 +6,7 @@ import logging
 import time
 from typing import Any, Literal
 
+import httpx
 from google import genai
 from google.genai import errors, types
 from pydantic import BaseModel, TypeAdapter, ValidationError
@@ -25,13 +26,16 @@ logger = logging.getLogger(__name__)
 HINTS_TTL_SECONDS = 30 * 60
 MAX_HINTS = 300
 SELF_CHECK_SMS = "Pokupka: TEST CAFE, 1000.00 UZS, 01.10.2026 12:00, karta *0000"
-# Перегрузка и временные сбои Gemini: два коротких повтора, затем запасная модель.
-# Длинные повторы держали пользователя без ответа почти минуту.
+# Перегрузка и временные сбои Gemini: один короткий повтор, затем запасная модель.
+# Перегруженная модель держала запрос до таймаута (было 120 с), и пользователь
+# ждал ответа на SMS около двух минут.
 OVERLOADED = frozenset({429, 500, 503, 504})
+TRANSIENT = (httpx.TimeoutException, httpx.ConnectError)  # SDK повторяет и их
 RETRY = types.HttpRetryOptions(
-    attempts=3, initial_delay=1.0, max_delay=8.0, http_status_codes=sorted(OVERLOADED)
+    attempts=2, initial_delay=1.0, max_delay=4.0, http_status_codes=sorted(OVERLOADED)
 )
-TIMEOUT_MS = 120_000
+TEXT_TIMEOUT_MS = 30_000  # SMS и текст: обычный ответ — 2–5 с
+FILE_TIMEOUT_MS = 90_000  # фото и PDF модель читает дольше
 MAX_MERCHANTS = 60  # магазинов в одном запросе на раскладку
 # Нам не нужны вызовы функций: без этого SDK пишет в лог предупреждение об AFC
 NO_AFC = types.AutomaticFunctionCallingConfig(disable=True)
@@ -168,7 +172,9 @@ class GeminiService:
         self.client = (
             genai.Client(
                 api_key=config.GEMINI_API_KEY,
-                http_options=types.HttpOptions(retry_options=RETRY, timeout=TIMEOUT_MS),
+                http_options=types.HttpOptions(
+                    retry_options=RETRY, timeout=FILE_TIMEOUT_MS
+                ),
             )
             if config.GEMINI_API_KEY
             else None
@@ -196,20 +202,26 @@ class GeminiService:
         return hints
 
     async def _generate(
-        self, contents: list[Any], schema: dict[str, Any] | None = None
+        self,
+        contents: list[Any],
+        schema: dict[str, Any] | None = None,
+        timeout_ms: int = TEXT_TIMEOUT_MS,
     ) -> types.GenerateContentResponse:
+        """Запрос к Gemini; при перегрузке или таймауте — следующая модель списка."""
         if self.client is None:
             raise ValueError("AI сервис не настроен (нет GEMINI_API_KEY)")
         config_args: dict[str, Any] = {
             "temperature": 0,
             "automatic_function_calling": NO_AFC,
+            # таймаут уходит и серверу (X-Server-Timeout): он не держит запрос дольше
+            "http_options": types.HttpOptions(timeout=timeout_ms),
         }
         if schema is not None:
             config_args |= {
                 "response_mime_type": "application/json",
                 "response_json_schema": schema,
             }
-        last_error: errors.APIError | None = None
+        last_error: Exception | None = None
         for model in self.models:
             try:
                 return await self.client.aio.models.generate_content(
@@ -221,6 +233,11 @@ class GeminiService:
                 if error.code not in OVERLOADED:
                     raise
                 logger.warning("Gemini %s unavailable (%s)", model, error.code)
+                last_error = error
+            except TRANSIENT as error:
+                logger.warning(
+                    "Gemini %s did not answer: %s", model, type(error).__name__
+                )
                 last_error = error
         raise last_error
 
@@ -251,7 +268,11 @@ class GeminiService:
                 )
             )
 
-        response = await self._generate(contents, RESPONSE_SCHEMA)
+        response = await self._generate(
+            contents,
+            RESPONSE_SCHEMA,
+            FILE_TIMEOUT_MS if attachment else TEXT_TIMEOUT_MS,
+        )
         if not response.text:
             raise ValueError("Gemini не вернул ответ (пустой ответ или фильтр)")
         data = json.loads(response.text)
@@ -276,11 +297,14 @@ class GeminiService:
             )
         except errors.APIError as error:
             if error.code in OVERLOADED:
+                # не ошибка бота: модели перегружены, запросы пользователя повторятся
                 logger.warning(
-                    "Gemini self-check: overloaded (%s), will retry", error.code
+                    "Gemini self-check: all models overloaded (%s)", error.code
                 )
             else:
                 logger.exception("Gemini self-check failed")
+        except TRANSIENT as error:
+            logger.warning("Gemini self-check: no answer (%s)", type(error).__name__)
         except Exception:
             logger.exception("Gemini self-check failed")
 
