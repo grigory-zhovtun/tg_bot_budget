@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from google.genai import errors, types
 
@@ -300,3 +301,41 @@ async def test_automatic_function_calling_is_off() -> None:
     await service.parse_transaction("1")
     config: types.GenerateContentConfig = models.calls[0]["config"]
     assert config.automatic_function_calling.disable is True
+
+
+async def test_request_timeout_is_short_for_text_and_longer_for_files() -> None:
+    service, models, _ = make_service("[]")
+    await service.parse_transaction("Pokupka 48000 UZS")
+    await service.parse_transaction(
+        "фото", attachment=b"\xff\xd8", mime_type="image/jpeg"
+    )
+    timeouts = [call["config"].http_options.timeout for call in models.calls]
+    assert timeouts == [ai_service.TEXT_TIMEOUT_MS, ai_service.FILE_TIMEOUT_MS]
+    assert ai_service.TEXT_TIMEOUT_MS <= 30_000
+
+
+async def test_timeout_falls_back_to_the_next_model() -> None:
+    models = FlakyModels([httpx.ReadTimeout("no answer")])
+    assert await with_models(models).parse_transaction("1") == []
+    assert [call["model"] for call in models.calls] == [
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest",
+    ]
+
+
+async def test_all_models_silent_gives_a_clear_message(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from app.errors import user_message
+
+    models = FlakyModels([httpx.ReadTimeout("a"), httpx.ConnectError("b")])
+    with pytest.raises(httpx.ConnectError):
+        await with_models(models).parse_transaction("1")
+    assert user_message(httpx.ReadTimeout("x")) == (
+        "Gemini не ответил вовремя, попробуйте ещё раз"
+    )
+
+    models = FlakyModels([httpx.ReadTimeout("a"), httpx.ReadTimeout("b")])
+    await with_models(models).self_check()
+    assert [r.levelname for r in caplog.records].count("ERROR") == 0
+    assert "Gemini self-check: no answer (ReadTimeout)" in caplog.text
