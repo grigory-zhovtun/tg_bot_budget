@@ -44,7 +44,9 @@ DEFAULT_CURRENCY = "UZS"
 FALLBACK_CURRENCY = "XXX"
 
 # Webhook (for Render/Production)
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+# Render задаёт RENDER_EXTERNAL_URL только web-сервисам; у воркера его нет → polling
+WEBHOOK_URL = os.getenv("WEBHOOK_URL") or os.getenv("RENDER_EXTERNAL_URL")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 PORT = int(os.getenv("PORT", "8443"))
 LOCAL_RUN = os.getenv("LOCAL_RUN", "False").lower() == "true"
 
