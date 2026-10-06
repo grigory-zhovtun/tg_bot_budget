@@ -562,7 +562,10 @@ def categorize(
             continue
         if match := MERCHANT.search(det):
             name = re.sub(r"\s+", " ", match.group(1)).strip()
-            if known := book.find(name):
+            known = book.find(name)
+            if known and known[0] == INCOME_GROUP:
+                known = None  # покупка не бывает доходом, даже если так было в истории
+            if known:
                 add(txn, known, title(name), flow)
             elif suggested := ai_categories.get(name):
                 add(txn, suggested, title(name), flow, "категория от AI")

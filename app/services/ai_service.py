@@ -15,6 +15,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from app import config
 from app.domain import (
     FALLBACK_CATEGORY,
+    INCOME_GROUP,
     Catalog,
     MerchantBook,
     local_today,
@@ -108,9 +109,13 @@ def use_history(item: dict[str, Any], book: MerchantBook) -> None:
     """Известный магазин — категория владельца из fact, а не догадка модели.
 
     «РАЗНОЕ» в истории не считается решением владельца: там модель решает сама.
+    Ищем только по имени магазина — без догадок по первому слову комментария.
     """
-    known = book.find(str(item.get("comment") or ""))
+    known = book.find(str(item.get("comment") or ""), first_word=False)
     if known is None or known[0] == FALLBACK_CATEGORY:
+        return
+    # Доход и расход история местами не меняет: от категории зависит знак суммы
+    if (known[0] == INCOME_GROUP) != (item.get("direction") == "income"):
         return
     if (item.get("category"), item.get("subcategory")) != known:
         logger.info("Category of %s taken from history", merchant_key(item["comment"]))
