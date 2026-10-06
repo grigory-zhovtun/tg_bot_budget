@@ -146,6 +146,10 @@ Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this
     *   a temporary balancing row (comment contains `ВРЕМЕННАЯ`) is deleted once a statement covers its date;
     *   sending the same statements again changes nothing.
 
+### Monthly plan tabs
+
+Every day at 00:05 (`ANALYTICS_TIMEZONE`) and right after start the bot checks the tab of the current month («Nov 26»). If it is missing, the bot copies the latest month tab (the plan stays the same), sets the month dates in `M1:M2`, hides past months and tells the owner (`ANALYTICS_CHAT_ID`, otherwise the first id from `ALLOWED_USER_IDS`). Fact values in the tab are formulas over `fact` and the dates in `M1:M2`, so nothing else changes.
+
 ### Commands
 
 *   **`/analytics`** — report for the last 3 days with charts.
