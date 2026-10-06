@@ -57,7 +57,13 @@ def setup_logging() -> None:
 
 async def _post_init(application: Application) -> None:
     await application.bot.set_my_commands(COMMANDS)
-    await application.bot_data["ai_service"].self_check()
+    # Проверка Gemini — в фоне: при перегрузке модели она идёт минуту и больше,
+    # а бот всё это время не отвечал бы
+    application.job_queue.run_once(_self_check, 1, name="gemini_self_check")
+
+
+async def _self_check(context: ContextTypes.DEFAULT_TYPE) -> None:
+    await context.bot_data["ai_service"].self_check()
 
 
 async def _daily_analytics(context: ContextTypes.DEFAULT_TYPE) -> None:

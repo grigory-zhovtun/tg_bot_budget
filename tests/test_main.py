@@ -1,6 +1,8 @@
 """Сборка приложения без сети: доступ, обработчики, ежедневный отчёт."""
 
 import logging
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from telegram.ext import CommandHandler, TypeHandler
@@ -63,3 +65,24 @@ def test_bad_or_missing_report_settings_do_not_break_start(
 def test_httpx_logs_no_request_urls() -> None:
     main.setup_logging()
     assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+
+
+async def test_gemini_self_check_does_not_delay_the_start() -> None:
+    scheduled: list[tuple[object, float, str]] = []
+    ai = SimpleNamespace(self_check=AsyncMock())
+    application = SimpleNamespace(
+        bot=SimpleNamespace(set_my_commands=AsyncMock()),
+        bot_data={"ai_service": ai},
+        job_queue=SimpleNamespace(
+            run_once=lambda cb, when, name: scheduled.append((cb, when, name))
+        ),
+    )
+
+    await main._post_init(application)
+
+    application.bot.set_my_commands.assert_awaited_once_with(main.COMMANDS)
+    ai.self_check.assert_not_awaited()
+    [(callback, when, name)] = scheduled
+    assert (when, name) == (1, "gemini_self_check")
+    await callback(SimpleNamespace(bot_data=application.bot_data))
+    ai.self_check.assert_awaited_once()
