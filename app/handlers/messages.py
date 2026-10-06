@@ -302,16 +302,11 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     image_part = images[0]  # Use first page as image
                     extracted_text = "PDF document with transaction history"
             except ImportError:
-                # Fallback: try to extract text with PyPDF2
-                try:
-                    import PyPDF2
-                    with open(file_path, 'rb') as f:
-                        reader = PyPDF2.PdfReader(f)
-                        for page in reader.pages[:10]:  # Limit to 10 pages
-                            extracted_text += page.extract_text() or ""
-                except ImportError:
-                    await update.message.reply_text("❌ Для обработки PDF установите pdf2image или PyPDF2.")
-                    return
+                # Fallback: extract text with pypdf (PyPDF2 is abandoned, CVE-2023-36464)
+                from pypdf import PdfReader
+                reader = PdfReader(file_path)
+                for page in reader.pages[:10]:  # Limit to 10 pages
+                    extracted_text += page.extract_text() or ""
 
         elif is_excel:
             try:
