@@ -15,6 +15,7 @@ from pydantic import BaseModel, TypeAdapter, ValidationError
 from app import config
 from app.domain import (
     FALLBACK_CATEGORY,
+    FALLBACK_SUBCATEGORY,
     INCOME_GROUP,
     Catalog,
     MerchantBook,
@@ -81,6 +82,7 @@ def merchant_hints(rows: list[list[Any]], limit: int = MAX_HINTS) -> list[str]:
     Берутся последние операции (свежие первыми), по одной строке на магазин.
     Это заменяет 5000 строк истории в промпте: ~300 строк вместо ~100 тыс. токенов.
     """
+    mixed = MerchantBook.from_sheet(rows).mixed
     hints: dict[str, str] = {}
     for row in reversed(rows[1:]):
         if len(hints) >= limit:
@@ -88,7 +90,7 @@ def merchant_hints(rows: list[list[Any]], limit: int = MAX_HINTS) -> list[str]:
         cells = [str(cell).strip() for cell in row[:6]] + [""] * (6 - len(row[:6]))
         category, subcategory, comment = cells[1], cells[2], cells[5]
         key = merchant_key(comment)
-        if key and category and subcategory and key not in hints:
+        if key and key not in mixed and category and subcategory and key not in hints:
             hints[key] = f"{category} / {subcategory}"
     return [f"{key} → {target}" for key, target in hints.items()]
 
@@ -167,6 +169,9 @@ Rules:
 7. balance: card balance only if the input says so explicitly (Ostatok,
    Остаток, Dostupno, Доступно, Balance, Qoldiq); otherwise null.
 8. Screenshots and statements: every transaction row is a separate object.
+9. Marketplace orders (Uzum Market, Ozon, Wildberries, AliExpress) hold different
+   goods: if the input does not say what was bought, use
+   "{FALLBACK_CATEGORY} / {FALLBACK_SUBCATEGORY}".
 
 Input:
 {user_input}"""
@@ -197,7 +202,8 @@ Shops:
 {shops}
 
 Return one object per shop: "name" copied exactly from the list, "category"
-and "subcategory". If you cannot tell what the shop sells, use
+and "subcategory". If you cannot tell what the shop sells, or it is a
+marketplace with all kinds of goods (Uzum Market, Ozon, Wildberries), use
 "{FALLBACK_CATEGORY}" with its subcategory."""
 
 

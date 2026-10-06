@@ -507,3 +507,15 @@ async def test_history_never_turns_spending_into_income(
     service.gs_service = IncomeHistorySheets()
     [result] = await service.parse_transaction("SMS")
     assert (result.get("category"), result.get("subcategory")) == expected
+
+
+def test_mixed_merchants_get_no_hint_and_marketplaces_a_rule() -> None:
+    rows = [
+        HEADER,
+        ["01.09.2026", "🏚️ ДОМ", "продукты", 1, "", "AI: Ooo Uzum Market"],
+        ["02.09.2026", "🏚️ ДОМ", "инвентарь", 1, "", "AI: Ooo Uzum Market"],
+        ["03.09.2026", "🍔 ЕДА", "кафе", 1, "", "AI: Uzum Tezkor"],
+    ]
+    assert merchant_hints(rows) == ["UZUM TEZKOR → 🍔 ЕДА / кафе"]
+    prompt = build_parse_prompt("Uzum Market 250000", "06.10.2026", [], {}, [], [])
+    assert "Marketplace orders" in prompt and "🚧 РАЗНОЕ / неучтенка" in prompt

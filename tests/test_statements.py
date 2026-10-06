@@ -642,3 +642,23 @@ def test_purchase_is_never_income_even_if_history_says_so() -> None:
         5000,
         "новый магазин",
     )
+
+
+def test_mixed_merchant_is_left_to_the_content() -> None:
+    book = MerchantBook(
+        [
+            ("🏚️ ДОМ", "продукты", "AI: Ooo Uzum Market"),
+            ("🎉 ПРАЗДНИК", "сезонный", "AI: Ooo Uzum Market"),
+            ("🚧 РАЗНОЕ", "неучтенка", "AI: Ooo Uzum Market"),
+            ("🍔 ЕДА", "кофе", "AI: Shavi"),
+            ("🚧 РАЗНОЕ", "неучтенка", "AI: Shavi"),  # свежая «неучтенка»
+        ]
+    )
+    assert book.find("OOO UZUM MARKET") is None  # владелец разносил по-разному
+    assert book.find("UZUM MARKET MCHJ") is None  # и без правовой формы
+    # «РАЗНОЕ» не решение: берётся последнее настоящее — кофе
+    assert book.find("SHAVI") == ("🍔 ЕДА", "кофе")
+    assert MerchantBook([("🚧 РАЗНОЕ", "неучтенка", "AI: Toredo")]).find("TOREDO") == (
+        "🚧 РАЗНОЕ",
+        "неучтенка",
+    )
