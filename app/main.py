@@ -28,6 +28,7 @@ from app.handlers import (
     messages,
     statement_import,
     transactions,
+    undo,
 )
 from app.services.ai_service import GeminiService
 from app.services.analytics_service import AnalyticsService
@@ -39,6 +40,7 @@ COMMANDS = [
     ("start", "Начать работу 🚀"),
     ("analytics", "Аналитика за 3 дня 📊"),
     ("advice", "Финансовый совет 🧠"),
+    ("undo", "Отменить последнюю запись ↩️"),
     ("reboot", "Обновить настройки 🔄"),
 ]
 WEBHOOK_PATH = "telegram"
@@ -118,6 +120,7 @@ def build_application(
 
     app.add_handler(CommandHandler("start", common.start))
     app.add_handler(CommandHandler("reboot", admin.reboot))
+    app.add_handler(CommandHandler("undo", undo.undo))
     app.add_handler(CommandHandler("advice", analytics.advice_command))
     app.add_handler(CommandHandler("analytics", analytics.analytics_command))
     # Кнопки импорта выписок — раньше общего обработчика кнопок без фильтра

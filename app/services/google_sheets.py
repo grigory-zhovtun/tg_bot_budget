@@ -69,6 +69,26 @@ def appended_rows(response: dict[str, Any]) -> tuple[int, int]:
     return first, int(match.group(2) or first)
 
 
+def _same_row(cells: list[Any], row: SheetRow) -> bool:
+    """Строка листа (UNFORMATTED) та же, что записал бот? Баланс E не сравнивается."""
+    cells = list(cells) + [""] * (8 - len(cells))
+    serial, amount = cells[0], cells[3]
+    return (
+        isinstance(serial, int | float)
+        and SERIAL_ZERO + timedelta(days=int(serial)) == row.day
+        and isinstance(amount, int | float)
+        and abs(amount - row.amount) < 0.005
+        and [str(c).strip() for c in (cells[1], cells[2], cells[5], cells[6], cells[7])]
+        == [
+            row.category,
+            row.subcategory,
+            row.comment.strip(),
+            row.currency,
+            row.source,
+        ]
+    )
+
+
 class GoogleSheetsService:
     def __init__(self) -> None:
         self.client: gspread.Client | None = None
@@ -398,3 +418,40 @@ class GoogleSheetsService:
             # без повтора: если ответ потерялся, второй запрос снёс бы другие строки
             self.sheet.batch_update({"requests": requests})
         return confirmed
+
+    def delete_rows_if_match(
+        self, first: int, last: int, rows: Sequence[SheetRow]
+    ) -> bool:
+        """Удалить строки first..last, если в таблице всё ещё именно они.
+
+        Если строки успели поправить или сдвинуть, ничего не удаляется.
+        """
+        worksheet = self._worksheet(config.FACT_SHEET_NAME)
+        current = self._with_retry(
+            "Reading rows to undo",
+            lambda: worksheet.get(
+                f"A{first}:H{last}", value_render_option=ValueRenderOption.unformatted
+            ),
+        )
+        if len(current) != len(rows) or not all(
+            _same_row(cells, row) for cells, row in zip(current, rows, strict=True)
+        ):
+            return False
+        # без повтора: если ответ потерялся, второй запрос снёс бы другие строки
+        self.sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "deleteDimension": {
+                            "range": {
+                                "sheetId": worksheet.id,
+                                "dimension": "ROWS",
+                                "startIndex": first - 1,
+                                "endIndex": last,
+                            }
+                        }
+                    }
+                ]
+            }
+        )
+        return True

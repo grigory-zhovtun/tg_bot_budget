@@ -31,7 +31,7 @@ def test_gate_runs_before_all_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
         if isinstance(handler, CommandHandler)
         for command in handler.commands
     }
-    assert commands == {"start", "reboot", "advice", "analytics"}
+    assert commands == {"start", "reboot", "advice", "analytics", "undo"}
 
 
 def test_daily_report_is_scheduled_in_owner_timezone(

@@ -1,9 +1,14 @@
 import asyncio
+import hashlib
 import logging
+import re
 import tempfile
+import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 from telegram import File, Message, Update
@@ -23,6 +28,8 @@ from app.domain import (
 from app.errors import user_message
 from app.handlers import statement_import
 from app.handlers.common import (
+    LAST_WRITE,
+    SEEN_INPUTS,
     clear_tracked_messages,
     show_main_menu,
     track_message,
@@ -35,6 +42,10 @@ from app.utils.keyboards import (
 )
 
 logger = logging.getLogger(__name__)
+
+SEEN_LIMIT = 200  # сколько последних SMS/файлов помнить
+SEEN_TTL = 7 * 24 * 3600
+MIN_SMS_LENGTH = 20  # короче — это ручной ввод вроде «48000 латте», повтор законен
 
 
 @asynccontextmanager
@@ -65,6 +76,52 @@ def _catalog(context: ContextTypes.DEFAULT_TYPE) -> Catalog:
         subcategories=context.bot_data.get("subcategories", {}),
         sources=context.bot_data.get("sources", []),
     )
+
+
+def input_fingerprint(
+    text: str | None, file_unique_id: str | None = None
+) -> str | None:
+    """Отпечаток SMS или файла: тот же текст или тот же файл Telegram — тот же ключ."""
+    if file_unique_id:
+        return f"file:{file_unique_id}"
+    normalized = re.sub(r"\s+", " ", text or "").strip().lower()
+    if len(normalized) < MIN_SMS_LENGTH:
+        return None
+    return "text:" + hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+
+def _seen(context: ContextTypes.DEFAULT_TYPE, fingerprint: str | None) -> dict | None:
+    """Запись о том, что этот вход уже записан в таблицу (не старше недели)."""
+    if fingerprint is None:
+        return None
+    entry = context.user_data.get(SEEN_INPUTS, {}).get(fingerprint)
+    if entry and time.time() - entry["at"] < SEEN_TTL:
+        return entry
+    return None
+
+
+def _remember(
+    context: ContextTypes.DEFAULT_TYPE, fingerprint: str, first: int, last: int
+) -> None:
+    seen: dict[str, dict] = context.user_data.setdefault(SEEN_INPUTS, {})
+    seen[fingerprint] = {"at": time.time(), "rows": (first, last)}
+    while len(seen) > SEEN_LIMIT:
+        seen.pop(next(iter(seen)))
+
+
+async def _report_duplicate(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, entry: dict
+) -> None:
+    await _delete_quietly(update.message)
+    first, last = entry["rows"]
+    rows = f"строка {first}" if first == last else f"строки {first}–{last}"
+    tz = ZoneInfo(config.ANALYTICS_TIMEZONE)
+    when = datetime.fromtimestamp(entry["at"], tz).strftime("%d.%m %H:%M")
+    message = await update.effective_chat.send_message(
+        f"⚠️ Это уже записано ({rows}, {when}), повтор не записываю.\n"
+        "Если запись была ошибочной — /undo."
+    )
+    track_message(context, message)
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -153,6 +210,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    fingerprint = input_fingerprint(
+        msg_text, update.message.photo[-1].file_unique_id if is_photo else None
+    )
+    if entry := _seen(context, fingerprint):
+        await _report_duplicate(update, context, entry)
+        return
+
     # Photo: Telegram always sends JPEG; read it into memory and drop the file
     photo = None
     if is_photo:
@@ -184,7 +248,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             items = items[::-1]
 
         rows, skipped = await _to_rows(items, context, current_source)
-        await _save_rows(update, context, rows, skipped)
+        await _save_rows(update, context, rows, skipped, fingerprint)
 
     except Exception as e:
         logger.exception("AI parsing failed")
@@ -224,24 +288,51 @@ def _format_amount(row: SheetRow) -> str:
     return f"{'+' if incoming else ''}{digits.replace(',', ' ')} {row.currency}"
 
 
+def _balance_check(source: str, bank: float, table: float) -> str:
+    """Сверка остатка из SMS с остатком по таблице (колонка J блока остатков)."""
+    currency = source.strip()[-3:].upper()
+    tolerance = 0.01 if currency == "USD" else 1
+    if abs(bank - table) < tolerance:
+        return f"🟰 {source}: остаток сходится с банком"
+    digits = "{:,.2f}" if currency == "USD" else "{:,.0f}"
+
+    def money(value: float) -> str:
+        return digits.format(value).replace(",", " ")
+
+    return (
+        f"⚠️ {source}: в банке {money(bank)}, в таблице {money(table)} "
+        f"(разница {money(bank - table)})"
+    )
+
+
 async def _save_rows(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     rows: Sequence[SheetRow],
     skipped: Sequence[Skipped],
+    fingerprint: str | None = None,
 ) -> None:
     """Записать строки в fact одним запросом, обновить остатки и показать сводку."""
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
     lines: list[str] = []
     if rows:
         try:
-            await asyncio.to_thread(gs_service.append_transactions, rows)
+            first, last = await asyncio.to_thread(gs_service.append_transactions, rows)
         except Exception:
             logger.exception("Writing %d rows failed", len(rows))
             lines.append(
                 f"❌ Не записал в Google Таблицу ({len(rows)} шт.), попробуйте ещё раз"
             )
             rows = []
+        else:
+            context.user_data[LAST_WRITE] = {
+                "first": first,
+                "last": last,
+                "rows": list(rows),
+                "fingerprint": fingerprint,
+            }
+            if fingerprint:
+                _remember(context, fingerprint, first, last)
 
     updated: list[str] = []
     balances = {row.source: row.balance for row in rows if row.balance is not None}
@@ -259,9 +350,23 @@ async def _save_rows(
     if rows:
         context.user_data["source"] = rows[-1].source
 
+    if updated:
+        try:
+            table = await asyncio.to_thread(gs_service.get_table_balances)
+        except Exception:
+            logger.exception("Reading table balances failed")
+            table = {}
+        lines += [
+            _balance_check(source, balances[source], table[source])
+            for source in updated
+            if source in table
+        ]
+
     lines += [f"⚠️ Не записал: {s.comment} — {s.reason}" for s in skipped]
     if not lines:
         lines.append("Не удалось распознать транзакции.")
+    if rows:
+        lines.append("↩️ Ошиблись? /undo — удалить эту запись")
 
     # Clear specific manual selection state
     context.user_data.pop("category", None)
@@ -324,6 +429,10 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not ai_service or not config.GEMINI_API_KEY:
             await update.effective_chat.send_message("AI сервис не настроен.")
             return
+        fingerprint = input_fingerprint(None, document.file_unique_id)
+        if entry := _seen(context, fingerprint):
+            await _report_duplicate(update, context, entry)
+            return
 
         if not extracted_text.strip():
             await update.effective_chat.send_message(
@@ -342,7 +451,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         items = result if isinstance(result, list) else [result]
         rows, skipped = await _to_rows(items, context, context.user_data.get("source"))
-        await _save_rows(update, context, rows, skipped)
+        await _save_rows(update, context, rows, skipped, fingerprint)
 
     except Exception as e:
         logger.exception("Document processing failed")
