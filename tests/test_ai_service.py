@@ -90,10 +90,17 @@ class FakeModels:
     def __init__(self, text: str | None) -> None:
         self.text = text
         self.calls: list[dict[str, Any]] = []
+        self.get_failures: list[Exception] = []
 
     async def generate_content(self, **kwargs: Any) -> SimpleNamespace:
         self.calls.append(kwargs)
         return SimpleNamespace(text=self.text, model_version="gemini-test")
+
+    async def get(self, model: str) -> SimpleNamespace:
+        """Метаданные модели (самопроверка): генерацию и квоту не тратят."""
+        if self.get_failures:
+            raise self.get_failures.pop(0)
+        return SimpleNamespace(name=f"models/{model}", version="3.8")
 
 
 class FakeSheets:
@@ -114,6 +121,7 @@ def make_service(text: str | None) -> tuple[GeminiService, FakeModels, FakeSheet
     service.models = ["gemini-flash-latest", "gemini-flash-lite-latest"]
     service.client = SimpleNamespace(aio=SimpleNamespace(models=models))
     service._hints = None
+    service._paused = {}
     return service, models, sheets
 
 
@@ -162,17 +170,25 @@ async def test_hints_are_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     assert sheets.reads == 2
 
 
-async def test_self_check_logs_model(caplog: pytest.LogCaptureFixture) -> None:
+async def test_self_check_reads_models_without_generating(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level("INFO")
-    service, _, _ = make_service('[{"amount": 1000, "direction": "expense"}]')
+    service, models, _ = make_service("[]")
     await service.self_check()
-    assert "Gemini self-check OK: model gemini-test, 1 item(s)" in caplog.text
+    assert models.calls == []  # ни одного запроса генерации — квота цела
+    assert (
+        "Gemini self-check OK: gemini-flash-latest (3.8), gemini-flash-lite-latest (3.8)"
+        in caplog.text
+    )
 
 
 async def test_self_check_never_raises(caplog: pytest.LogCaptureFixture) -> None:
-    service, _, _ = make_service("not json")
+    service, models, _ = make_service("[]")
+    models.get_failures = [ValueError("boom"), overloaded(404)]
     await service.self_check()
-    assert "Gemini self-check failed" in caplog.text
+    assert "Gemini self-check failed for gemini-flash-latest" in caplog.text
+    assert "Gemini model gemini-flash-lite-latest: 404" in caplog.text
 
 
 async def test_without_key_parsing_is_refused() -> None:
@@ -237,18 +253,81 @@ async def test_all_models_overloaded_raises_the_last_error() -> None:
 async def test_self_check_overload_is_only_a_warning(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    models = FlakyModels([overloaded(503), overloaded(503)])
-    await with_models(models).self_check()
+    service, models, _ = make_service("[]")
+    models.get_failures = [overloaded(503), httpx.ReadTimeout("slow")]
+    await service.self_check()
     assert [r.levelname for r in caplog.records].count("ERROR") == 0
-    assert "overloaded (503)" in caplog.text
+    assert "Gemini model gemini-flash-latest: 503" in caplog.text
+    assert (
+        "Gemini model gemini-flash-lite-latest: no answer (ReadTimeout)" in caplog.text
+    )
 
 
-def test_overload_message_for_the_chat() -> None:
+def test_overload_and_quota_messages_for_the_chat() -> None:
     from app.errors import user_message
 
     assert user_message(overloaded(503)) == (
         "Gemini сейчас перегружен, попробуйте через минуту"
     )
+    assert user_message(quota_error(60)).startswith(
+        "Gemini: лимит запросов на сегодня исчерпан"
+    )
+
+
+def quota_error(seconds: int | None) -> errors.ClientError:
+    details = [{"@type": "type.googleapis.com/google.rpc.QuotaFailure"}]
+    if seconds is not None:
+        details.append(
+            {
+                "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                "retryDelay": f"{seconds}s",
+            }
+        )
+    body = {"error": {"code": 429, "status": "RESOURCE_EXHAUSTED", "details": details}}
+    return errors.ClientError(429, body)
+
+
+def test_quota_pause_comes_from_retry_info() -> None:
+    assert ai_service.quota_pause(quota_error(27209)) == 27209
+    assert ai_service.quota_pause(quota_error(None)) == ai_service.QUOTA_PAUSE_SECONDS
+    assert ai_service.quota_pause(overloaded(503)) == ai_service.QUOTA_PAUSE_SECONDS
+
+
+def test_sdk_does_not_retry_quota_errors() -> None:
+    assert 429 not in ai_service.RETRY.http_status_codes
+    assert 429 in ai_service.OVERLOADED  # но к запасной модели переходит
+
+
+async def test_exhausted_model_is_skipped_until_its_quota_returns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    clock = [1000.0]
+    monkeypatch.setattr(ai_service.time, "monotonic", lambda: clock[0])
+    models = FlakyModels([quota_error(3600)])
+    service = with_models(models)
+
+    await service.parse_transaction("1")  # основная: 429 → запасная
+    await service.parse_transaction("2")  # основная на паузе — сразу запасная
+    assert [call["model"] for call in models.calls] == [
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest",
+        "gemini-flash-lite-latest",
+    ]
+
+    clock[0] += 3601  # квота вернулась
+    await service.parse_transaction("3")
+    assert models.calls[-1]["model"] == "gemini-flash-latest"
+
+
+async def test_when_all_models_are_exhausted_the_soonest_is_tried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(ai_service.time, "monotonic", lambda: 0.0)
+    models = FlakyModels([])
+    service = with_models(models)
+    service._paused = {"gemini-flash-latest": 500.0, "gemini-flash-lite-latest": 90.0}
+    await service.parse_transaction("1")
+    assert [call["model"] for call in models.calls] == ["gemini-flash-lite-latest"]
 
 
 CATALOG = Catalog(
@@ -325,9 +404,7 @@ async def test_timeout_falls_back_to_the_next_model() -> None:
     ]
 
 
-async def test_all_models_silent_gives_a_clear_message(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+async def test_all_models_silent_gives_a_clear_message() -> None:
     from app.errors import user_message
 
     models = FlakyModels([httpx.ReadTimeout("a"), httpx.ConnectError("b")])
@@ -336,11 +413,6 @@ async def test_all_models_silent_gives_a_clear_message(
     assert user_message(httpx.ReadTimeout("x")) == (
         "Gemini не ответил вовремя, попробуйте ещё раз"
     )
-
-    models = FlakyModels([httpx.ReadTimeout("a"), httpx.ReadTimeout("b")])
-    await with_models(models).self_check()
-    assert [r.levelname for r in caplog.records].count("ERROR") == 0
-    assert "Gemini self-check: no answer (ReadTimeout)" in caplog.text
 
 
 class HistorySheets(FakeSheets):

@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Any, Literal
 
@@ -26,15 +27,17 @@ logger = logging.getLogger(__name__)
 
 HINTS_TTL_SECONDS = 30 * 60
 MAX_HINTS = 300
-SELF_CHECK_SMS = "Pokupka: TEST CAFE, 1000.00 UZS, 01.10.2026 12:00, karta *0000"
 # Перегрузка и временные сбои Gemini: один короткий повтор, затем запасная модель.
 # Перегруженная модель держала запрос до таймаута (было 120 с), и пользователь
 # ждал ответа на SMS около двух минут.
-OVERLOADED = frozenset({429, 500, 503, 504})
+OVERLOADED = frozenset({429, 500, 503, 504})  # с этими кодами — к запасной модели
 TRANSIENT = (httpx.TimeoutException, httpx.ConnectError)  # SDK повторяет и их
+# 429 — исчерпана квота (на бесплатном ключе 20 запросов в день на модель):
+# повтор через секунду её не вернёт, только потратит время
 RETRY = types.HttpRetryOptions(
-    attempts=2, initial_delay=1.0, max_delay=4.0, http_status_codes=sorted(OVERLOADED)
+    attempts=2, initial_delay=1.0, max_delay=4.0, http_status_codes=[500, 503, 504]
 )
+QUOTA_PAUSE_SECONDS = 15 * 60  # если API не сказал, когда вернётся квота
 TEXT_TIMEOUT_MS = 30_000  # SMS и текст: обычный ответ — 2–5 с
 FILE_TIMEOUT_MS = 90_000  # фото и PDF модель читает дольше
 MAX_MERCHANTS = 60  # магазинов в одном запросе на раскладку
@@ -87,6 +90,18 @@ def merchant_hints(rows: list[list[Any]], limit: int = MAX_HINTS) -> list[str]:
         if key and category and subcategory and key not in hints:
             hints[key] = f"{category} / {subcategory}"
     return [f"{key} → {target}" for key, target in hints.items()]
+
+
+def quota_pause(error: errors.APIError) -> float:
+    """Через сколько секунд вернётся квота: RetryInfo.retryDelay («27209s»)."""
+    body = error.details if isinstance(error.details, dict) else {}
+    details = body.get("error", {}).get("details", [])
+    for item in details if isinstance(details, list) else []:
+        if isinstance(item, dict) and str(item.get("@type", "")).endswith("RetryInfo"):
+            match = re.fullmatch(r"(\d+(?:\.\d+)?)s", str(item.get("retryDelay", "")))
+            if match:
+                return float(match.group(1))
+    return QUOTA_PAUSE_SECONDS
 
 
 def use_history(item: dict[str, Any], book: MerchantBook) -> None:
@@ -197,6 +212,8 @@ class GeminiService:
             else None
         )
         self._hints: tuple[float, list[str], MerchantBook] | None = None
+        # модель → time.monotonic(), до которого она без квоты (ответила 429)
+        self._paused: dict[str, float] = {}
         if self.client is None:
             logger.warning("GEMINI_API_KEY not found. AI features will be disabled.")
 
@@ -221,6 +238,12 @@ class GeminiService:
     def _load_hints(self) -> list[str]:
         return self._history()[0]
 
+    def _available_models(self) -> list[str]:
+        """Модели без исчерпанной квоты; если таких нет — та, что вернётся раньше."""
+        now = time.monotonic()
+        ready = [m for m in self.models if self._paused.get(m, 0.0) <= now]
+        return ready or [min(self.models, key=lambda m: self._paused[m])]
+
     async def _generate(
         self,
         contents: list[Any],
@@ -242,7 +265,7 @@ class GeminiService:
                 "response_json_schema": schema,
             }
         last_error: Exception | None = None
-        for model in self.models:
+        for model in self._available_models():
             try:
                 return await self.client.aio.models.generate_content(
                     model=model,
@@ -252,7 +275,16 @@ class GeminiService:
             except errors.APIError as error:
                 if error.code not in OVERLOADED:
                     raise
-                logger.warning("Gemini %s unavailable (%s)", model, error.code)
+                if error.code == 429:
+                    pause = quota_pause(error)
+                    self._paused[model] = time.monotonic() + pause
+                    logger.warning(
+                        "Gemini %s: quota exhausted, skipped for %.0f min",
+                        model,
+                        pause / 60,
+                    )
+                else:
+                    logger.warning("Gemini %s unavailable (%s)", model, error.code)
                 last_error = error
             except TRANSIENT as error:
                 logger.warning(
@@ -310,30 +342,30 @@ class GeminiService:
         return items
 
     async def self_check(self) -> None:
-        """Проверка ключа, модели и схемы при старте: результат — в лог."""
+        """Ключ и модели при старте — без генерации, квоту запросов не тратит.
+
+        На бесплатном ключе 20 запросов в день на модель: прежняя проверка
+        разбором тестового SMS съедала их за несколько деплоев.
+        """
         if not self.enabled:
             return
-        try:
-            prompt = build_parse_prompt(SELF_CHECK_SMS, "01.10.2026", [], {}, [], [])
-            response = await self._generate([prompt], RESPONSE_SCHEMA)
-            items = json.loads(response.text or "[]")
-            logger.info(
-                "Gemini self-check OK: model %s, %d item(s)",
-                response.model_version,
-                len(items),
-            )
-        except errors.APIError as error:
-            if error.code in OVERLOADED:
-                # не ошибка бота: модели перегружены, запросы пользователя повторятся
+        found: list[str] = []
+        for model in self.models:
+            try:
+                info = await self.client.aio.models.get(model=model)
+                found.append(f"{model} ({info.version or info.name})")
+            except errors.APIError as error:
                 logger.warning(
-                    "Gemini self-check: all models overloaded (%s)", error.code
+                    "Gemini model %s: %s %s", model, error.code, error.status
                 )
-            else:
-                logger.exception("Gemini self-check failed")
-        except TRANSIENT as error:
-            logger.warning("Gemini self-check: no answer (%s)", type(error).__name__)
-        except Exception:
-            logger.exception("Gemini self-check failed")
+            except TRANSIENT as error:
+                logger.warning(
+                    "Gemini model %s: no answer (%s)", model, type(error).__name__
+                )
+            except Exception:
+                logger.exception("Gemini self-check failed for %s", model)
+        if found:
+            logger.info("Gemini self-check OK: %s", ", ".join(found))
 
     async def categorize_merchants(
         self, names: list[str], catalog: Catalog

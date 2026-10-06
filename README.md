@@ -65,6 +65,9 @@ ALLOWED_USER_IDS="123456789"
 GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 # GEMINI_MODEL="gemini-flash-latest"   # any Gemini model id; the resolved version is logged
 # GEMINI_FALLBACK_MODELS="gemini-flash-lite-latest"  # used when the main model is overloaded (503/429)
+# A free Gemini key allows ~20 requests a day per model: after a 429 the bot skips that
+# model until its quota returns (RetryInfo) and uses the next one; the start-up check reads
+# model metadata only and spends no quota.
 
 # Optional daily report
 # ANALYTICS_CHAT_ID="123456789"

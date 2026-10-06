@@ -89,6 +89,7 @@ Optional:
 - User state stored in `context.user_data` (source, category, subcategory; `last_write` for /undo, `seen_inputs` — fingerprints of SMS/files already written)
 - The Google Sheets client is synchronous: call it with `asyncio.to_thread` from handlers; Gemini uses the async client (`client.aio`)
 - Writes that are not idempotent (row deletion) are not retried: a lost response would make the retry delete other rows
+- Gemini quota: a free key gives ~20 generate requests a day per model. Never generate on start-up (self-check uses `models.get`); 429 pauses the model for RetryInfo.retryDelay (`GeminiService._paused`) instead of retrying
 - Business rules live in `app/domain.py` as pure functions — test them table-driven
 - PTB 20+ `run_daily(days=...)`: 0 = Sunday … 6 = Saturday
 - Never show raw exceptions in the chat: use `errors.user_message(e)`; log with `logger.exception`

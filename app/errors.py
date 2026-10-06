@@ -20,7 +20,12 @@ MAX_LENGTH = 200
 
 def user_message(error: BaseException) -> str:
     """Первая строка ошибки без секретов, не длиннее MAX_LENGTH символов."""
-    if isinstance(error, genai_errors.APIError) and error.code in (429, 503):
+    if isinstance(error, genai_errors.APIError) and error.code == 429:
+        return (
+            "Gemini: лимит запросов на сегодня исчерпан — попробуйте позже "
+            "или внесите операцию кнопками"
+        )
+    if isinstance(error, genai_errors.APIError) and error.code == 503:
         return "Gemini сейчас перегружен, попробуйте через минуту"
     if isinstance(error, httpx.TimeoutException):
         return "Gemini не ответил вовремя, попробуйте ещё раз"
