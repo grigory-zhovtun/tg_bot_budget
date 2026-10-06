@@ -38,7 +38,7 @@ app/
 │   └── analytics.py     # /advice, /analytics, daily report
 ├── services/
 │   ├── google_sheets.py # GoogleSheetsService — synchronous gspread wrapper
-│   ├── ai_service.py    # GeminiService — transaction parsing, financial analysis
+│   ├── ai_service.py    # GeminiService (google-genai, JSON schema output, merchant hints from fact)
 │   └── analytics_service.py # AnalyticsService - reports with matplotlib charts
 └── utils/
     └── keyboards.py     # Telegram keyboard generators
@@ -70,7 +70,7 @@ Required:
 - `ALLOWED_USER_IDS` — Telegram user ids allowed to use the bot (falls back to `ANALYTICS_CHAT_ID`; empty = nobody)
 
 Optional:
-- `GEMINI_API_KEY` - Enables AI features
+- `GEMINI_API_KEY` - Enables AI features; `GEMINI_MODEL` (default `gemini-flash-latest`)
 - `ANALYTICS_CHAT_ID`, `ANALYTICS_TIME`, `ANALYTICS_TIMEZONE` - daily report (JobQueue); the time zone also defines "today"
 - `WEBHOOK_URL` (or Render's `RENDER_EXTERNAL_URL`), `WEBHOOK_SECRET`, `PORT`, `LOCAL_RUN=True`
 
