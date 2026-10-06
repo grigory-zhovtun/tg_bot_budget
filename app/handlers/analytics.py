@@ -121,3 +121,28 @@ async def send_daily_analytics(bot: Bot, chat_id: int, analytics_service: Any) -
         logger.info("Daily analytics sent to chat %s", chat_id)
     except Exception:
         logger.exception("Failed to send daily analytics")
+
+
+async def plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/plan: план-факт месяца без AI — сколько потрачено и сколько осталось."""
+    analytics_service = context.bot_data.get("analytics_service")
+    try:
+        text = await asyncio.to_thread(analytics_service.plan_report)
+    except Exception as e:
+        logger.exception("Plan report failed")
+        await update.message.reply_text(
+            f"Не удалось собрать план-факт: {user_message(e)}"
+        )
+        return
+    await update.message.reply_text(text)
+
+
+async def send_weekly_digest(bot: Bot, chat_id: int, analytics_service: Any) -> None:
+    """Воскресная сводка (JobQueue). Ошибки только в лог."""
+    try:
+        text = await asyncio.to_thread(analytics_service.weekly_digest)
+        for chunk in split_text(text):
+            await bot.send_message(chat_id, chunk)
+        logger.info("Weekly digest sent")
+    except Exception:
+        logger.exception("Failed to send the weekly digest")

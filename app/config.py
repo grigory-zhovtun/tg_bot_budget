@@ -71,6 +71,8 @@ ANALYTICS_CHAT_ID = os.getenv("ANALYTICS_CHAT_ID")
 ANALYTICS_TIME = os.getenv("ANALYTICS_TIME", "07:00")
 # Timezone for scheduling (e.g., "Asia/Tashkent", "Europe/Moscow")
 ANALYTICS_TIMEZONE = os.getenv("ANALYTICS_TIMEZONE", "Asia/Tashkent")
+# Воскресная сводка владельцу: «HH:MM» по ANALYTICS_TIMEZONE, «off» — выключить
+WEEKLY_DIGEST_TIME = os.getenv("WEEKLY_DIGEST_TIME", "20:00")
 
 # Access control: Telegram user IDs allowed to use the bot ("123, 456").
 # Falls back to ANALYTICS_CHAT_ID (the owner's private chat id == user id).

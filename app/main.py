@@ -40,11 +40,13 @@ logger = logging.getLogger(__name__)
 COMMANDS = [
     ("start", "Начать работу 🚀"),
     ("analytics", "Аналитика за 3 дня 📊"),
+    ("plan", "План-факт месяца 📋"),
     ("advice", "Финансовый совет 🧠"),
     ("undo", "Отменить последнюю запись ↩️"),
     ("reboot", "Обновить настройки 🔄"),
 ]
 WEBHOOK_PATH = "telegram"
+SUNDAY = 0  # PTB 20+: дни недели 0–6 = воскресенье–суббота
 
 
 def setup_logging() -> None:
@@ -112,6 +114,30 @@ def _schedule_month_tab(app: Application) -> None:
     app.job_queue.run_once(month.month_tab_job, 30, name="month_tab_on_start")
 
 
+async def _weekly_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = month.owner_chat_id()
+    if chat_id is not None:
+        await analytics.send_weekly_digest(
+            context.bot, chat_id, context.bot_data["analytics_service"]
+        )
+
+
+def _schedule_weekly_digest(app: Application) -> None:
+    """Сводка недели по воскресеньям; WEEKLY_DIGEST_TIME=off — выключить."""
+    if config.WEEKLY_DIGEST_TIME.strip().lower() == "off":
+        logger.info("Weekly digest disabled")
+        return
+    try:
+        hour, minute = map(int, config.WEEKLY_DIGEST_TIME.split(":"))
+        when = dtime(hour, minute, tzinfo=ZoneInfo(config.ANALYTICS_TIMEZONE))
+    except (ValueError, ZoneInfoNotFoundError):
+        logger.exception("Bad WEEKLY_DIGEST_TIME, weekly digest disabled")
+        return
+    app.job_queue.run_daily(
+        _weekly_digest, time=when, days=(SUNDAY,), name="weekly_digest"
+    )
+
+
 def build_application(
     gs_service: GoogleSheetsService,
     categories: list[str],
@@ -145,6 +171,7 @@ def build_application(
     app.add_handler(CommandHandler("undo", undo.undo))
     app.add_handler(CommandHandler("advice", analytics.advice_command))
     app.add_handler(CommandHandler("analytics", analytics.analytics_command))
+    app.add_handler(CommandHandler("plan", analytics.plan_command))
     # Кнопки импорта выписок — раньше общего обработчика кнопок без фильтра
     app.add_handler(CallbackQueryHandler(statement_import.button, pattern=r"^import:"))
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
@@ -157,6 +184,7 @@ def build_application(
     app.add_error_handler(on_error)
     _schedule_daily_report(app)
     _schedule_month_tab(app)
+    _schedule_weekly_digest(app)
     return app
 
 

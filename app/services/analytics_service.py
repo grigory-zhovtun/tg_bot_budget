@@ -8,6 +8,7 @@ import calendar
 import io
 import logging
 import re
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
@@ -24,6 +25,10 @@ TRANSFERS_GROUP = "💳 СЧЕТА"
 OPENING_BALANCE = "нач остаток"
 SERIAL_ZERO = date(1899, 12, 30)
 COLUMNS = ["day", "group", "subcategory", "amount", "comment", "currency", "source"]
+MONTHS_RU = ("январь", "февраль", "март", "апрель", "май", "июнь", "июль",
+             "август", "сентябрь", "октябрь", "ноябрь", "декабрь")  # fmt: skip
+NEAR_LIMIT = 0.8  # с этой доли плана статья попадает в «почти всё»
+PACE_SLACK = 0.05  # траты могут обгонять календарь на 5 п. п. без тревоги
 CAPTION_PIE = "📈 Расходы по категориям"
 CAPTION_DAYS = "📊 Динамика по дням"
 
@@ -170,6 +175,124 @@ def days_chart(days: list[date], spent: list[float], earned: list[float]) -> io.
     return _png(figure)
 
 
+@dataclass
+class PlanLine:
+    """Статья вкладки месяца в сумах; по всем валютам вместе."""
+
+    group: str
+    subcategory: str
+    plan: float = 0.0
+    fact: float = 0.0
+
+    @property
+    def name(self) -> str:
+        return f"{self.group} / {self.subcategory}"
+
+
+def plan_lines(rows: list[list[Any]]) -> tuple[list[PlanLine], list[PlanLine]]:
+    """Вкладка месяца (UNFORMATTED) → расходы и доходы, план и факт в сумах.
+
+    Во вкладке и план, и факт отрицательные (факт = −SUMIFS по fact), берём модуль
+    со знаком: возврат больше трат даёт отрицательный факт. Строки одной статьи
+    в разных валютах складываются по сумовому эквиваленту (колонки H и I).
+    """
+    found: dict[tuple[str, str, str], PlanLine] = {}
+    for row in rows[1:]:
+        cells = list(row[:9]) + [""] * (9 - len(row[:9]))
+        kind, group, sub = (str(c).strip() for c in cells[:3])
+        plan, fact = cells[7], cells[8]
+        if kind not in ("Расходы", "Доходы") or not group:
+            continue
+        if not (isinstance(plan, int | float) and isinstance(fact, int | float)):
+            continue
+        line = found.setdefault((kind, group, sub), PlanLine(group, sub))
+        line.plan -= plan
+        line.fact -= fact
+    spend = [line for (kind, *_), line in found.items() if kind == "Расходы"]
+    earn = [line for (kind, *_), line in found.items() if kind == "Доходы"]
+    return spend, earn
+
+
+def _share(part: float, whole: float) -> str:
+    return f"{part / whole:.0%}" if whole else "—"
+
+
+def format_plan_report(rows: list[list[Any]], today: date) -> str:
+    """План-факт месяца для чата: темп трат, остаток в день, перерасход."""
+    days = calendar.monthrange(today.year, today.month)[1]
+    elapsed = today.day / days
+    spend, earn = plan_lines(rows)
+    plan = sum(line.plan for line in spend)
+    fact = sum(line.fact for line in spend)
+
+    lines = [
+        f"📋 План-факт: {MONTHS_RU[today.month - 1]} {today.year}, "
+        f"прошло {today.day} из {days} дн. ({elapsed:.0%})",
+        "",
+    ]
+    pace = (
+        "✅ в графике"
+        if plan and fact / plan <= elapsed + PACE_SLACK
+        else "⚠️ быстрее графика"
+    )
+    lines.append(
+        f"Расходы: {money(fact)} из {money(plan)} сум ({_share(fact, plan)}) {pace}"
+    )
+    left = plan - fact
+    if left > 0:
+        per_day = left / (days - today.day + 1)
+        lines.append(f"Осталось {money(left)} сум ≈ {money(per_day)} в день")
+    else:
+        lines.append(f"План превышен на {money(-left)} сум")
+
+    over = sorted(
+        (line for line in spend if line.plan > 0 and line.fact > line.plan),
+        key=lambda line: line.fact - line.plan,
+        reverse=True,
+    )
+    near = sorted(
+        (
+            line
+            for line in spend
+            if line.plan > 0 and NEAR_LIMIT * line.plan <= line.fact <= line.plan
+        ),
+        key=lambda line: line.fact / line.plan,
+        reverse=True,
+    )
+    outside = sorted(
+        (line for line in spend if line.plan <= 0 and line.fact > 0),
+        key=lambda line: line.fact,
+        reverse=True,
+    )
+    if over:
+        lines += ["", "🔴 Сверх плана:"]
+        lines += [
+            f"• {line.name}: {money(line.fact)} из {money(line.plan)} "
+            f"({_share(line.fact, line.plan)})"
+            for line in over
+        ]
+    if near:
+        lines += ["", f"🟡 Почти всё (от {NEAR_LIMIT:.0%}):"]
+        lines += [
+            f"• {line.name}: {money(line.fact)} из {money(line.plan)} "
+            f"({_share(line.fact, line.plan)})"
+            for line in near
+        ]
+    if outside:
+        lines += ["", "⚪ Вне плана:"]
+        lines += [f"• {line.name}: {money(line.fact)}" for line in outside]
+
+    earn_plan = sum(line.plan for line in earn)
+    earn_fact = sum(line.fact for line in earn)
+    if earn_plan or earn_fact:
+        lines += [
+            "",
+            f"Доходы: {money(earn_fact)} из {money(earn_plan)} сум "
+            f"({_share(earn_fact, earn_plan)})",
+        ]
+    return "\n".join(lines)
+
+
 class AnalyticsService:
     def __init__(self, gs_service: GoogleSheetsService) -> None:
         self.gs_service = gs_service
@@ -302,3 +425,46 @@ class AnalyticsService:
                 f" | {money(abs(fact))} | {ratio}"
             )
         return lines
+
+    def plan_report(self, today: date | None = None) -> str:
+        """/plan: план-факт текущего месяца по вкладке «Oct 26»."""
+        today = today or local_today(config.ANALYTICS_TIMEZONE)
+        sheet = month_title(today)
+        try:
+            rows = self.gs_service.get_values(sheet)
+        except Exception:
+            logger.info("No plan sheet %s", sheet)
+            return f"Вкладки «{sheet}» с планом нет — бот создаёт её 1-го числа."
+        return format_plan_report(rows, today)
+
+    def weekly_digest(self, today: date | None = None) -> str:
+        """Воскресная сводка: траты недели против прошлой и план-факт месяца."""
+        today = today or local_today(config.ANALYTICS_TIMEZONE)
+        week_start = today - timedelta(days=6)
+        frame = expenses(self._frame())
+        week = frame[(frame["day"] >= week_start) & (frame["day"] <= today)]
+        before = frame[
+            (frame["day"] >= week_start - timedelta(days=7))
+            & (frame["day"] < week_start)
+        ]
+        spent, spent_before = week["amount_uzs"].sum(), before["amount_uzs"].sum()
+        lines = [f"🗓 Неделя {week_start:%d.%m}–{today:%d.%m}"]
+        change = (
+            f", {spent / spent_before - 1:+.0%} к прошлой" if spent_before > 0 else ""
+        )
+        lines.append(
+            f"Потрачено {money(spent)} сум (прошлая неделя {money(spent_before)}{change})"
+        )
+        top = (
+            week.groupby(["group", "subcategory"])["amount_uzs"]
+            .sum()
+            .sort_values(ascending=False)
+            .head(3)
+        )
+        top = top[top > 0]
+        if not top.empty:
+            lines.append(
+                "Больше всего: "
+                + ", ".join(f"{g} / {s} {money(v)}" for (g, s), v in top.items())
+            )
+        return "\n".join([*lines, "", self.plan_report(today)])
