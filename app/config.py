@@ -1,6 +1,9 @@
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
+
+from app.auth import parse_user_ids
 
 # Load environment variables
 load_dotenv()
@@ -22,11 +25,15 @@ GOOGLE_SERVICE_ACCOUNT_EMAIL = os.getenv("GOOGLE_SERVICE_ACCOUNT_EMAIL")
 GOOGLE_PRIVATE_KEY = os.getenv("GOOGLE_PRIVATE_KEY")
 GOOGLE_APPLICATION_CREDENTIALS_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_PATH")
 
-if not GOOGLE_APPLICATION_CREDENTIALS_PATH and not (GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY):
-    raise ValueError("Google credentials are missing. Set GOOGLE_APPLICATION_CREDENTIALS_PATH or (GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY).")
+if not GOOGLE_APPLICATION_CREDENTIALS_PATH and not (
+    GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY
+):
+    raise ValueError(
+        "Google credentials are missing. Set GOOGLE_APPLICATION_CREDENTIALS_PATH or (GOOGLE_SERVICE_ACCOUNT_EMAIL and GOOGLE_PRIVATE_KEY)."
+    )
 
 if GOOGLE_PRIVATE_KEY:
-    GOOGLE_PRIVATE_KEY = GOOGLE_PRIVATE_KEY.replace('\\n', '\n')
+    GOOGLE_PRIVATE_KEY = GOOGLE_PRIVATE_KEY.replace("\\n", "\n")
 
 # Sheet Names
 FACT_SHEET_NAME = "fact"
@@ -54,6 +61,7 @@ CARD_BALANCE_CELLS = {
     "9959": "N4",  # МИР 9959
     "4058": "N5",  # VISA 4058
     "6845": "N6",  # HUMO 6845
+    "7450": "N7",  # VISA 7450 (Сбербанк)
 }
 
 # Daily Analytics
@@ -63,3 +71,8 @@ ANALYTICS_CHAT_ID = os.getenv("ANALYTICS_CHAT_ID")
 ANALYTICS_TIME = os.getenv("ANALYTICS_TIME", "07:00")
 # Timezone for scheduling (e.g., "Asia/Tashkent", "Europe/Moscow")
 ANALYTICS_TIMEZONE = os.getenv("ANALYTICS_TIMEZONE", "Asia/Tashkent")
+
+# Access control: Telegram user IDs allowed to use the bot ("123, 456").
+# Falls back to ANALYTICS_CHAT_ID (the owner's private chat id == user id).
+# Empty → the bot answers nobody.
+ALLOWED_USER_IDS = parse_user_ids(os.getenv("ALLOWED_USER_IDS"), ANALYTICS_CHAT_ID)

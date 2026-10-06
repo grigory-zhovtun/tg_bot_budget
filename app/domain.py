@@ -1,0 +1,345 @@
+"""Правила листа fact: знак суммы, валюта, категория, источник, дата.
+
+Колонка D (сумма) хранит знак по правилу таблицы:
+- расход и перевод со своей карты — плюс;
+- доход (категория «💰 ДОХОДЫ») — плюс;
+- приход, который не доход (перевод на карту, возврат), — минус.
+Баланс в колонке E = Σ(D доходов) − Σ(D остальных), поэтому знак важен.
+"""
+
+import re
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from enum import StrEnum
+from zoneinfo import ZoneInfo
+
+from pydantic import BaseModel, ConfigDict, field_validator
+
+INCOME_GROUP = "💰 ДОХОДЫ"
+FALLBACK_CATEGORY = "🚧 РАЗНОЕ"
+FALLBACK_SUBCATEGORY = "неучтенка"
+MAX_AGE_DAYS = 400
+NBSP = chr(0xA0)
+
+
+class Direction(StrEnum):
+    """Куда двигаются деньги относительно карты-источника."""
+
+    EXPENSE = "expense"  # покупка, оплата, комиссия
+    INCOME = "income"  # зарплата, премия, доход
+    TRANSFER_OUT = "transfer_out"  # перевод или снятие с карты
+    TRANSFER_IN = "transfer_in"  # зачисление на карту, которое не доход
+    REFUND = "refund"  # возврат покупки
+
+
+INCOMING = frozenset({Direction.INCOME, Direction.TRANSFER_IN, Direction.REFUND})
+
+
+def parse_number(value: object) -> float | None:
+    """«1 234,56», «1,500,000.00», «-1500», «$50», 12.5 → положительное число."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return abs(float(value))
+    text = re.sub(r"[^\d,.]", "", str(value))
+    if "," in text and "." in text:
+        # десятичный разделитель — тот, что стоит последним
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif text.count(",") > 1:
+        text = text.replace(",", "")
+    elif text.count(".") > 1:
+        text = text.replace(".", "")
+    elif text.count(",") == 1:
+        head, tail = text.split(",")
+        text = head + tail if len(tail) == 3 else f"{head}.{tail}"
+    try:
+        return abs(float(text))
+    except ValueError:
+        return None
+
+
+class ParsedTransaction(BaseModel):
+    """Операция, как её вернул AI. Поля мягко приводятся к нужным типам."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    amount: float
+    currency: str | None = None
+    date: str | None = None
+    category: str | None = None
+    subcategory: str | None = None
+    comment: str | None = None
+    source: str | None = None
+    direction: Direction = Direction.EXPENSE
+    balance: float | None = None
+    card_identifier: str | None = None
+
+    @field_validator("amount", mode="before")
+    @classmethod
+    def _amount(cls, value: object) -> float:
+        number = parse_number(value)
+        if not number:
+            raise ValueError(f"no amount in {value!r}")
+        return number
+
+    @field_validator("balance", mode="before")
+    @classmethod
+    def _balance(cls, value: object) -> float | None:
+        return parse_number(value)
+
+    @field_validator("currency", mode="before")
+    @classmethod
+    def _currency(cls, value: object) -> str | None:
+        if not value:
+            return None
+        code = re.sub(r"[^A-Za-z]", "", str(value)).upper()
+        aliases = {"SUM": "UZS", "SOM": "UZS", "RUR": "RUB", "UZB": "UZS"}
+        code = aliases.get(code, code)
+        return code if len(code) == 3 else None
+
+    @field_validator("direction", mode="before")
+    @classmethod
+    def _direction(cls, value: object) -> Direction:
+        try:
+            return Direction(str(value).strip().lower())
+        except ValueError:
+            return Direction.EXPENSE
+
+    @field_validator("card_identifier", mode="before")
+    @classmethod
+    def _card(cls, value: object) -> str | None:
+        digits = re.sub(r"\D", "", str(value or ""))
+        return digits[-4:] if len(digits) >= 4 else None
+
+
+@dataclass(frozen=True)
+class Rates:
+    """Курсы к суму: {"UZS": 1.0, "USD": 11750.0, "RUB": 141.9}."""
+
+    to_uzs: dict[str, float]
+
+    def convert(self, amount: float, src: str, dst: str) -> float | None:
+        if src == dst:
+            return amount
+        src_rate, dst_rate = self.to_uzs.get(src), self.to_uzs.get(dst)
+        if not src_rate or not dst_rate:
+            return None
+        return amount * src_rate / dst_rate
+
+
+@dataclass(frozen=True)
+class Catalog:
+    """Справочники из листа system."""
+
+    categories: list[str]
+    subcategories: dict[str, list[str]]
+    sources: list[str]
+
+
+@dataclass(frozen=True)
+class SheetRow:
+    """Готовая к записи строка fact (без формулы баланса)."""
+
+    day: date
+    category: str
+    subcategory: str
+    amount: float
+    comment: str
+    currency: str
+    source: str
+    balance: float | None = None
+    card_identifier: str | None = None
+
+    @property
+    def date_text(self) -> str:
+        return self.day.strftime("%d.%m.%Y")
+
+
+@dataclass(frozen=True)
+class Skipped:
+    """Операция, которую нельзя записать без участия человека."""
+
+    reason: str
+    comment: str
+
+
+def local_today(timezone: str) -> date:
+    """Сегодняшняя дата в часовом поясе владельца (сервер живёт в UTC)."""
+    return datetime.now(ZoneInfo(timezone)).date()
+
+
+def currency_of(source: str) -> str:
+    """Валюта источника — последние три буквы названия («VISA 9120 UZS» → UZS)."""
+    return source.strip()[-3:].upper()
+
+
+def _letters(text: str) -> str:
+    return re.sub(r"[^a-zа-яё0-9 ]", "", text.lower()).strip()
+
+
+def resolve_source(
+    raw_source: str | None,
+    card_identifier: str | None,
+    sources: list[str],
+    default: str | None,
+) -> str | None:
+    """Источник из ответа AI → точное название из system.
+
+    AI пишет «*9120», «VISA 9120» или «HUMO» — ищем по четырём цифрам карты,
+    затем по совпадению названия; иначе берём выбранный пользователем источник.
+    """
+    if raw_source in sources:
+        return raw_source
+    numbers = [card_identifier] if card_identifier else []
+    numbers += re.findall(r"\d{4}", raw_source or "")
+    for number in numbers:
+        matches = [s for s in sources if number in s]
+        if len(matches) == 1:
+            return matches[0]
+    if raw_source:
+        wanted = _letters(raw_source)
+        matches = [s for s in sources if wanted and wanted in _letters(s)]
+        if len(matches) == 1:
+            return matches[0]
+    return default
+
+
+def resolve_category(
+    category: str | None, subcategory: str | None, catalog: Catalog
+) -> tuple[str, str, str | None]:
+    """Категория и подкатегория из справочника либо «РАЗНОЕ / неучтенка».
+
+    Третье значение — пометка для комментария, если ответ AI не подошёл.
+    """
+    by_name = {_letters(c): c for c in catalog.categories}
+    cat = category if category in catalog.categories else None
+    if cat is None and category:
+        cat = by_name.get(_letters(category))
+    wanted = (subcategory or "").strip().lower()
+
+    def find(cat_name: str) -> str | None:
+        subs = catalog.subcategories.get(cat_name, [])
+        return next((s for s in subs if s.lower() == wanted), None)
+
+    if cat and wanted and (sub := find(cat)):
+        return cat, sub, None
+    owners = [(c, s) for c in catalog.subcategories if wanted and (s := find(c))]
+    if len(owners) == 1:
+        return owners[0][0], owners[0][1], None
+    guess = " / ".join(x for x in (category, subcategory) if x)
+    note = f"AI: {guess}" if guess else None
+    return FALLBACK_CATEGORY, FALLBACK_SUBCATEGORY, note
+
+
+def signed_amount(amount: float, direction: Direction, category: str) -> float:
+    """Знак колонки D: доход и расход — плюс, прочий приход — минус."""
+    if category == INCOME_GROUP:
+        return amount
+    return -amount if direction in INCOMING else amount
+
+
+def parse_day(value: str | None, now: date) -> date:
+    """Дата операции из текста; будущее и слишком старое → сегодня."""
+    if not value:
+        return now
+    text = value.strip()
+    for fmt in ("%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d.%m.%y"):
+        try:
+            day = datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+        if now - timedelta(days=MAX_AGE_DAYS) <= day <= now + timedelta(days=1):
+            return min(day, now)
+        return now
+    return now
+
+
+def build_row(
+    parsed: ParsedTransaction,
+    catalog: Catalog,
+    rates: Rates,
+    now: date,
+    default_source: str | None,
+) -> SheetRow | Skipped:
+    """Ответ AI → строка fact по правилам таблицы."""
+    comment = (parsed.comment or "").strip() or "AI"
+    source = resolve_source(
+        parsed.source, parsed.card_identifier, catalog.sources, default_source
+    )
+    if source is None:
+        return Skipped("не понял, с какой карты", comment)
+
+    source_currency = currency_of(source)
+    amount = parsed.amount
+    notes: list[str] = []
+    if parsed.currency and parsed.currency != source_currency:
+        converted = rates.convert(amount, parsed.currency, source_currency)
+        if converted is None:
+            return Skipped(f"нет курса {parsed.currency} → {source_currency}", comment)
+        notes.append(f"≈ {amount:g} {parsed.currency} по курсу таблицы")
+        amount = round(converted, 2)
+
+    category, subcategory, note = resolve_category(
+        parsed.category, parsed.subcategory, catalog
+    )
+    if note:
+        notes.append(note)
+    return SheetRow(
+        day=parse_day(parsed.date, now),
+        category=category,
+        subcategory=subcategory,
+        amount=signed_amount(amount, parsed.direction, category),
+        comment="; ".join([comment, *notes]),
+        currency=source_currency,
+        source=source,
+        balance=parsed.balance,
+        card_identifier=parsed.card_identifier,
+    )
+
+
+# Сумма в начале сообщения, за ней пробел или конец текста.
+# «12.10.2026 оплата…» не сумма: после «12.10» идёт точка, а не пробел.
+_MANUAL = re.compile(
+    rf"^\s*([+-]?)\s*(\d{{1,3}}(?:[ {NBSP}]\d{{3}})+|\d+)(?:[.,](\d{{1,2}}))?"
+    rf"(?:\s+(.*))?$",
+    re.S,
+)
+
+
+def parse_manual_entry(text: str) -> tuple[float, bool, str] | None:
+    """«5000 кофе», «5 000,50», «+20000 возврат» → (сумма, приход?, комментарий)."""
+    match = _MANUAL.match(text or "")
+    if not match:
+        return None
+    sign, whole, fraction, comment = match.groups()
+    number = float(f"{re.sub(r'[^0-9]', '', whole)}.{fraction or 0}")
+    if number <= 0:
+        return None
+    return number, sign == "+", (comment or "").strip()
+
+
+def manual_row(
+    text: str,
+    source: str,
+    category: str,
+    subcategory: str,
+    now: date,
+) -> SheetRow | None:
+    """Ручной ввод после выбора кнопок; None — текст не похож на сумму."""
+    parsed = parse_manual_entry(text)
+    if parsed is None:
+        return None
+    amount, incoming, comment = parsed
+    direction = Direction.TRANSFER_IN if incoming else Direction.EXPENSE
+    return SheetRow(
+        day=now,
+        category=category,
+        subcategory=subcategory,
+        amount=signed_amount(amount, direction, category),
+        comment=comment,
+        currency=currency_of(source),
+        source=source,
+    )
