@@ -3,15 +3,18 @@ import sys
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from telegram import Update
 from telegram.ext import (
     ApplicationBuilder,
     CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
+    TypeHandler,
     filters,
 )
 
 from app import config
+from app.auth import make_gatekeeper
 from app.handlers import admin, analytics, common, messages, transactions
 from app.services.analytics_service import AnalyticsService
 from app.services.google_sheets import GoogleSheetsService
@@ -79,6 +82,15 @@ def main():
     if config.GEMINI_API_KEY:
         logger.info("AI Service enabled.")
     logger.info("Analytics Service enabled.")
+
+    # Access control: runs before every other handler (group -1)
+    if config.ALLOWED_USER_IDS:
+        logger.info("Access allowed for user ids: %s", sorted(config.ALLOWED_USER_IDS))
+    else:
+        logger.warning(
+            "ALLOWED_USER_IDS and ANALYTICS_CHAT_ID are empty: the bot answers nobody"
+        )
+    app.add_handler(TypeHandler(Update, make_gatekeeper(config.ALLOWED_USER_IDS)), -1)
 
     # Handlers
     app.add_handler(CommandHandler("start", common.start))
