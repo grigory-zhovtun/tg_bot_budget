@@ -19,6 +19,8 @@ INCOME_GROUP = "💰 ДОХОДЫ"
 FALLBACK_CATEGORY = "🚧 РАЗНОЕ"
 FALLBACK_SUBCATEGORY = "неучтенка"
 MAX_AGE_DAYS = 400
+MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")  # fmt: skip
 NBSP = chr(0xA0)
 
 
@@ -169,6 +171,26 @@ class Skipped:
 def local_today(timezone: str) -> date:
     """Сегодняшняя дата в часовом поясе владельца (сервер живёт в UTC)."""
     return datetime.now(ZoneInfo(timezone)).date()
+
+
+def month_title(day: date) -> str:
+    """Вкладка план-факта месяца: «Oct 26» (английские сокращения, как в таблице)."""
+    return f"{MONTHS[day.month - 1]} {day:%y}"
+
+
+def parse_month_title(title: str) -> date | None:
+    """«Oct 26» → 01.10.2026; другие названия листов → None."""
+    match = re.fullmatch(r"([A-Z][a-z]{2}) (\d\d)", title.strip())
+    if not match or match.group(1) not in MONTHS:
+        return None
+    return date(2000 + int(match.group(2)), MONTHS.index(match.group(1)) + 1, 1)
+
+
+def month_bounds(day: date) -> tuple[date, date]:
+    """Первый и последний день месяца."""
+    first = day.replace(day=1)
+    following = (first + timedelta(days=32)).replace(day=1)
+    return first, following - timedelta(days=1)
 
 
 def currency_of(source: str) -> str:

@@ -26,6 +26,7 @@ from app.handlers import (
     analytics,
     common,
     messages,
+    month,
     statement_import,
     transactions,
     undo,
@@ -96,6 +97,19 @@ def _schedule_daily_report(app: Application) -> None:
     )
 
 
+def _schedule_month_tab(app: Application) -> None:
+    """Вкладка месяца: проверка в 00:05 по времени владельца и сразу после запуска."""
+    try:
+        zone = ZoneInfo(config.ANALYTICS_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        logger.warning("Unknown ANALYTICS_TIMEZONE, month tab check uses UTC")
+        zone = ZoneInfo("UTC")
+    app.job_queue.run_daily(
+        month.month_tab_job, time=dtime(0, 5, tzinfo=zone), name="month_tab"
+    )
+    app.job_queue.run_once(month.month_tab_job, 30, name="month_tab_on_start")
+
+
 def build_application(
     gs_service: GoogleSheetsService,
     categories: list[str],
@@ -140,6 +154,7 @@ def build_application(
 
     app.add_error_handler(on_error)
     _schedule_daily_report(app)
+    _schedule_month_tab(app)
     return app
 
 
