@@ -54,19 +54,30 @@ Create a `.env` file in the root directory of the project and add the following 
 TELEGRAM_TOKEN="YOUR_TELEGRAM_TOKEN"
 SPREADSHEET_ID="YOUR_GOOGLE_SHEET_ID"
 GOOGLE_SERVICE_ACCOUNT_EMAIL="YOUR_GOOGLE_SERVICE_ACCOUNT_EMAIL"
-GOOGLE_PRIVATE_KEY="YOUR_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY" # Can be multi-line, ensure quotes handle it correctly or use \n format
+GOOGLE_PRIVATE_KEY="YOUR_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY" # use \n for line breaks
 
-# Optional for running in webhook mode (for production)
-# WEBHOOK_URL="YOUR_WEBHOOK_URL" # e.g., https://your-domain.com
-# PORT="8443" # Port for the webhook
+# Who may use the bot: comma-separated Telegram user ids.
+# Falls back to ANALYTICS_CHAT_ID; if both are empty the bot answers nobody.
+ALLOWED_USER_IDS="123456789"
 
-# Optional for local run, if different from config.py default
-# LOCAL_RUN="True"
+# AI parsing of SMS, screenshots and documents (Google Gemini)
+GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+
+# Optional daily report
+# ANALYTICS_CHAT_ID="123456789"
+# ANALYTICS_TIME="07:00"
+# ANALYTICS_TIMEZONE="Asia/Tashkent"   # also used for "today" in new rows
+
+# Optional webhook mode (otherwise the bot polls Telegram)
+# WEBHOOK_URL="https://your-domain.com"   # RENDER_EXTERNAL_URL is used if empty
+# WEBHOOK_SECRET="random-string"           # Telegram signs webhook requests with it
+# PORT="8443"
+# LOCAL_RUN="True"                         # force polling
 ```
 
 **Important note on `GOOGLE_PRIVATE_KEY`:**
 *   The private key from the Google service account JSON file must be pasted as a string.
-*   If you copy it directly, it will contain newline characters (`\n`). In the `.env` file, these characters should either be escaped (`\\n`) or the entire string should be enclosed in double quotes if your system supports it. The `bot.py` file attempts to handle `\n` when loading from `.env`.
+*   If you copy it directly, it will contain newline characters (`\n`). In the `.env` file, these characters should either be escaped (`\\n`) or the entire string should be enclosed in double quotes if your system supports it. `app/config.py` converts `\n` back to line breaks.
 
 ### 5. Set up Google Sheets API:
 
@@ -96,53 +107,48 @@ GOOGLE_PRIVATE_KEY="YOUR_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY" # Can be multi-line
 Ensure your Google Sheet contains two sheets:
 
 *   **`fact`**: All transactions will be recorded here.
-    *   **Columns (minimum):** `Date`, `Category`, `Subcategory`, `Amount`, `Balance` (formula), `Comment`, `Currency`, `Source`.
-    *   Formula for the `Balance` column (example for row 2, adapt to your needs and Google Sheets formula language):
+    *   **Columns:** `Date`, `Category`, `Subcategory`, `Amount`, `Balance` (formula), `Comment`, `Currency`, `Source`.
+    *   **Sign of `Amount`:** expenses and income (category `💰 ДОХОДЫ`) are positive; money that comes in but is not income (transfer to the card, refund) is negative.
+    *   **Balance formula** written by the bot. It has no row numbers, so it stays correct after sorting or deleting rows:
         ```excel
-        =SUMIFS($D$2:D2, $H$2:H2, $H2, $G$2:G2, $G2, $B$2:B2, "💰 INCOME") - SUMIFS($D$2:D2, $H$2:H2, $H2, $G$2:G2, $G2, $B$2:B2, "<>💰 INCOME")
+        =SUMIFS($D$2:INDEX($D:$D;ROW()); $H$2:INDEX($H:$H;ROW()); INDEX($H:$H;ROW()); $G$2:INDEX($G:$G;ROW()); INDEX($G:$G;ROW()); $B$2:INDEX($B:$B;ROW()); "💰 ДОХОДЫ") - SUMIFS(...; "<>💰 ДОХОДЫ")
         ```
-        This formula calculates the current balance for a specific source and currency by summing all incomes and subtracting all expenses. Note: "💰 INCOME" should be exactly how your income categories are named or identified. If you use a different term or logic for income vs. expense in your 'Category' column (B), adjust the formula accordingly.
-*   **`system`**: This sheet is used for bot configuration (categories, subcategories, sources).
+    *   **Balance block `I:N`** (rows 2+): column I lists the sources, column N ("check") receives the bank balance from SMS ("Остаток", "Dostupno").
+*   **`system`**: This sheet is used for bot configuration (categories, subcategories, sources, currency rates).
     *   **Column A:** Categories (e.g., "Groceries", "Transport").
     *   **Column B:** Subcategories (e.g., for "Groceries": "Supermarket", "Market"). The corresponding category from Column A must be specified.
     *   **Column F:** Sources (e.g., "Card UZS", "Cash USD"). The last 3 characters of the source name are used to determine the currency (e.g., "UZS", "USD").
+    *   **Columns H:I (rows 2–10):** currency code and its rate to UZS (`GOOGLEFINANCE`). Used to convert an SMS amount in another currency into the card currency.
 
 ### 7. Running the bot:
 
-*   **Local run (polling):**
-    Set `LOCAL_RUN="True"` in `.env` (or don't set it if this is the default in `config.py` when `WEBHOOK_URL` is absent).
-    ```bash
-    python bot.py
-    ```
-*   **Webhook mode (for production):**
-    Ensure `LOCAL_RUN` is not set or is `False`.
-    Set `WEBHOOK_URL` and, if necessary, `PORT` in your `.env` file.
-    ```bash
-    python bot.py
-    ```
-    The bot will listen for incoming requests from Telegram at the specified `WEBHOOK_URL` and port. You might need to set up a reverse proxy (e.g., Nginx) to handle HTTPS and forward traffic to the bot's port.
+```bash
+python -m app.main
+```
+
+Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this is how it runs as a Render background worker. With `WEBHOOK_URL` it listens on `PORT` at `/telegram`.
 
 ## Usage
 
-1.  **Start the bot** in Telegram (find it by the name you gave it when creating the token).
-2.  **Send the `/start` command.**
-3.  **Select Source:** The bot will prompt you to select a source of funds using a keyboard. The transaction currency will be determined by the last three characters of the source name. If no source is selected, many operations will be unavailable.
-4.  **Select Category:** After selecting a source, an inline keyboard with categories will appear.
-5.  **Select Subcategory:** After selecting a category, an inline keyboard with subcategories will appear.
-6.  **Enter amount and comment:** After selecting a subcategory, the bot will ask you to enter the transaction amount and, optionally, a comment separated by a space (e.g., `150.50 Lunch at cafe`).
-7.  **Data logging:** The data will be recorded in the Google Sheet on the `fact` sheet.
+1.  **Send `/start`** and pick a source (card) on the keyboard.
+2.  **Pick a category and a subcategory** on the inline keyboards.
+3.  **Type the amount and an optional comment**: `48000 latte`, `5 000,50 lunch`. A leading `+` records incoming money: `+20000 refund`.
+4.  **Or just send an SMS, a screenshot, a PDF/Excel/CSV file** — Gemini extracts the transactions; the bot converts currencies, picks the card by its number, checks categories against `system` and writes all rows in one request. Rows it cannot write are listed in the reply.
 
-### Other commands and features:
+### Commands
 
-*   **`/reboot`**: Updates the lists of categories, subcategories, and sources from the Google Sheet (`system` sheet) without restarting the bot. Useful if you've made changes to the sheet.
-*   **"SMS" Button**:
-    *   After selecting a source, press the "SMS" button on the inline category keyboard.
-    *   The bot will switch to SMS waiting mode.
-    *   Paste the text of one or more SMS messages from your bank.
-    *   The bot will attempt to recognize the date, amount, currency, and transaction type (income/expense) from each SMS.
-    *   Recognized transactions will be added to the `fact` sheet. The comment will be part of the SMS text, and the category will be the transaction type.
-*   **"Back" Navigation**: Use the "⬅️ Back" buttons to return to previous selection steps.
-*   **Changing Source**: Simply press the button with the desired source on the main keyboard (which appears after `/start` or when changing sources). Category and subcategory selections will be reset, and you'll need to choose them again for the new source.
+*   **`/analytics`** — report for the last 3 days with charts.
+*   **`/advice`** — AI analysis of spending vs. the current month plan.
+*   **`/reboot`** — reload categories, subcategories and sources from the `system` sheet.
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+ruff check . && black --check . && pytest -q
+```
+
+CI runs the same checks on every push and pull request.
 
 ## Contributing
 
