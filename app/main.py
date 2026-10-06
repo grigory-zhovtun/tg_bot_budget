@@ -54,6 +54,8 @@ def setup_logging() -> None:
     )
     # httpx на уровне INFO пишет полный URL запроса к Telegram, а в нём токен бота
     logging.getLogger("httpx").setLevel(logging.WARNING)
+    # apscheduler на INFO пишет 4 строки на каждый запуск задачи
+    logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
 async def _post_init(application: Application) -> None:

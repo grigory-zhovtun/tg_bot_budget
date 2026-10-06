@@ -65,6 +65,7 @@ def test_bad_or_missing_report_settings_do_not_break_start(
 def test_httpx_logs_no_request_urls() -> None:
     main.setup_logging()
     assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+    assert logging.getLogger("apscheduler").getEffectiveLevel() >= logging.WARNING
 
 
 async def test_gemini_self_check_does_not_delay_the_start() -> None:
