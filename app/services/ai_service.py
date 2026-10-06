@@ -1,9 +1,15 @@
+"""Gemini: разбор операций из SMS, скриншотов и файлов, финансовый анализ."""
+
 import asyncio
 import json
 import logging
-from typing import Any
+import re
+import time
+from typing import Any, Literal
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
+from pydantic import BaseModel, TypeAdapter
 
 from app import config
 from app.domain import local_today
@@ -11,237 +17,280 @@ from app.services.google_sheets import GoogleSheetsService
 
 logger = logging.getLogger(__name__)
 
+HINTS_TTL_SECONDS = 30 * 60
+MAX_HINTS = 300
+SELF_CHECK_SMS = "Pokupka: TEST CAFE, 1000.00 UZS, 01.10.2026 12:00, karta *0000"
+# Листы месяцев называются «Oct 26»; список, а не strftime — не зависит от локали
+MONTHS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
+
+
+class AiTransaction(BaseModel):
+    """Схема ответа Gemini (structured output). Проверка значений — в app.domain."""
+
+    amount: float
+    currency: str | None = None
+    date: str | None = None
+    category: str | None = None
+    subcategory: str | None = None
+    comment: str | None = None
+    source: str | None = None
+    direction: Literal["expense", "income", "transfer_out", "transfer_in", "refund"]
+    balance: float | None = None
+    card_identifier: str | None = None
+
+
+RESPONSE_SCHEMA = TypeAdapter(list[AiTransaction]).json_schema()
+
+# Комментарии, по которым не понять магазин: служебные строки бюджета
+_GENERIC = re.compile(
+    r"^(без мерчанта|humo, тсп|выравнивание|перевод|конвертация|снятие|внесение|"
+    r"комиссия|остаток|наличные|←|→|ai$|\?\?)",
+    re.IGNORECASE,
+)
+
+
+def merchant_key(comment: str) -> str | None:
+    """«AI: Ip Ooo Anglesey Food (Сингапур); ≈ 3 USD» → «IP OOO ANGLESEY FOOD»."""
+    text = re.sub(r"^(AI|SMS):\s*", "", (comment or "").strip(), flags=re.IGNORECASE)
+    if not text or _GENERIC.match(text):
+        return None
+    text = re.split(r"[;(,]| ≈ ", text, maxsplit=1)[0]
+    text = re.sub(r"\s+", " ", text).strip().upper()[:40]
+    return text if len(text) >= 3 and not text.isdigit() else None
+
+
+def merchant_hints(rows: list[list[Any]], limit: int = MAX_HINTS) -> list[str]:
+    """Как владелец раньше разносил магазины: «KEY → категория / подкатегория».
+
+    Берутся последние операции (свежие первыми), по одной строке на магазин.
+    Это заменяет 5000 строк истории в промпте: ~300 строк вместо ~100 тыс. токенов.
+    """
+    hints: dict[str, str] = {}
+    for row in reversed(rows[1:]):
+        if len(hints) >= limit:
+            break
+        cells = [str(cell).strip() for cell in row[:6]] + [""] * (6 - len(row[:6]))
+        category, subcategory, comment = cells[1], cells[2], cells[5]
+        key = merchant_key(comment)
+        if key and category and subcategory and key not in hints:
+            hints[key] = f"{category} / {subcategory}"
+    return [f"{key} → {target}" for key, target in hints.items()]
+
+
+def build_parse_prompt(
+    user_input: str,
+    today: str,
+    categories: list[str],
+    subcategories: dict[str, list[str]],
+    sources: list[str],
+    hints: list[str],
+) -> str:
+    tree = "\n".join(
+        f"- {cat}: {', '.join(subcategories.get(cat, []))}" for cat in categories
+    )
+    known = "\n".join(hints) or "(пока нет)"
+    return f"""You extract bank transactions for a personal budget in Google Sheets.
+Today is {today} (Asia/Tashkent). Return one JSON object per transaction.
+
+Sources — return exactly one of these names, or null if the input names no card:
+{", ".join(sources)}
+
+Categories and their subcategories — copy the strings exactly, emoji included:
+{tree}
+
+How the owner categorized merchants before (newest first). If the merchant is
+listed, use the same category and subcategory:
+{known}
+
+Rules:
+1. amount: positive number exactly as written; the sign goes to direction.
+2. currency: ISO code of that amount as written (UZS, USD, RUB, EUR, SGD...);
+   null if not stated. Never convert.
+3. direction: expense = purchase/payment/fee (Xarid, Pokupka, Oplata, Spisanie);
+   transfer_out = money sent to another card or cash withdrawal;
+   transfer_in = money received that is not salary (popolnen, zachislenie,
+   perevod na kartu, P2P received); refund = return of a purchase (vozvrat,
+   otmena); income = salary, bonus, advance (ZP, zarplata, avans, premiya).
+4. date: DD.MM.YYYY of the transaction itself; use {today} only if no date is
+   shown.
+5. source and card_identifier: the card whose number appears in the input
+   (e.g. *9120); card_identifier is its last 4 digits.
+6. comment: merchant, sender or a short raw description — never empty.
+7. balance: card balance only if the input says so explicitly (Ostatok,
+   Остаток, Dostupno, Доступно, Balance, Qoldiq); otherwise null.
+8. Screenshots and statements: every transaction row is a separate object.
+
+Input:
+{user_input}"""
+
 
 class GeminiService:
-    def __init__(self, gs_service: GoogleSheetsService):
+    def __init__(self, gs_service: GoogleSheetsService) -> None:
         self.gs_service = gs_service
-        self._setup_client()
-
-    def _setup_client(self):
-        if config.GEMINI_API_KEY:
-            genai.configure(api_key=config.GEMINI_API_KEY)
-
-            # Based on logs, 'gemini-flash-latest' is available and safe.
-            self.model = genai.GenerativeModel("gemini-flash-latest")
-            logger.info("Gemini AI client configured with 'gemini-flash-latest'.")
-        else:
+        self.model_name = config.GEMINI_MODEL
+        self.client = (
+            genai.Client(api_key=config.GEMINI_API_KEY)
+            if config.GEMINI_API_KEY
+            else None
+        )
+        self._hints: tuple[float, list[str]] | None = None
+        if self.client is None:
             logger.warning("GEMINI_API_KEY not found. AI features will be disabled.")
-            self.model = None
 
-    def get_history_context(self, limit: int = 50) -> str:
-        """
-        Fetches recent transactions from Google Sheets to use as few-shot examples.
-        Returns a formatted string for the prompt.
-        """
+    @property
+    def enabled(self) -> bool:
+        return self.client is not None
+
+    def _load_hints(self) -> list[str]:
+        """Подсказки по магазинам из листа fact; кэш на 30 минут."""
+        now = time.monotonic()
+        if self._hints and now - self._hints[0] < HINTS_TTL_SECONDS:
+            return self._hints[1]
         try:
-            # We need to access the sheet directly.
-            # Assuming gs_service has a method or we access client.
-            # Ideally GS service should expose 'get_recent_rows'.
-            # For now, we will use the internal sheet object if available or add a method to GS service.
-            # Let's add a method to GS service or just use private access if we must (not ideal).
-            # Better: use gs_service.sheet.worksheet(config.FACT_SHEET_NAME).get_all_values()
-            # But that pulls ALL rows. Inefficient for large history.
-            # We'll do it for now or assume recent rows.
+            rows = self.gs_service.get_all_records(config.FACT_SHEET_NAME)
+            hints = merchant_hints(rows)
+        except Exception:
+            logger.exception("Could not build merchant hints, parsing without them")
+            hints = []
+        self._hints = (now, hints)
+        return hints
 
-            # Use the robust service method with retry logic
-            all_values = self.gs_service.get_all_records(config.FACT_SHEET_NAME)
-            # Assuming standard columns: Date, Category, Subcategory, Amount, ..., Comment, ...
-            # We want Date, Category, Subcat, Amount, Comment, Source
-
-            # Take last 'limit' rows
-            recent_rows = (
-                all_values[-limit:] if len(all_values) > limit else all_values[1:]
-            )
-
-            context_str = "History of recent user transactions (Format: Date | Category | Subcategory | Amount | Comment | Source):\n"
-            for row in recent_rows:
-                # Safe index access
-                try:
-                    # Adjust indices based on your sheet structure:
-                    # 0:Date, 1:Cat, 2:Sub, 3:Amt, 5:Comment, 7:Source (based on bot.py)
-                    d = row[0]
-                    c = row[1]
-                    s = row[2]
-                    a = row[3]
-                    cmt = row[5] if len(row) > 5 else ""
-                    src = row[7] if len(row) > 7 else ""
-                    context_str += f"{d} | {c} | {s} | {a} | {cmt} | {src}\n"
-                except IndexError:
-                    continue
-
-            return context_str
-
-        except Exception as e:
-            logger.error(f"Failed to fetch history context: {e}")
-            return "No history available."
+    async def _generate(
+        self, contents: list[Any], schema: dict[str, Any] | None = None
+    ) -> types.GenerateContentResponse:
+        if self.client is None:
+            raise ValueError("AI сервис не настроен (нет GEMINI_API_KEY)")
+        config_args: dict[str, Any] = {"temperature": 0}
+        if schema is not None:
+            config_args |= {
+                "response_mime_type": "application/json",
+                "response_json_schema": schema,
+            }
+        return await self.client.aio.models.generate_content(
+            model=self.model_name,
+            contents=contents,
+            config=types.GenerateContentConfig(**config_args),
+        )
 
     async def parse_transaction(
         self,
         user_input: str,
-        image_part: Any = None,
+        attachment: bytes | None = None,
+        mime_type: str | None = None,
         known_categories: list[str] | None = None,
         known_sources: list[str] | None = None,
         known_subcategories: dict[str, list[str]] | None = None,
-    ) -> dict[str, Any] | list[dict[str, Any]]:
-        """
-        Parses text or image input using Gemini to extract transaction details.
-        """
-        if not self.model:
-            raise ValueError("AI Service not configured (missing API Key).")
-        known_categories = known_categories or []
-        known_sources = known_sources or []
-        known_subcategories = known_subcategories or {}
-
-        # Increase context to 5000 transactions as requested.
-        # Gemini 1.5 Flash (1M tokens) can easily handle this (~100k-150k tokens).
-        history_context = await asyncio.to_thread(self.get_history_context, 5000)
-
-        cats_str = "\n".join(
-            f"- {cat}: {', '.join(known_subcategories.get(cat, []))}"
-            for cat in known_categories
+    ) -> list[dict[str, Any]]:
+        """Текст, фото (image/jpeg) или PDF (application/pdf) → список операций."""
+        hints = await asyncio.to_thread(self._load_hints)
+        prompt = build_parse_prompt(
+            user_input=user_input,
+            today=local_today(config.ANALYTICS_TIMEZONE).strftime("%d.%m.%Y"),
+            categories=known_categories or [],
+            subcategories=known_subcategories or {},
+            sources=known_sources or [],
+            hints=hints,
         )
-        sources_str = ", ".join(known_sources)
-        today_str = local_today(config.ANALYTICS_TIMEZONE).strftime("%d.%m.%Y")
+        contents: list[Any] = [prompt]
+        if attachment:
+            contents.append(
+                types.Part.from_bytes(
+                    data=attachment, mime_type=mime_type or "image/jpeg"
+                )
+            )
 
-        prompt_parts = [
-            "You are a personal finance assistant. Analyze the input and extract transaction details.",
-            "Allowed categories and their subcategories "
-            f"(copy the strings EXACTLY, emoji included):\n{cats_str}",
-            f"Allowed Sources: {sources_str}",
-            f"\nCONTEXT (User's habits):\n{history_context}\n",
-            "INSTRUCTION:",
-            "1. Extract: Amount (float, ALWAYS POSITIVE), Currency (ISO code of the amount exactly as written in the input: UZS, USD, RUB, EUR, SGD...; null if not stated), Date (DD.MM.YYYY), Category, Subcategory (must belong to the chosen category), Comment, Source, Direction.",
-            "2. Use the History Context to predict the Category and Subcategory based on the Comment/Merchant name.",
-            "3. IMPORTANT: The 'Comment' field MUST contain the Merchant Name, Sender Name, or the raw description of the transaction (e.g. 'IP IVANOV', 'Uber', 'Vkusvill'). Do NOT leave it empty if there is any text identifier.",
-            "4. Source: the exact name from Allowed Sources whose card number appears in the input (e.g. '*9120' -> the source containing 9120); also put the last 4 card digits into 'card_identifier'. If no card is mentioned, return null.",
-            f"5. DATE EXTRACTION (CRITICAL): Look carefully for the transaction date on receipts, bank statements, screenshots. Extract the ACTUAL date shown (formats: DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, 'January 15, 2025', etc). Convert to DD.MM.YYYY format. Only use today's date ({today_str}) if NO date is visible anywhere in the input.",
-            "6. AMOUNT (CRITICAL): Always return POSITIVE amount. If the receipt/statement shows negative number (e.g. -1500, -$50), remove the minus sign and return positive value (1500, 50). The sign is expressed by 'direction', not by the amount.",
-            "6a. DIRECTION (CRITICAL): 'expense' = purchase/payment/fee (Xarid, Pokupka, Oplata, Spisanie); 'transfer_out' = money sent from the card to another card or cash withdrawal; 'transfer_in' = money received on the card that is NOT salary (popolnen, zachislenie, perevod na kartu, P2P received); 'refund' = return of a purchase (vozvrat, otmena); 'income' = salary, bonus, advance (ZP, zarplata, avans, premiya).",
-            "7. BALANCE EXTRACTION (ONLY IF EXPLICITLY PRESENT): Extract 'balance' (float) and 'card_identifier' (last 4 digits) ONLY if the input explicitly contains balance/remaining amount keywords like: 'Остаток', 'Ostatok', 'Balance', 'Баланс', 'Available', 'Доступно', 'Qoldiq'. If NO such keywords found - return null for both fields. NEVER guess or calculate balance.",
-            "8. Return ONLY valid JSON. No markdown formatting.",
-            "9. If input contains MULTIPLE transactions, return a JSON ARRAY of objects. If single transaction, return a single object.",
-            "JSON Schema for single: {'amount': float, 'currency': str|null, 'date': str, 'category': str, 'subcategory': str, 'comment': str, 'source': str|null, 'direction': 'expense'|'income'|'transfer_out'|'transfer_in'|'refund', 'balance': float|null, 'card_identifier': str|null}",
-            "JSON Schema for multiple: [{'amount': float, ...}, {'amount': float, ...}]",
-            f"\nINPUT: {user_input}",
-        ]
+        response = await self._generate(contents, RESPONSE_SCHEMA)
+        if not response.text:
+            raise ValueError("Gemini не вернул ответ (пустой ответ или фильтр)")
+        data = json.loads(response.text)
+        items = data if isinstance(data, list) else [data]
+        logger.info(
+            "Gemini %s parsed %d transaction(s)", response.model_version, len(items)
+        )
+        return items
 
-        content = prompt_parts
-        if image_part:
-            content.append(image_part)
-
+    async def self_check(self) -> None:
+        """Проверка ключа, модели и схемы при старте: результат — в лог."""
+        if not self.enabled:
+            return
         try:
-            response = await asyncio.to_thread(self.model.generate_content, content)
-            text_resp = response.text.replace("```json", "").replace("```", "").strip()
+            prompt = build_parse_prompt(SELF_CHECK_SMS, "01.10.2026", [], {}, [], [])
+            response = await self._generate([prompt], RESPONSE_SCHEMA)
+            items = json.loads(response.text or "[]")
+            logger.info(
+                "Gemini self-check OK: model %s, %d item(s)",
+                response.model_version,
+                len(items),
+            )
+        except Exception:
+            logger.exception("Gemini self-check failed")
 
-            try:
-                data = json.loads(text_resp)
-            except json.JSONDecodeError as json_err:
-                # Handle case when Gemini returns multiple JSON objects without array wrapper
-                if "Extra data" in str(json_err):
-                    # Parse concatenated JSON objects: {...}{...}{...} -> [{...}, {...}, {...}]
-                    objects = []
-                    decoder = json.JSONDecoder()
-                    pos = 0
-                    text_resp = text_resp.strip()
-                    while pos < len(text_resp):
-                        # Skip whitespace
-                        while pos < len(text_resp) and text_resp[pos] in " \t\n\r":
-                            pos += 1
-                        if pos >= len(text_resp):
-                            break
-                        try:
-                            obj, end_pos = decoder.raw_decode(text_resp, pos)
-                            objects.append(obj)
-                            pos = end_pos  # end_pos is absolute position, not relative
-                        except json.JSONDecodeError:
-                            break
-                    if objects:
-                        data = objects if len(objects) > 1 else objects[0]
-                    else:
-                        raise json_err
-                else:
-                    raise json_err
+    def get_history_context(self, limit: int = 2000) -> str:
+        """Последние операции для финансового анализа (/advice)."""
+        all_values = self.gs_service.get_all_records(config.FACT_SHEET_NAME)
+        recent = all_values[-limit:] if len(all_values) > limit else all_values[1:]
+        columns = (0, 1, 2, 3, 5, 6, 7)
+        lines = [
+            " | ".join(str(row[i]) if len(row) > i else "" for i in columns)
+            for row in recent
+        ]
+        return (
+            "History (Date | Category | Subcategory | Amount | Comment | Currency"
+            " | Source):\n" + "\n".join(lines)
+        )
 
-            return data
-        except Exception as e:
-            logger.error(f"Gemini API Error: {e}")
-            # Identify if it was a safety block or parsing error
-            if "safety" in str(e).lower():
-                raise ValueError("AI blocked the content for safety reasons.") from e
-            raise ValueError(f"Could not understand transaction: {e}") from e
-
-    async def analyze_finances(self, custom_context: str = None) -> str:
-        """
-        Analyzes the user's transaction history with budget comparison and forecasting.
-        """
-        if not self.model:
-            raise ValueError("AI Service not configured.")
-
-        # 1. Fetch History (Fact)
+    async def analyze_finances(self, custom_context: str | None = None) -> str:
+        """Анализ трат с планом месяца и прогнозом (/advice)."""
         context = custom_context or await asyncio.to_thread(
             self.get_history_context, 2000
         )
-
-        # 2. Fetch Budget (Plan)
-        # Format: "Dec 25" (English Month + Year)
         now = local_today(config.ANALYTICS_TIMEZONE)
-        # English month names mapping
-        months = [
-            "Jan",
-            "Feb",
-            "Mar",
-            "Apr",
-            "May",
-            "Jun",
-            "Jul",
-            "Aug",
-            "Sep",
-            "Oct",
-            "Nov",
-            "Dec",
-        ]
-        current_month_sheet = f"{months[now.month - 1]} {now.strftime('%y')}"
+        month_sheet = f"{MONTHS[now.month - 1]} {now:%y}"
 
         budget_data = "No budget sheet found for this month."
         try:
             budget_rows = await asyncio.to_thread(
-                self.gs_service.get_all_records, current_month_sheet
+                self.gs_service.get_all_records, month_sheet
             )
-            if budget_rows:
-                # Convert rows to string representation
-                budget_data = "\n".join(
-                    [str(row) for row in budget_rows[:50]]
-                )  # Limit to first 50 rows of budget to save tokens
-            else:
-                budget_data = "Budget sheet exists but is empty."
+            budget_data = "\n".join(str(row) for row in budget_rows[:50]) or (
+                "Budget sheet exists but is empty."
+            )
         except Exception:
-            # It's okay if the sheet doesn't exist, we just note it.
-            pass
+            logger.info("No budget sheet %s", month_sheet)
 
-        prompt = [
-            "You are a strict and concise financial analyst.",
-            f"\nCURRENT DATE: {now.strftime('%d.%m.%Y')}",
-            f"\nTRANSACTION HISTORY (FACT):\n{context}\n",
-            f"\nBUDGET PLAN FOR {current_month_sheet} (PLAN):\n{budget_data}\n",
-            "INSTRUCTIONS:",
-            "1. **3-Month Analysis**: accurately calculate if current spending deviates from the average of the last 3 months.",
-            "2. **Plan vs Fact**: Check the 'Budget Plan' data. Report categories where ACTUAL spending exceeds PLANNED values.",
-            "3. **Forecast**: Estimate total expenses by month-end based on current daily average and remaining days.",
-            "4. **Recommendations**: Short, practical steps to stay within budget.",
-            "CONSTRAINTS:",
-            "- Max 300 words total. STRICTLY.",
-            "- Simple, clear Russian language.",
-            "- Structure: '📊 Анализ', '⚠️ Перерасход', '🔮 Прогноз', '💡 Совет'.",
-            "- No intro/outro fluff.",
-        ]
-
-        try:
-            response = await asyncio.to_thread(self.model.generate_content, prompt)
-            text = response.text
-            # Enforce hard length limit if AI hallucinates long text
-            if len(text) > 4000:
-                text = text[:3900] + "..."
-            return text
-        except Exception as e:
-            logger.error(f"Analysis Error: {e}")
-            return "Не удалось провести анализ. Проверьте, создан ли лист с бюджетом (например, 'Dec 25')."
+        prompt = "\n".join(
+            [
+                "You are a strict and concise financial analyst.",
+                f"CURRENT DATE: {now.strftime('%d.%m.%Y')}",
+                f"TRANSACTION HISTORY (FACT):\n{context}\n",
+                f"BUDGET PLAN FOR {month_sheet} (PLAN):\n{budget_data}\n",
+                "INSTRUCTIONS:",
+                "1. 3-Month Analysis: does current spending deviate from the "
+                "average of the last 3 months?",
+                "2. Plan vs Fact: report categories where ACTUAL spending exceeds "
+                "PLANNED values.",
+                "3. Forecast: estimate total expenses by month-end.",
+                "4. Recommendations: short, practical steps to stay within budget.",
+                "CONSTRAINTS:",
+                "- Max 300 words total. STRICTLY.",
+                "- Simple, clear Russian language.",
+                "- Structure: '📊 Анализ', '⚠️ Перерасход', '🔮 Прогноз', '💡 Совет'.",
+                "- No intro/outro fluff.",
+            ]
+        )
+        response = await self._generate([prompt])
+        text = response.text or "Не удалось провести анализ."
+        return text if len(text) <= 4000 else text[:3900] + "..."

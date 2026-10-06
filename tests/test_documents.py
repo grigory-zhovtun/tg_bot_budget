@@ -81,23 +81,46 @@ async def test_table_document_goes_to_ai_and_temp_file_is_removed(name: str) -> 
     assert sheets.rows[0][1:4] == ["🍔 ЕДА", "кофе", 48000.0]
 
 
-async def test_photo_is_closed_after_ai(monkeypatch: pytest.MonkeyPatch) -> None:
-    seen: list[PIL.Image.Image] = []
+class AttachmentAI(FakeAI):
+    """Запоминает, что пришло в Gemini: текст, байты вложения, MIME-тип."""
 
-    class ImageAI(FakeAI):
-        async def parse_transaction(self, **kwargs: Any) -> Any:
-            seen.append(kwargs["image_part"])
-            return []
+    def __init__(self) -> None:
+        super().__init__([])
+        self.seen: list[dict[str, Any]] = []
 
-    update, context, _ = make_chat("", {}, ImageAI([]))
-    file = FakeFile(lambda path: PIL.Image.new("RGB", (4, 4), "white").save(path))
+    async def parse_transaction(self, **kwargs: Any) -> Any:
+        self.seen.append(kwargs)
+        return []
+
+
+async def test_photo_goes_to_ai_as_jpeg_bytes_and_file_is_removed() -> None:
+    ai = AttachmentAI()
+    update, context, _ = make_chat("", {}, ai)
+    file = FakeFile(
+        lambda path: PIL.Image.new("RGB", (4, 4), "white").save(path, "JPEG")
+    )
     update.message.photo = [SimpleNamespace(get_file=AsyncMock(return_value=file))]
     update.message.caption = None
 
     await messages.text_handler(update, context)
 
-    [image] = seen
-    assert image.size == (4, 4)
+    [call] = ai.seen
+    assert call["mime_type"] == "image/jpeg"
+    assert call["attachment"][:2] == b"\xff\xd8"  # JPEG
     assert file.path is not None and not file.path.exists()
-    with pytest.raises(ValueError):
-        image.load()  # закрытая картинка больше не читается
+
+
+async def test_pdf_goes_to_ai_as_is() -> None:
+    ai = AttachmentAI()
+    update, context, _ = make_chat("", {}, ai)
+    file = FakeFile(lambda path: path.write_bytes(b"%PDF-1.7 statement"))
+    attach_document(update, "выписка.pdf", "application/pdf", file)
+
+    await messages.document_handler(update, context)
+
+    [call] = ai.seen
+    assert (call["attachment"], call["mime_type"]) == (
+        b"%PDF-1.7 statement",
+        "application/pdf",
+    )
+    assert file.path is not None and not file.path.exists()

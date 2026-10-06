@@ -48,6 +48,7 @@ def setup_logging() -> None:
 
 async def _post_init(application: Application) -> None:
     await application.bot.set_my_commands(COMMANDS)
+    await application.bot_data["ai_service"].self_check()
 
 
 async def _daily_analytics(context: ContextTypes.DEFAULT_TYPE) -> None:

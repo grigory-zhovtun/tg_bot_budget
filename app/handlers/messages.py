@@ -5,7 +5,6 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-import PIL.Image
 from pydantic import ValidationError
 from telegram import File, Message, Update
 from telegram.ext import ContextTypes
@@ -46,13 +45,6 @@ async def _downloaded(file: File, suffix: str) -> AsyncIterator[Path]:
         path = Path(folder) / f"upload{suffix}"
         await file.download_to_drive(path)
         yield path
-
-
-def _load_image(path: Path) -> PIL.Image.Image:
-    """Прочитать картинку в память, чтобы файл можно было сразу удалить."""
-    image = PIL.Image.open(path)
-    image.load()
-    return image
 
 
 async def _delete_quietly(message: Message | None) -> None:
@@ -159,12 +151,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Prepare Image if photo
-    image_part = None
+    # Photo: Telegram always sends JPEG; read it into memory and drop the file
+    photo = None
     if is_photo:
         photo_file = await update.message.photo[-1].get_file()
         async with _downloaded(photo_file, ".jpg") as path:
-            image_part = _load_image(path)
+            photo = path.read_bytes()
 
     # Delete user's message (text/SMS/photo) to keep chat clean
     await _delete_quietly(update.message)
@@ -175,8 +167,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         catalog = _catalog(context)
         result = await ai_service.parse_transaction(
-            user_input=msg_text or "Image Input",
-            image_part=image_part,
+            user_input=msg_text or "Скриншот банка или фото чека",
+            attachment=photo,
+            mime_type="image/jpeg" if photo else None,
             known_categories=catalog.categories,
             known_sources=catalog.sources,
             known_subcategories=catalog.subcategories,
@@ -194,9 +187,6 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.exception("AI parsing failed")
         await update.effective_chat.send_message(f"Ошибка AI: {user_message(e)}")
-    finally:
-        if image_part is not None:
-            image_part.close()
 
 
 async def _to_rows(
@@ -314,8 +304,14 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         file = await document.get_file()
+        attachment = None
         async with _downloaded(file, Path(file_name).suffix) as path:
-            extracted_text = _extract_text(path, is_pdf=is_pdf, is_excel=is_excel)
+            if is_pdf:
+                # Gemini читает PDF сам: сканы, таблицы, все страницы
+                attachment = path.read_bytes()
+                extracted_text = "Выписка или документ с операциями во вложении (PDF)"
+            else:
+                extracted_text = _table_text(path, is_excel=is_excel)
 
         if not extracted_text.strip():
             await update.effective_chat.send_message(
@@ -326,6 +322,8 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         catalog = _catalog(context)
         result = await ai_service.parse_transaction(
             user_input=extracted_text,
+            attachment=attachment,
+            mime_type="application/pdf" if attachment else None,
             known_categories=catalog.categories,
             known_sources=catalog.sources,
             known_subcategories=catalog.subcategories,
@@ -341,14 +339,8 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
-def _extract_text(path: Path, *, is_pdf: bool, is_excel: bool) -> str:
-    """Текст документа для AI: PDF — первые 10 страниц, таблицы — 500 строк."""
-    if is_pdf:
-        from pypdf import PdfReader  # PyPDF2 заброшен, CVE-2023-36464
-
-        reader = PdfReader(path)
-        return "".join(page.extract_text() or "" for page in reader.pages[:10])
-
+def _table_text(path: Path, *, is_excel: bool) -> str:
+    """Таблица (Excel/CSV) текстом для AI, до 500 строк."""
     import pandas as pd
 
     frame = pd.read_excel(path) if is_excel else pd.read_csv(path)

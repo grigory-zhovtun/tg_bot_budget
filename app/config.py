@@ -52,6 +52,8 @@ LOCAL_RUN = os.getenv("LOCAL_RUN", "False").lower() == "true"
 
 # AI
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Псевдоним на актуальную Flash-модель; конкретную версию видно в логах
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 # We don't raise error immediately to allow bot to start if key is missing (feature flag logic),
 # but for this specific request, it's critical.
 # However, user might deploy first then add key.
