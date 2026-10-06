@@ -18,6 +18,7 @@ This Telegram bot is designed for convenient personal finance tracking. It allow
 *   **Categorization:** Assign categories and subcategories to each transaction.
 *   **Source Management:** Select the source of funds (e.g., card, cash) with automatic currency detection.
 *   **SMS Parsing:** Automatically recognize and add transactions from bank SMS messages.
+*   **Bank Statements:** Kapitalbank PDF statements («История операций») are parsed without AI: transfers between own cards are paired, categories come from how the same shop was categorized before (Gemini suggests one for new shops), rows already in the sheet are skipped, and nothing is written before you confirm the preview.
 *   **Google Sheets Integration:** All data is saved and updated in real-time in the specified Google Sheet.
 *   **Dynamic Keyboards:** User-friendly interface with buttons for selecting categories, sources, and other actions.
 *   **On-the-fly Data Updates:** The `/reboot` command reloads categories, subcategories, and sources from the Google Sheet without restarting the bot.
@@ -121,6 +122,7 @@ Ensure your Google Sheet contains two sheets:
     *   **Column B:** Subcategories (e.g., for "Groceries": "Supermarket", "Market"). The corresponding category from Column A must be specified.
     *   **Column F:** Sources (e.g., "Card UZS", "Cash USD"). The last 3 characters of the source name are used to determine the currency (e.g., "UZS", "USD").
     *   **Columns H:I (rows 2–10):** currency code and its rate to UZS (`GOOGLEFINANCE`). Used to convert an SMS amount in another currency into the card currency.
+    *   **Column G** (next to the sources): the day up to which bank statements are loaded. The bot fills it after each import.
 
 ### 7. Running the bot:
 
@@ -136,6 +138,11 @@ Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this
 2.  **Pick a category and a subcategory** on the inline keyboards.
 3.  **Type the amount and an optional comment**: `48000 latte`, `5 000,50 lunch`. A leading `+` records incoming money: `+20000 refund`.
 4.  **Or just send an SMS, a screenshot, a PDF/Excel/CSV file** — Gemini extracts the transactions; the bot converts currencies, picks the card by its number, checks categories against `system` and writes all rows in one request. Rows it cannot write are listed in the reply.
+5.  **Send Kapitalbank statements** (PDF «История операций», one or several cards at once). The bot waits a few seconds for all files, then shows one preview: new rows, rows already in the sheet, how each card balance changes and rows worth checking. **✅ Записать** writes everything in one go:
+    *   operations booked up to the date in `system!G` («выписка по», next to the card) were loaded before and are skipped; after the import the date moves to the last full day of the statement;
+    *   a row the bot once converted at the sheet rate (comment with `≈`) gets the bank amount instead of a second row;
+    *   a temporary balancing row (comment contains `ВРЕМЕННАЯ`) is deleted once a statement covers its date;
+    *   sending the same statements again changes nothing.
 
 ### Commands
 
