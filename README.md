@@ -70,6 +70,7 @@ GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 # ANALYTICS_CHAT_ID="123456789"
 # ANALYTICS_TIME="07:00"
 # ANALYTICS_TIMEZONE="Asia/Tashkent"   # also used for "today" in new rows
+# WEEKLY_DIGEST_TIME="20:00"           # Sunday digest to the owner; "off" disables it
 
 # Optional webhook mode (otherwise the bot polls Telegram)
 # WEBHOOK_URL="https://your-domain.com"   # RENDER_EXTERNAL_URL is used if empty
@@ -146,6 +147,10 @@ Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this
     *   a temporary balancing row (comment contains `ВРЕМЕННАЯ`) is deleted once a statement covers its date;
     *   sending the same statements again changes nothing.
 
+### Weekly digest
+
+On Sundays at `WEEKLY_DIGEST_TIME` (default `20:00`, `off` disables it) the owner gets the week's spending against the previous week, the three biggest subcategories and the `/plan` report.
+
 ### Monthly plan tabs
 
 Every day at 00:05 (`ANALYTICS_TIMEZONE`) and right after start the bot checks the tab of the current month («Nov 26»). If it is missing, the bot copies the latest month tab (the plan stays the same), sets the month dates in `M1:M2`, hides past months and tells the owner (`ANALYTICS_CHAT_ID`, otherwise the first id from `ALLOWED_USER_IDS`). Fact values in the tab are formulas over `fact` and the dates in `M1:M2`, so nothing else changes.
@@ -153,6 +158,7 @@ Every day at 00:05 (`ANALYTICS_TIMEZONE`) and right after start the bot checks t
 ### Commands
 
 *   **`/analytics`** — report for the last 3 days with charts.
+*   **`/plan`** — month plan vs fact without AI: spending pace against the calendar, what is left per day, lines over plan, close to the plan (80%+) and outside the plan. Lines of one subcategory in different currencies are added up in UZS.
 *   **`/advice`** — AI analysis of spending vs. the current month plan.
 *   **`/undo`** — delete the rows of the last write, if nobody changed them in the sheet since.
 *   **`/reboot`** — reload categories, subcategories and sources from the `system` sheet.

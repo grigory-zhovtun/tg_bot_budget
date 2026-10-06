@@ -33,7 +33,7 @@ def test_gate_runs_before_all_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
         if isinstance(handler, CommandHandler)
         for command in handler.commands
     }
-    assert commands == {"start", "reboot", "advice", "analytics", "undo"}
+    assert commands == {"start", "reboot", "advice", "analytics", "undo", "plan"}
 
 
 def test_daily_report_is_scheduled_in_owner_timezone(
@@ -101,3 +101,19 @@ def test_month_tab_is_checked_daily_and_on_start(
         daily.trigger.fields[6].expressions[0].first,
     ) == (0, 5)
     assert "month_tab_on_start" in jobs
+
+
+def test_weekly_digest_runs_on_sunday_evening(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = build(monkeypatch, WEEKLY_DIGEST_TIME="20:00")
+    job = {job.name: job for job in app.job_queue.jobs()}["weekly_digest"]
+    fields = {field.name: str(field) for field in job.trigger.fields}
+    assert (fields["day_of_week"], fields["hour"], fields["minute"]) == (
+        "sun",
+        "20",
+        "0",
+    )
+
+
+def test_weekly_digest_can_be_switched_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = build(monkeypatch, WEEKLY_DIGEST_TIME="off")
+    assert "weekly_digest" not in {job.name for job in app.job_queue.jobs()}
