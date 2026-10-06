@@ -27,9 +27,9 @@ from app.domain import (
     FALLBACK_SUBCATEGORY,
     INCOME_GROUP,
     Catalog,
+    MerchantBook,
     SheetRow,
     currency_of,
-    merchant_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -411,51 +411,6 @@ def fact_rows(values: list[list[Any]]) -> list[FactRow]:
 
 # --- категории ------------------------------------------------------------------
 
-# Организационно-правовые формы и служебные слова в названиях магазинов
-LEGAL_WORDS = frozenset(
-    "OOO ООО MCHJ MCHDJ QK XK IP ИП ЧП CHP YATT YTT LLC LTD PTE CO INC AJ AO SP THE".split()
-)
-
-
-def merchant_core(name: str) -> str:
-    """«Markthof MCHJ QK» → «MARKTHOF», «Transit 3075061…» → «TRANSIT»."""
-    words = re.sub(r"[^0-9A-ZА-ЯЁ]+", " ", name.upper()).split()
-    return " ".join(w for w in words if w not in LEGAL_WORDS and not w.isdigit())
-
-
-class MerchantBook:
-    """Как владелец раньше разносил магазины в fact (свежие строки важнее)."""
-
-    def __init__(self, rows: list[FactRow]) -> None:
-        self.exact: dict[str, tuple[str, str]] = {}
-        self.core: dict[str, tuple[str, str]] = {}
-        self.first: dict[str, set[tuple[str, str]]] = defaultdict(set)
-        for row in reversed(rows):
-            key = merchant_key(row.comment)
-            if not key or not row.category or not row.subcategory:
-                continue
-            target = (row.category, row.subcategory)
-            self.exact.setdefault(key, target)
-            if core := merchant_core(key):
-                self.core.setdefault(core, target)
-                self.first[core.split()[0]].add(target)
-
-    def find(self, name: str) -> tuple[str, str] | None:
-        key = merchant_key(name)
-        if not key:
-            return None
-        if key in self.exact:
-            return self.exact[key]
-        core = merchant_core(key)
-        if not core:
-            return None
-        if core in self.core:
-            return self.core[core]
-        word = core.split()[0]
-        targets = self.first.get(word, set())
-        # по первому слову — только если все такие магазины в одной категории
-        return next(iter(targets)) if len(word) >= 4 and len(targets) == 1 else None
-
 
 @dataclass(frozen=True)
 class ImportRow:
@@ -795,6 +750,7 @@ def plan_import(
                 if f.temporary and f.source == statement.source and f.day <= until
             ]
 
-    rows = categorize(fresh, pairs, MerchantBook(facts), catalog, ai_categories)
+    book = MerchantBook((f.category, f.subcategory, f.comment) for f in facts)
+    rows = categorize(fresh, pairs, book, catalog, ai_categories)
     plan.rows, plan.already, plan.adjustments = reconcile(rows, facts)
     return plan

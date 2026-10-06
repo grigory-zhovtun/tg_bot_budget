@@ -15,6 +15,7 @@ from app import config
 from app.domain import (
     FALLBACK_CATEGORY,
     Catalog,
+    MerchantBook,
     local_today,
     merchant_key,
     resolve_category,
@@ -88,6 +89,19 @@ def merchant_hints(rows: list[list[Any]], limit: int = MAX_HINTS) -> list[str]:
     return [f"{key} → {target}" for key, target in hints.items()]
 
 
+def use_history(item: dict[str, Any], book: MerchantBook) -> None:
+    """Известный магазин — категория владельца из fact, а не догадка модели.
+
+    «РАЗНОЕ» в истории не считается решением владельца: там модель решает сама.
+    """
+    known = book.find(str(item.get("comment") or ""))
+    if known is None or known[0] == FALLBACK_CATEGORY:
+        return
+    if (item.get("category"), item.get("subcategory")) != known:
+        logger.info("Category of %s taken from history", merchant_key(item["comment"]))
+    item["category"], item["subcategory"] = known
+
+
 def build_parse_prompt(
     user_input: str,
     today: str,
@@ -126,7 +140,10 @@ Rules:
    shown.
 5. source and card_identifier: the card whose number appears in the input
    (e.g. *9120); card_identifier is its last 4 digits.
-6. comment: merchant, sender or a short raw description — never empty.
+6. comment: the merchant or sender name exactly as written in the input
+   (e.g. OOO SHAVI CAFE) — the owner's history above is matched by it. If the
+   user added their own words, put them after a comma (SHOWPRO, струны).
+   Only when the input has no name, a short description. Never empty.
 7. balance: card balance only if the input says so explicitly (Ostatok,
    Остаток, Dostupno, Доступно, Balance, Qoldiq); otherwise null.
 8. Screenshots and statements: every transaction row is a separate object.
@@ -179,7 +196,7 @@ class GeminiService:
             if config.GEMINI_API_KEY
             else None
         )
-        self._hints: tuple[float, list[str]] | None = None
+        self._hints: tuple[float, list[str], MerchantBook] | None = None
         if self.client is None:
             logger.warning("GEMINI_API_KEY not found. AI features will be disabled.")
 
@@ -187,19 +204,22 @@ class GeminiService:
     def enabled(self) -> bool:
         return self.client is not None
 
-    def _load_hints(self) -> list[str]:
-        """Подсказки по магазинам из листа fact; кэш на 30 минут."""
+    def _history(self) -> tuple[list[str], MerchantBook]:
+        """Подсказки для промпта и книга магазинов из листа fact; кэш на 30 минут."""
         now = time.monotonic()
         if self._hints and now - self._hints[0] < HINTS_TTL_SECONDS:
-            return self._hints[1]
+            return self._hints[1], self._hints[2]
         try:
             rows = self.gs_service.get_all_records(config.FACT_SHEET_NAME)
-            hints = merchant_hints(rows)
+            hints, book = merchant_hints(rows), MerchantBook.from_sheet(rows)
         except Exception:
-            logger.exception("Could not build merchant hints, parsing without them")
-            hints = []
-        self._hints = (now, hints)
-        return hints
+            logger.exception("Could not read merchant history, parsing without it")
+            hints, book = [], MerchantBook([])
+        self._hints = (now, hints, book)
+        return hints, book
+
+    def _load_hints(self) -> list[str]:
+        return self._history()[0]
 
     async def _generate(
         self,
@@ -250,8 +270,12 @@ class GeminiService:
         known_sources: list[str] | None = None,
         known_subcategories: dict[str, list[str]] | None = None,
     ) -> list[dict[str, Any]]:
-        """Текст, фото (image/jpeg) или PDF (application/pdf) → список операций."""
-        hints = await asyncio.to_thread(self._load_hints)
+        """Текст, фото (image/jpeg) или PDF (application/pdf) → список операций.
+
+        Магазин, который уже есть в таблице, получает категорию из истории:
+        подсказки в промпте модель (особенно запасная) иногда пропускает.
+        """
+        hints, book = await asyncio.to_thread(self._history)
         prompt = build_parse_prompt(
             user_input=user_input,
             today=local_today(config.ANALYTICS_TIMEZONE).strftime("%d.%m.%Y"),
@@ -280,6 +304,9 @@ class GeminiService:
         logger.info(
             "Gemini %s parsed %d transaction(s)", response.model_version, len(items)
         )
+        for item in items:
+            if isinstance(item, dict):
+                use_history(item, book)
         return items
 
     async def self_check(self) -> None:

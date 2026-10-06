@@ -69,6 +69,7 @@ def test_prompt_contains_catalog_hints_and_rules() -> None:
     assert "VISA 9120 UZS" in prompt
     assert "OOO SHAVI CAFE → 🍔 ЕДА / кофе" in prompt
     assert "transfer_in" in prompt and "Never convert" in prompt
+    assert "exactly as written in the input" in prompt  # имя магазина — ключ истории
     assert prompt.endswith("Pokupka 48000 UZS")
 
 
@@ -124,7 +125,8 @@ async def test_parse_sends_schema_and_attachment_and_returns_list() -> None:
         "фото чека", attachment=b"\xff\xd8jpeg", mime_type="image/jpeg"
     )
 
-    assert items == answer
+    # магазин есть в истории (Shavi → кофе): категорию дописал бот, а не модель
+    assert items == [{**answer[0], "category": "🍔 ЕДА", "subcategory": "кофе"}]
     [call] = models.calls
     assert call["model"] == "gemini-flash-latest"
     config: types.GenerateContentConfig = call["config"]
@@ -339,3 +341,52 @@ async def test_all_models_silent_gives_a_clear_message(
     await with_models(models).self_check()
     assert [r.levelname for r in caplog.records].count("ERROR") == 0
     assert "Gemini self-check: no answer (ReadTimeout)" in caplog.text
+
+
+class HistorySheets(FakeSheets):
+    def get_all_records(self, name: str) -> list[list[Any]]:
+        self.reads += 1
+        return [
+            HEADER,
+            ["01.03.2026", "🚧 РАЗНОЕ", "неучтенка", 670000, "", "AI: Showpro"],
+            ["27.08.2026", "⛱️ ОТДЫХ", "развлечения", 2660000, "", "AI: Showpro"],
+            ["01.09.2026", "🚧 РАЗНОЕ", "неучтенка", 1, "", "AI: Toredo Solutions"],
+        ]
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        # модель не применила подсказку — категорию берёт история (свежая строка)
+        (
+            {
+                "comment": "SHOWPRO, струны",
+                "category": "🚧 РАЗНОЕ",
+                "subcategory": "неучтенка",
+            },
+            ("⛱️ ОТДЫХ", "развлечения"),
+        ),
+        # «РАЗНОЕ» в истории — не решение владельца: остаётся ответ модели
+        (
+            {
+                "comment": "TOREDO SOLUTIONS",
+                "category": "🏚️ ДОМ",
+                "subcategory": "инвентарь",
+            },
+            ("🏚️ ДОМ", "инвентарь"),
+        ),
+        # нового магазина в истории нет
+        (
+            {"comment": "NEW SHOP", "category": "🍔 ЕДА", "subcategory": "кафе"},
+            ("🍔 ЕДА", "кафе"),
+        ),
+    ],
+)
+async def test_known_merchant_gets_the_owner_category(
+    answer: dict[str, Any], expected: tuple[str, str]
+) -> None:
+    item = {"amount": 333000, "direction": "expense", **answer}
+    service, _, _ = make_service(json.dumps([item]))
+    service.gs_service = HistorySheets()
+    [result] = await service.parse_transaction("SMS")
+    assert (result["category"], result["subcategory"]) == expected
