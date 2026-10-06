@@ -7,8 +7,10 @@ from typing import Any
 import pytest
 from google.genai import errors, types
 
+from app.domain import Catalog
 from app.services import ai_service
 from app.services.ai_service import (
+    MERCHANTS_SCHEMA,
     RESPONSE_SCHEMA,
     GeminiService,
     build_parse_prompt,
@@ -244,3 +246,57 @@ def test_overload_message_for_the_chat() -> None:
     assert user_message(overloaded(503)) == (
         "Gemini сейчас перегружен, попробуйте через минуту"
     )
+
+
+CATALOG = Catalog(
+    categories=["🍔 ЕДА", "🏚️ ДОМ", "🚧 РАЗНОЕ"],
+    subcategories={
+        "🍔 ЕДА": ["кофе", "кафе"],
+        "🏚️ ДОМ": ["продукты"],
+        "🚧 РАЗНОЕ": ["неучтенка"],
+    },
+    sources=["VISA 9120 UZS"],
+)
+
+
+async def test_merchants_are_categorized_in_one_call_within_the_catalog() -> None:
+    answer = [
+        {"name": "MARKTHOF MCHJ", "category": "ДОМ", "subcategory": "продукты"},
+        {"name": "PIE POINT", "category": "🍔 ЕДА", "subcategory": "кафе"},
+        {"name": "UNKNOWN SHOP", "category": "🚧 РАЗНОЕ", "subcategory": "неучтенка"},
+        {"name": "ODD", "category": "🍔 ЕДА", "subcategory": "пицца"},
+        {"name": "NOT ASKED", "category": "🍔 ЕДА", "subcategory": "кофе"},
+        {"category": "🍔 ЕДА"},
+    ]
+    service, models, _ = make_service(json.dumps(answer))
+
+    found = await service.categorize_merchants(
+        ["MARKTHOF MCHJ", "PIE POINT", "UNKNOWN SHOP", "ODD"], CATALOG
+    )
+
+    assert found == {
+        "MARKTHOF MCHJ": ("🏚️ ДОМ", "продукты"),
+        "PIE POINT": ("🍔 ЕДА", "кафе"),
+    }
+    [call] = models.calls
+    config: types.GenerateContentConfig = call["config"]
+    assert config.response_json_schema == MERCHANTS_SCHEMA
+    [prompt] = call["contents"]
+    assert "1. MARKTHOF MCHJ" in prompt and "4. ODD" in prompt
+    assert "- 🍔 ЕДА: кофе, кафе" in prompt
+    assert "SHAVI → 🍔 ЕДА / кофе" in prompt  # подсказки из истории
+
+
+async def test_no_merchants_no_call() -> None:
+    service, models, _ = make_service("[]")
+    assert await service.categorize_merchants([], CATALOG) == {}
+    service.client = None
+    assert await service.categorize_merchants(["X"], CATALOG) == {}
+    assert models.calls == []
+
+
+async def test_automatic_function_calling_is_off() -> None:
+    service, models, _ = make_service("[]")
+    await service.parse_transaction("1")
+    config: types.GenerateContentConfig = models.calls[0]["config"]
+    assert config.automatic_function_calling.disable is True

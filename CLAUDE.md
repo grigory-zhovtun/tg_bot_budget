@@ -30,10 +30,12 @@ app/
 ├── auth.py              # Allowlist gate (TypeHandler in group -1)
 ├── domain.py            # Sheet rules: sign of the amount, currency conversion, category/source/date validation
 ├── errors.py            # Safe one-line error texts for the chat, application error handler
+├── statements.py        # Kapitalbank PDF statements: parsing, own-transfer pairs, categories, reconcile with fact
 ├── handlers/
 │   ├── common.py        # /start, keyboard helpers, message tracking
 │   ├── admin.py         # /reboot (reload categories from sheets)
 │   ├── messages.py      # Text/photo/document handling, manual entry, AI parsing flow
+│   ├── statement_import.py # Statement preview (JobQueue debounce), confirm buttons, apply_plan
 │   ├── transactions.py  # Callback query handler for inline buttons
 │   └── analytics.py     # /advice, /analytics, daily report
 ├── services/
@@ -51,6 +53,8 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 
 **AI Parsing**: text/photo/document → `GeminiService.parse_transaction()` → each item validated by `domain.ParsedTransaction` → `domain.build_row` (source by card digits, currency conversion with rates from `system!H2:I10`, category/subcategory must exist in `system`, otherwise "🚧 РАЗНОЕ / неучтенка") → one `append_transactions` call → one summary message
 
+**Statement import**: PDF → `statements.pdf_text` → `is_kapitalbank_statement` → `parse_statement` (card by `******NNNN`, period, generation date) → basket in `user_data`, preview job after 4 s → `plan_import` (skip operations booked up to `system!G`, pair own transfers, categories from `MerchantBook` over fact, new shops → `GeminiService.categorize_merchants`, `reconcile`: exact duplicates skipped, `≈` rows corrected, `ВРЕМЕННАЯ` rows removed) → buttons `import:ok|no:<version>` → `apply_plan` (amount fixes → row deletions → append → marks)
+
 **Analytics**: `/analytics` → `AnalyticsService.generate_3day_report()` → text summary + pie/bar charts as PNG
 
 ## Google Sheets Structure
@@ -59,7 +63,7 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
   - Amount sign: expenses and income (`💰 ДОХОДЫ`) positive; incoming money that is not income (transfer to the card, refund) negative.
   - Balance formula: `google_sheets.BALANCE_FORMULA` uses `INDEX(...;ROW())`, no row numbers.
   - Balance block `I2:N…`: column I = source name, column N = bank balance written from SMS ("Остаток", "Dostupno"). The bot finds the cell by source name.
-- **`system` sheet**: Column A: Categories, Column B: Subcategories, Column F: Sources (last 3 chars = currency code), H:I currency rates to UZS.
+- **`system` sheet**: Column A: Categories, Column B: Subcategories, Column F: Sources (last 3 chars = currency code), G: statements loaded up to this day (written by the bot), H:I currency rates to UZS.
 - **Monthly sheets** ("Oct 26"): plan vs fact by Subcategory + Currency (`SUMIFS` on `fact`), used by `/advice`.
 
 ## Environment Variables
@@ -78,7 +82,8 @@ Optional:
 
 - Dependencies injected via `context.bot_data` (gs_service, ai_service, analytics_service, categories, subcategories, sources)
 - User state stored in `context.user_data` (source, category, subcategory)
-- Google Sheets and Gemini clients are synchronous: call them with `asyncio.to_thread` from handlers
+- The Google Sheets client is synchronous: call it with `asyncio.to_thread` from handlers; Gemini uses the async client (`client.aio`)
+- Writes that are not idempotent (row deletion) are not retried: a lost response would make the retry delete other rows
 - Business rules live in `app/domain.py` as pure functions — test them table-driven
 - Never show raw exceptions in the chat: use `errors.user_message(e)`; log with `logger.exception`
 - httpx logger stays at WARNING: at INFO it logs Telegram URLs with the bot token

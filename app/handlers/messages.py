@@ -21,12 +21,14 @@ from app.domain import (
     manual_row,
 )
 from app.errors import user_message
+from app.handlers import statement_import
 from app.handlers.common import (
     clear_tracked_messages,
     show_main_menu,
     track_message,
 )
 from app.services.google_sheets import GoogleSheetsService
+from app.statements import is_kapitalbank_statement, parse_statement, pdf_text
 from app.utils.keyboards import (
     generate_categories_keyboard,
     generate_sources_keyboard,
@@ -293,10 +295,6 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     ai_service = context.bot_data.get("ai_service")
-    if not ai_service or not config.GEMINI_API_KEY:
-        await update.message.reply_text("AI сервис не настроен.")
-        return
-
     await _delete_quietly(update.message)
 
     analyzing_msg = await update.effective_chat.send_message("📄")
@@ -312,6 +310,20 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 extracted_text = "Выписка или документ с операциями во вложении (PDF)"
             else:
                 extracted_text = _table_text(path, is_excel=is_excel)
+
+        if attachment is not None:
+            # Выписку Капиталбанка бот разбирает сам, без AI и без лимитов модели
+            text = await asyncio.to_thread(pdf_text, attachment)
+            if is_kapitalbank_statement(text):
+                statement = parse_statement(text, _catalog(context).sources)
+                await statement_import.receive_statement(
+                    update, context, statement, analyzing_msg
+                )
+                return
+
+        if not ai_service or not config.GEMINI_API_KEY:
+            await update.effective_chat.send_message("AI сервис не настроен.")
+            return
 
         if not extracted_text.strip():
             await update.effective_chat.send_message(
