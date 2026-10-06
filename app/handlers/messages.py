@@ -28,6 +28,7 @@ from app.domain import (
 from app.errors import user_message
 from app.handlers import statement_import
 from app.handlers.common import (
+    CHOOSE_SOURCE,
     LAST_WRITE,
     SEEN_INPUTS,
     clear_tracked_messages,
@@ -148,9 +149,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if clean_text in sources:
             context.user_data["source"] = clean_text
             await _delete_quietly(update.message)
-            # Silent update - just show keyboards
+            # Клавиатура карт держится на сообщении, а пустой или «невидимый»
+            # текст Telegram отвергает (Message_empty) — показываем выбранную карту
             msg1 = await update.effective_chat.send_message(
-                "ㅤ",  # Invisible character for minimal text
+                f"💳 {clean_text}",
                 reply_markup=generate_sources_keyboard(sources, clean_text),
             )
             track_message(context, msg1)
@@ -179,7 +181,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 track_message(context, msg)
             else:
                 msg = await update.effective_chat.send_message(
-                    "ㅤ", reply_markup=generate_sources_keyboard(sources)
+                    CHOOSE_SOURCE, reply_markup=generate_sources_keyboard(sources)
                 )
                 track_message(context, msg)
             return

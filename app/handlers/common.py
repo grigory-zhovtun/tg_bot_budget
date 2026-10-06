@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 # user_data: последняя запись (для /undo) и уже записанные SMS/файлы
 LAST_WRITE = "last_write"
 SEEN_INPUTS = "seen_inputs"
+CHOOSE_SOURCE = "Выберите карту:"
 
 
 def track_message(context: ContextTypes.DEFAULT_TYPE, message: Message):
@@ -38,19 +39,14 @@ async def show_main_menu(
     sources = context.bot_data.get("sources", [])
     current_source = context.user_data.get("source")
 
-    # Send success message if provided, otherwise minimal text
-    if success_message:
-        msg1 = await update.effective_message.reply_text(
-            success_message,
-            reply_markup=generate_sources_keyboard(sources, current_source),
-        )
-        track_message(context, msg1)
-    else:
-        msg1 = await update.effective_message.reply_text(
-            "ㅤ",  # Invisible character
-            reply_markup=generate_sources_keyboard(sources, current_source),
-        )
-        track_message(context, msg1)
+    # Пустой или «невидимый» текст Telegram отвергает (Message_empty)
+    text = success_message or (
+        f"💳 {current_source}" if current_source else CHOOSE_SOURCE
+    )
+    msg1 = await update.effective_message.reply_text(
+        text, reply_markup=generate_sources_keyboard(sources, current_source)
+    )
+    track_message(context, msg1)
 
     # Send categories keyboard if source is selected
     if current_source:
