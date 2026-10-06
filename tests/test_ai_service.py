@@ -462,3 +462,48 @@ async def test_known_merchant_gets_the_owner_category(
     service.gs_service = HistorySheets()
     [result] = await service.parse_transaction("SMS")
     assert (result["category"], result["subcategory"]) == expected
+
+
+class IncomeHistorySheets(FakeSheets):
+    """Как в настоящем fact: «Оплата аванс/премия» — зарплата, возвраты — нач остаток."""
+
+    def get_all_records(self, name: str) -> list[list[Any]]:
+        self.reads += 1
+        return [
+            HEADER,
+            ["15.08.2026", "💰 ДОХОДЫ", "зарплата", 1, "", "Оплата аванс"],
+            ["30.08.2026", "💰 ДОХОДЫ", "зарплата", 1, "", "Оплата премия"],
+            ["16.03.2026", "💰 ДОХОДЫ", "нач остаток", 1, "", "Возврат Anglesey"],
+        ]
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        # «ОПЛАТА» у всех строк истории — зарплата, но покупка зарплатой не станет
+        (
+            {"comment": "Оплата Магнит", "direction": "expense",
+             "category": "🏚️ ДОМ", "subcategory": "продукты"},
+            ("🏚️ ДОМ", "продукты"),
+        ),
+        # возврат в истории записан доходом — знак у возврата не переворачиваем
+        (
+            {"comment": "Возврат Anglesey", "direction": "refund",
+             "category": "🏚️ ДОМ", "subcategory": "продукты"},
+            ("🏚️ ДОМ", "продукты"),
+        ),
+        # доход с тем же именем, что в истории, — категория из истории
+        (
+            {"comment": "Оплата аванс", "direction": "income"},
+            ("💰 ДОХОДЫ", "зарплата"),
+        ),
+    ],
+)  # fmt: skip
+async def test_history_never_turns_spending_into_income(
+    answer: dict[str, Any], expected: tuple[str, str]
+) -> None:
+    item = {"amount": 1000, **answer}
+    service, _, _ = make_service(json.dumps([item]))
+    service.gs_service = IncomeHistorySheets()
+    [result] = await service.parse_transaction("SMS")
+    assert (result.get("category"), result.get("subcategory")) == expected

@@ -623,3 +623,22 @@ def test_transfer_pairs_with_an_already_loaded_half() -> None:
     [item] = plan.rows
     assert item.row.comment == "AI: перевод HUMO 6845 ← VISA 9120 (свой)"
     assert item.review == ""
+
+
+def test_first_word_match_is_optional() -> None:
+    assert BOOK.find("HAVAS GROCERY") == ("🏚️ ДОМ", "продукты")
+    assert BOOK.find("HAVAS GROCERY", first_word=False) is None
+    assert BOOK.find("HAVAS FOOD MCHJ QK", first_word=False) == ("🏚️ ДОМ", "продукты")
+
+
+def test_purchase_is_never_income_even_if_history_says_so() -> None:
+    book = MerchantBook([("💰 ДОХОДЫ", "зарплата", "AI: Kapital Shop")])
+    operation = txn(
+        "VISA 9120 UZS", -5000, "покупке KAPITAL SHOP SLIP No 1 за 01.08.2026"
+    )
+    [item] = st.categorize([operation], {}, book, CATALOG)
+    assert (item.row.category, item.row.amount, item.review) == (
+        "🚧 РАЗНОЕ",
+        5000,
+        "новый магазин",
+    )

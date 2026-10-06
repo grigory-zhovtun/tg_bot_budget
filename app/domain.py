@@ -263,7 +263,12 @@ class MerchantBook:
         cells = (list(row[:6]) + [""] * (6 - len(row[:6])) for row in rows[1:])
         return cls((str(c[1]).strip(), str(c[2]).strip(), str(c[5])) for c in cells)
 
-    def find(self, name: str) -> tuple[str, str] | None:
+    def find(self, name: str, first_word: bool = True) -> tuple[str, str] | None:
+        """Категория магазина из истории; first_word=False — только по имени.
+
+        Первое слово годится для названий из выписки («Shavi Coffee» ~ «Shavi
+        Cafe»), но не для свободного текста: «Оплата …» в истории — зарплата.
+        """
         key = merchant_key(name)
         if not key:
             return None
@@ -274,6 +279,8 @@ class MerchantBook:
             return None
         if core in self.core:
             return self.core[core]
+        if not first_word:
+            return None
         word = core.split()[0]
         targets = self.first.get(word, set())
         # по первому слову — только если все такие магазины в одной категории
