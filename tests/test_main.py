@@ -65,6 +65,7 @@ def test_bad_or_missing_report_settings_do_not_break_start(
 def test_httpx_logs_no_request_urls() -> None:
     main.setup_logging()
     assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
+    assert logging.getLogger("apscheduler").getEffectiveLevel() >= logging.WARNING
 
 
 async def test_gemini_self_check_does_not_delay_the_start() -> None:
@@ -86,3 +87,17 @@ async def test_gemini_self_check_does_not_delay_the_start() -> None:
     assert (when, name) == (1, "gemini_self_check")
     await callback(SimpleNamespace(bot_data=application.bot_data))
     ai.self_check.assert_awaited_once()
+
+
+def test_month_tab_is_checked_daily_and_on_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = build(monkeypatch)
+    jobs = {job.name: job for job in app.job_queue.jobs()}
+    daily = jobs["month_tab"]
+    assert daily.trigger.timezone.key == "Asia/Tashkent"
+    assert (
+        daily.trigger.fields[5].expressions[0].first,
+        daily.trigger.fields[6].expressions[0].first,
+    ) == (0, 5)
+    assert "month_tab_on_start" in jobs

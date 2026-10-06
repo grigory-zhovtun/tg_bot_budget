@@ -38,6 +38,7 @@ app/
 │   ├── statement_import.py # Statement preview (JobQueue debounce), confirm buttons, apply_plan
 │   ├── transactions.py  # Callback query handler for inline buttons
 │   ├── undo.py          # /undo: delete the last write after checking the rows are unchanged
+│   ├── month.py         # Daily job: month plan tab exists (copy of the last one), owner notified
 │   └── analytics.py     # /advice, /analytics, daily report
 ├── services/
 │   ├── google_sheets.py # GoogleSheetsService — synchronous gspread wrapper
@@ -65,7 +66,7 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
   - Balance formula: `google_sheets.BALANCE_FORMULA` uses `INDEX(...;ROW())`, no row numbers.
   - Balance block `I2:N…`: column I = source name, column N = bank balance written from SMS ("Остаток", "Dostupno"). The bot finds the cell by source name.
 - **`system` sheet**: Column A: Categories, Column B: Subcategories, Column F: Sources (last 3 chars = currency code), G: statements loaded up to this day (written by the bot), H:I currency rates to UZS.
-- **Monthly sheets** ("Oct 26"): plan vs fact by Subcategory + Currency (`SUMIFS` on `fact`), used by `/advice`.
+- **Monthly sheets** ("Oct 26", `domain.month_title`): plan vs fact by Subcategory + Currency (`SUMIFS` on `fact` between the dates in `M1:M2`), used by `/advice`. Created by `GoogleSheetsService.ensure_month_tab` (duplicate of the latest month, new `M1:M2`, past months hidden).
 
 ## Environment Variables
 

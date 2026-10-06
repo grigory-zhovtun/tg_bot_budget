@@ -15,7 +15,7 @@ import pandas as pd
 from matplotlib.figure import Figure
 
 from app import config
-from app.domain import INCOME_GROUP, Rates, local_today
+from app.domain import INCOME_GROUP, Rates, local_today, month_title
 from app.services.google_sheets import GoogleSheetsService
 
 logger = logging.getLogger(__name__)
@@ -24,8 +24,6 @@ TRANSFERS_GROUP = "💳 СЧЕТА"
 OPENING_BALANCE = "нач остаток"
 SERIAL_ZERO = date(1899, 12, 30)
 COLUMNS = ["day", "group", "subcategory", "amount", "comment", "currency", "source"]
-MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
-          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")  # fmt: skip
 CAPTION_PIE = "📈 Расходы по категориям"
 CAPTION_DAYS = "📊 Динамика по дням"
 
@@ -284,7 +282,7 @@ class AnalyticsService:
 
     def _plan_fact_lines(self, today: date) -> list[str]:
         """Строки вкладки месяца («Oct 26»): план и факт в сумовом эквиваленте."""
-        sheet = f"{MONTHS[today.month - 1]} {today:%y}"
+        sheet = month_title(today)
         try:
             rows = self.gs_service.get_values(sheet)
         except Exception:

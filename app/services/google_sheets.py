@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, TypeVar
 
@@ -12,7 +13,7 @@ from google.oauth2.service_account import Credentials
 from gspread.utils import ValueInputOption, ValueRenderOption
 
 from app import config
-from app.domain import Rates, SheetRow
+from app.domain import Rates, SheetRow, month_bounds, month_title, parse_month_title
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +68,21 @@ def appended_rows(response: dict[str, Any]) -> tuple[int, int]:
         raise ValueError(f"unexpected updatedRange: {updated}")
     first = int(match.group(1))
     return first, int(match.group(2) or first)
+
+
+@dataclass
+class MonthTab:
+    """Что сделано со вкладкой месяца: создана, даты поправлены, скрыты прошлые."""
+
+    title: str
+    source: str | None = None  # с какой вкладки скопирован план
+    created: bool = False
+    dates_fixed: bool = False
+    hidden: list[str] = field(default_factory=list)
+
+
+def _serial(day: date) -> int:
+    return (day - SERIAL_ZERO).days
 
 
 def _same_row(cells: list[Any], row: SheetRow) -> bool:
@@ -455,3 +471,77 @@ class GoogleSheetsService:
             }
         )
         return True
+
+    def ensure_month_tab(self, day: date) -> MonthTab:
+        """Вкладка план-факта месяца day: создать копией прошлой, если её нет.
+
+        Факт во вкладке считается формулами по датам M1 (первый день) и M2
+        (последний), поэтому у копии меняются только они; план остаётся
+        прошлый. Прошедшие месяцы скрываются: видны fact, текущий месяц, system.
+        Повторный вызов ничего не меняет.
+        """
+        result = MonthTab(month_title(day))
+        first, last = month_bounds(day)
+        sheets = self._with_retry("Listing sheets", self.sheet.worksheets)
+        if not any(ws.title == result.title for ws in sheets):
+            months = [
+                (start, ws)
+                for ws in sheets
+                if (start := parse_month_title(ws.title)) and start < first
+            ]
+            if not months:
+                raise ValueError("нет вкладки прошлого месяца, чтобы скопировать план")
+            _, source = max(months, key=lambda item: item[0])
+            # без повтора: копия с тем же именем второй раз не создастся
+            reply = self.sheet.batch_update(
+                {
+                    "requests": [
+                        {
+                            "duplicateSheet": {
+                                "sourceSheetId": source.id,
+                                "insertSheetIndex": source.index,
+                                "newSheetName": result.title,
+                            }
+                        }
+                    ]
+                }
+            )
+            new_id = reply["replies"][0]["duplicateSheet"]["properties"]["sheetId"]
+            result.created, result.source = True, source.title
+            visibility = [(new_id, False)] + [
+                (ws.id, True) for _, ws in months if not ws.isSheetHidden
+            ]
+            result.hidden = [ws.title for _, ws in months if not ws.isSheetHidden]
+            self.sheet.batch_update(
+                {
+                    "requests": [
+                        {
+                            "updateSheetProperties": {
+                                "properties": {"sheetId": sheet_id, "hidden": hidden},
+                                "fields": "hidden",
+                            }
+                        }
+                        for sheet_id, hidden in visibility
+                    ]
+                }
+            )
+
+        dates = [[_serial(first)], [_serial(last)]]
+        current = self._with_retry(
+            "Reading month dates",
+            lambda: self._worksheet(result.title).get(
+                "M1:M2", value_render_option=ValueRenderOption.unformatted
+            ),
+        )
+        if current != dates:
+            self._with_retry(
+                "Writing month dates",
+                lambda: self.sheet.values_batch_update(
+                    {
+                        "valueInputOption": "RAW",
+                        "data": [{"range": f"'{result.title}'!M1:M2", "values": dates}],
+                    }
+                ),
+            )
+            result.dates_fixed = not result.created
+        return result
