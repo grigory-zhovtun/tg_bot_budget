@@ -244,18 +244,30 @@ class MerchantBook:
     """
 
     def __init__(self, entries: Iterable[tuple[str, str, str]]) -> None:
-        self.exact: dict[str, tuple[str, str]] = {}
-        self.core: dict[str, tuple[str, str]] = {}
+        newest: dict[str, tuple[str, str]] = {}  # самая свежая строка магазина
+        decided: dict[str, tuple[str, str]] = {}  # самая свежая не «РАЗНОЕ»
+        choices: dict[str, set[tuple[str, str]]] = defaultdict(set)
         self.first: dict[str, set[tuple[str, str]]] = defaultdict(set)
         for category, subcategory, comment in reversed(list(entries)):
             key = merchant_key(comment)
             if not key or not category or not subcategory:
                 continue
             target = (category, subcategory)
-            self.exact.setdefault(key, target)
-            if core := merchant_core(key):
-                self.core.setdefault(core, target)
+            core = merchant_core(key)
+            keys = [key, "core:" + core] if core else [key]
+            if core:
                 self.first[core.split()[0]].add(target)
+            for name in keys:
+                newest.setdefault(name, target)
+                if category != FALLBACK_CATEGORY:  # «РАЗНОЕ» — не решение владельца
+                    decided.setdefault(name, target)
+                    choices[name].add(target)
+        best = {name: decided.get(name, target) for name, target in newest.items()}
+        self.exact = {k: v for k, v in best.items() if not k.startswith("core:")}
+        self.core = {k[5:]: v for k, v in best.items() if k.startswith("core:")}
+        # Магазин, который владелец разносил по разным статьям (маркетплейс:
+        # продукты, химия, одежда), история не решает — смотрим, что куплено
+        self.mixed = {name for name, targets in choices.items() if len(targets) > 1}
 
     @classmethod
     def from_sheet(cls, rows: list[list[Any]]) -> "MerchantBook":
@@ -270,12 +282,12 @@ class MerchantBook:
         Cafe»), но не для свободного текста: «Оплата …» в истории — зарплата.
         """
         key = merchant_key(name)
-        if not key:
+        if not key or key in self.mixed:
             return None
         if key in self.exact:
             return self.exact[key]
         core = merchant_core(key)
-        if not core:
+        if not core or "core:" + core in self.mixed:
             return None
         if core in self.core:
             return self.core[core]
