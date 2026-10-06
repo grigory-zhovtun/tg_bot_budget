@@ -1,8 +1,10 @@
+import asyncio
 import logging
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from app.errors import user_message
 from app.handlers.common import start
 from app.services.google_sheets import GoogleSheetsService
 
@@ -11,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reloads categories and sources from Google Sheets."""
-    logger.info(f"User {update.effective_user.first_name} requested reboot.")
+    logger.info("User %s requested reboot.", update.effective_user.id)
 
     gs_service: GoogleSheetsService = context.bot_data.get("gs_service")
     if not gs_service:
@@ -23,29 +25,32 @@ async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Обновление данных из Google Sheets...")
 
     try:
-        categories, subcategories, sources = gs_service.get_categories_and_sources()
+        gs_service.reload()
+        categories, subcategories, sources = await asyncio.to_thread(
+            gs_service.get_categories_and_sources
+        )
+    except Exception as e:
+        logger.exception("Reboot failed")
+        await update.message.reply_text(f"Ошибка при обновлении: {user_message(e)}")
+        return
 
-        context.bot_data["categories"] = categories
-        context.bot_data["subcategories"] = subcategories
-        context.bot_data["sources"] = sources
+    context.bot_data["categories"] = categories
+    context.bot_data["subcategories"] = subcategories
+    context.bot_data["sources"] = sources
+    logger.info("Loaded %d sources and %d categories.", len(sources), len(categories))
 
-        logger.info(f"Loaded {len(sources)} sources and {len(categories)} categories.")
-
-        # Verify source consistency for the user
-        current_source = context.user_data.get("source")
-        if current_source and current_source not in sources:
-            context.user_data["source"] = sources[0] if sources else None
-            await update.message.reply_text(
-                f"Ваш текущий источник '{current_source}' больше не существует. Сброс."
-            )
-
+    # Verify source consistency for the user
+    current_source = context.user_data.get("source")
+    if current_source and current_source not in sources:
+        context.user_data["source"] = sources[0] if sources else None
         await update.message.reply_text(
-            f"Данные успешно обновлены.\nКатегорий: {len(categories)}\nИсточников: {len(sources)}"
+            f"Ваш текущий источник '{current_source}' больше не существует. Сброс."
         )
 
-        # Restart internal logic to refresh keyboards
-        await start(update, context)
+    await update.message.reply_text(
+        f"Данные успешно обновлены.\nКатегорий: {len(categories)}\n"
+        f"Источников: {len(sources)}"
+    )
 
-    except Exception as e:
-        logger.error(f"Reboot failed: {e}")
-        await update.message.reply_text(f"Ошибка при обновлении: {e}")
+    # Restart internal logic to refresh keyboards
+    await start(update, context)

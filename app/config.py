@@ -44,7 +44,9 @@ DEFAULT_CURRENCY = "UZS"
 FALLBACK_CURRENCY = "XXX"
 
 # Webhook (for Render/Production)
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+# Render задаёт RENDER_EXTERNAL_URL только web-сервисам; у воркера его нет → polling
+WEBHOOK_URL = os.getenv("WEBHOOK_URL") or os.getenv("RENDER_EXTERNAL_URL")
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 PORT = int(os.getenv("PORT", "8443"))
 LOCAL_RUN = os.getenv("LOCAL_RUN", "False").lower() == "true"
 
@@ -53,16 +55,6 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # We don't raise error immediately to allow bot to start if key is missing (feature flag logic),
 # but for this specific request, it's critical.
 # However, user might deploy first then add key.
-
-# Card balance cells mapping (last 4 digits -> cell in 'fact' sheet)
-CARD_BALANCE_CELLS = {
-    "9120": "N2",  # VISA 9120
-    "5837": "N3",  # UZCARD 5837
-    "9959": "N4",  # МИР 9959
-    "4058": "N5",  # VISA 4058
-    "6845": "N6",  # HUMO 6845
-    "7450": "N7",  # VISA 7450 (Сбербанк)
-}
 
 # Daily Analytics
 # Chat ID for daily analytics reports (your Telegram user ID)

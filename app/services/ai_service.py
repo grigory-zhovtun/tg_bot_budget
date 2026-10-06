@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 from typing import Any
@@ -93,7 +94,7 @@ class GeminiService:
 
         # Increase context to 5000 transactions as requested.
         # Gemini 1.5 Flash (1M tokens) can easily handle this (~100k-150k tokens).
-        history_context = self.get_history_context(limit=5000)
+        history_context = await asyncio.to_thread(self.get_history_context, 5000)
 
         cats_str = "\n".join(
             f"- {cat}: {', '.join(known_subcategories.get(cat, []))}"
@@ -129,7 +130,7 @@ class GeminiService:
             content.append(image_part)
 
         try:
-            response = self.model.generate_content(content)
+            response = await asyncio.to_thread(self.model.generate_content, content)
             text_resp = response.text.replace("```json", "").replace("```", "").strip()
 
             try:
@@ -177,15 +178,13 @@ class GeminiService:
             raise ValueError("AI Service not configured.")
 
         # 1. Fetch History (Fact)
-        context = (
-            custom_context if custom_context else self.get_history_context(limit=2000)
+        context = custom_context or await asyncio.to_thread(
+            self.get_history_context, 2000
         )
 
         # 2. Fetch Budget (Plan)
         # Format: "Dec 25" (English Month + Year)
-        import datetime
-
-        now = datetime.datetime.now()
+        now = local_today(config.ANALYTICS_TIMEZONE)
         # English month names mapping
         months = [
             "Jan",
@@ -205,7 +204,9 @@ class GeminiService:
 
         budget_data = "No budget sheet found for this month."
         try:
-            budget_rows = self.gs_service.get_all_records(current_month_sheet)
+            budget_rows = await asyncio.to_thread(
+                self.gs_service.get_all_records, current_month_sheet
+            )
             if budget_rows:
                 # Convert rows to string representation
                 budget_data = "\n".join(
@@ -235,7 +236,7 @@ class GeminiService:
         ]
 
         try:
-            response = self.model.generate_content(prompt)
+            response = await asyncio.to_thread(self.model.generate_content, prompt)
             text = response.text
             # Enforce hard length limit if AI hallucinates long text
             if len(text) > 4000:

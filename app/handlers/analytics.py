@@ -1,127 +1,122 @@
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from functools import partial
+from io import BytesIO
+from typing import Any
 
-from telegram import Update
+from telegram import Bot, Message, Update
+from telegram.error import BadRequest
 from telegram.ext import ContextTypes
+
+from app.errors import user_message
 
 logger = logging.getLogger(__name__)
 
+CHUNK_SIZE = 4000  # лимит Telegram — 4096 символов
+CAPTIONS = ("📈 Расходы по категориям", "📊 Динамика по дням")
+
+Send = Callable[..., Awaitable[Message]]
+
+
+def split_text(text: str, limit: int = CHUNK_SIZE) -> list[str]:
+    """Куски не длиннее limit по границам строк — так не рвётся Markdown-разметка."""
+    chunks: list[str] = []
+    current = ""
+    for line in text.splitlines(keepends=True):
+        while len(line) > limit:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.append(line[:limit])
+            line = line[limit:]
+        if len(current) + len(line) > limit:
+            chunks.append(current)
+            current = ""
+        current += line
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+async def send_markdown(send: Send, text: str) -> None:
+    """Каждый кусок с Markdown; если разметка сломана — этот же кусок без неё.
+
+    Раньше при ошибке в середине весь текст отправлялся заново, и начало дублировалось.
+    """
+    for chunk in split_text(text, CHUNK_SIZE):
+        try:
+            await send(chunk, parse_mode="Markdown")
+        except BadRequest:
+            await send(chunk, parse_mode=None)
+
+
+async def _send_charts(send_photo: Send, charts: list[BytesIO]) -> None:
+    for index, chart in enumerate(charts):
+        with chart:
+            await send_photo(photo=chart, caption=CAPTIONS[min(index, 1)])
+
+
+async def _delete_quietly(message: Message) -> None:
+    try:
+        await message.delete()
+    except BadRequest:
+        logger.debug("Status message already gone")
+
 
 async def advice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Handler for /advice command.
-    Triggers AI analysis of transaction history.
-    """
+    """Handler for /advice command: AI analysis of the transaction history."""
     ai_service = context.bot_data.get("ai_service")
-
     if not ai_service:
         await update.message.reply_text("AI сервис не доступен.")
         return
 
-    # Notify user that process started (it might take a few seconds)
     status_msg = await update.message.reply_text(
         "🤖 Анализирую ваши финансы... Это займет пару секунд."
     )
-
     try:
-        # Call AI service
         advice_text = await ai_service.analyze_finances()
-
-        # Delete status message
-        await status_msg.delete()
-
-        # Try sending with Markdown
-        try:
-            # Split message if too long (Telegram limit 4096)
-            # We use a slightly smaller chunk size to be safe
-            chunk_size = 4000
-            for i in range(0, len(advice_text), chunk_size):
-                chunk = advice_text[i : i + chunk_size]
-                await update.message.reply_text(chunk, parse_mode="Markdown")
-        except Exception as e:
-            logger.warning(f"Markdown parsing failed: {e}. Sending plain text.")
-            # Fallback to plain text if Markdown fails
-            for i in range(0, len(advice_text), chunk_size):
-                chunk = advice_text[i : i + chunk_size]
-                await update.message.reply_text(chunk, parse_mode=None)
-
     except Exception as e:
-        logger.error(f"Advice handling error: {e}")
-        # If status_msg still exists/accessible, edit it
-        try:
-            await status_msg.edit_text(f"Произошла ошибка при анализе: {e}")
-        except Exception:
-            await update.message.reply_text(f"Произошла ошибка при анализе: {e}")
+        logger.exception("Advice failed")
+        await status_msg.edit_text(f"Произошла ошибка при анализе: {user_message(e)}")
+        return
+
+    await _delete_quietly(status_msg)
+    await send_markdown(update.message.reply_text, advice_text)
 
 
 async def analytics_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Handler for /analytics command.
-    Sends 3-day analytics with charts.
-    """
+    """Handler for /analytics command: 3-day report with charts."""
     analytics_service = context.bot_data.get("analytics_service")
-
     if not analytics_service:
         await update.message.reply_text("Сервис аналитики не доступен.")
         return
 
     status_msg = await update.message.reply_text("📊 Формирую аналитику за 3 дня...")
-
     try:
-        # Generate report with charts
-        report_text, charts = analytics_service.generate_3day_report()
-
-        # Delete status message
-        await status_msg.delete()
-
-        # Send text report
-        try:
-            await update.message.reply_text(report_text, parse_mode="Markdown")
-        except Exception:
-            await update.message.reply_text(report_text, parse_mode=None)
-
-        # Send charts
-        if charts:
-            for i, chart_buf in enumerate(charts):
-                caption = (
-                    "📈 Расходы по категориям" if i == 0 else "📊 Динамика по дням"
-                )
-                await update.message.reply_photo(photo=chart_buf, caption=caption)
-                chart_buf.close()
-
+        report_text, charts = await asyncio.to_thread(
+            analytics_service.generate_3day_report
+        )
     except Exception as e:
-        logger.error(f"Analytics error: {e}")
-        try:
-            await status_msg.edit_text(f"Ошибка при формировании аналитики: {e}")
-        except Exception:
-            await update.message.reply_text(f"Ошибка при формировании аналитики: {e}")
+        logger.exception("Analytics failed")
+        await status_msg.edit_text(
+            f"Ошибка при формировании аналитики: {user_message(e)}"
+        )
+        return
+
+    await _delete_quietly(status_msg)
+    await send_markdown(update.message.reply_text, report_text)
+    await _send_charts(update.message.reply_photo, charts)
 
 
-async def send_daily_analytics(bot, chat_id: int, analytics_service):
-    """
-    Send daily analytics to a specific chat.
-    Called by scheduler.
-    """
+async def send_daily_analytics(bot: Bot, chat_id: int, analytics_service: Any) -> None:
+    """Ежедневный отчёт (JobQueue). Ошибки только в лог — пользователь ничего не ждёт."""
     try:
-        report_text, charts = analytics_service.generate_3day_report()
-
-        # Send text report
-        try:
-            await bot.send_message(
-                chat_id=chat_id, text=report_text, parse_mode="Markdown"
-            )
-        except Exception:
-            await bot.send_message(chat_id=chat_id, text=report_text, parse_mode=None)
-
-        # Send charts
-        if charts:
-            for i, chart_buf in enumerate(charts):
-                caption = (
-                    "📈 Расходы по категориям" if i == 0 else "📊 Динамика по дням"
-                )
-                await bot.send_photo(chat_id=chat_id, photo=chart_buf, caption=caption)
-                chart_buf.close()
-
-        logger.info(f"Daily analytics sent to chat {chat_id}")
-
-    except Exception as e:
-        logger.error(f"Failed to send daily analytics: {e}")
+        report_text, charts = await asyncio.to_thread(
+            analytics_service.generate_3day_report
+        )
+        await send_markdown(partial(bot.send_message, chat_id), report_text)
+        await _send_charts(partial(bot.send_photo, chat_id), charts)
+        logger.info("Daily analytics sent to chat %s", chat_id)
+    except Exception:
+        logger.exception("Failed to send daily analytics")

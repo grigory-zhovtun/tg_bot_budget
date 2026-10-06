@@ -10,6 +10,7 @@ import pytest
 from app import config
 from app.domain import Rates, local_today
 from app.handlers import messages
+from app.services.google_sheets import BALANCE_FORMULA, row_values
 
 CATEGORIES = ["🏚️ ДОМ", "🍔 ЕДА", "🌛 ЕЖЕМЕСЯЧНО", "🚧 РАЗНОЕ", "💳 СЧЕТА", "💰 ДОХОДЫ"]
 SUBCATEGORIES = {
@@ -24,22 +25,29 @@ SOURCES = ["VISA 9120 UZS", "UZCARD 5837 UZS", "VISA 4058 USD"]
 
 
 class FakeSheets:
+    """Таблица в памяти с тем же интерфейсом, что GoogleSheetsService."""
+
+    BALANCE_CELLS = {"VISA 9120 UZS": "N2", "UZCARD 5837 UZS": "N3"}
+
     def __init__(self) -> None:
         self.rows: list[list[Any]] = []
         self.cells: dict[str, Any] = {}
         self.last_row = 4168
+        self.appends = 0
 
-    def get_last_row_index(self) -> int:
-        return self.last_row
+    def append_transactions(self, rows: list[Any]) -> tuple[int, int]:
+        self.appends += 1
+        self.rows += [row_values(row) for row in rows]
+        first = self.last_row + 1
+        self.last_row += len(rows)
+        return first, self.last_row
 
-    def add_transaction(self, values: list[Any]) -> bool:
-        self.rows.append(values)
-        self.last_row += 1
-        return True
-
-    def update_cell(self, sheet: str, cell: str, value: Any) -> bool:
-        self.cells[f"{sheet}!{cell}"] = value
-        return True
+    def update_balances(self, balances: dict[str, float]) -> list[str]:
+        known = {k: v for k, v in balances.items() if k in self.BALANCE_CELLS}
+        self.cells.update(
+            {f"fact!{self.BALANCE_CELLS[k]}": v for k, v in known.items()}
+        )
+        return list(known)
 
     def get_rates(self) -> Rates:
         return Rates({"UZS": 1.0, "USD": 12000.0, "RUB": 150.0})
@@ -110,7 +118,7 @@ async def test_manual_expense_row() -> None:
     today = local_today(config.ANALYTICS_TIMEZONE).strftime("%d.%m.%Y")
     [row] = sheets.rows
     assert row[:4] == [today, "🍔 ЕДА", "кофе", 48000.0]
-    assert "D4169" in row[4] and row[4].startswith("=СУММЕСЛИМН")
+    assert row[4] == BALANCE_FORMULA
     assert row[5:] == ["латте", "UZS", "VISA 9120 UZS"]
     assert summary(update).startswith("✅ 48 000 UZS • 🍔 ЕДА (кофе)")
     assert "category" not in context.user_data
@@ -189,7 +197,7 @@ async def test_bad_items_are_reported_not_written() -> None:
     assert "⚠️ Не записал: Airalo — нет курса SGD → USD" in text
 
 
-async def test_several_rows_get_consecutive_balance_formulas() -> None:
+async def test_several_rows_are_written_in_one_request() -> None:
     ai = FakeAI(
         [
             {
@@ -208,5 +216,18 @@ async def test_several_rows_get_consecutive_balance_formulas() -> None:
     )
     update, context, sheets = make_chat("две покупки", {}, ai)
     await messages.text_handler(update, context)
-    assert ["D4169" in sheets.rows[0][4], "D4170" in sheets.rows[1][4]] == [True, True]
+    assert sheets.appends == 1
+    assert [row[3] for row in sheets.rows] == [10000.0, 20000.0]
+    assert all(row[4] == BALANCE_FORMULA for row in sheets.rows)
     assert summary(update).count("✅") == 2
+
+
+async def test_sheet_failure_is_reported_without_crash() -> None:
+    class BrokenSheets(FakeSheets):
+        def append_transactions(self, rows: list[Any]) -> tuple[int, int]:
+            raise ConnectionError("Google is down")
+
+    update, context, _ = make_chat("48000 латте", manual_state())
+    context.bot_data["gs_service"] = BrokenSheets()
+    await messages.text_handler(update, context)
+    assert summary(update).startswith("❌ Не записал в Google Таблицу (1 шт.)")
