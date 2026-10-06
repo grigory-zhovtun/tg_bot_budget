@@ -57,6 +57,8 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 
 **Statement import**: PDF → `statements.pdf_text` → `is_kapitalbank_statement` → `parse_statement` (card by `******NNNN`, period, generation date) → basket in `user_data`, preview job after 4 s → `plan_import` (skip operations booked up to `system!G`, pair own transfers, categories from `MerchantBook` over fact, new shops → `GeminiService.categorize_merchants`, `reconcile`: exact duplicates skipped, `≈` rows corrected, `ВРЕМЕННАЯ` rows removed) → buttons `import:ok|no:<version>` → `apply_plan` (amount fixes → row deletions → append → marks)
 
+**Plan**: `/plan` → `AnalyticsService.plan_report()` → `plan_lines` (month tab columns H/I in UZS, sign flipped, currencies joined) → `format_plan_report`; the Sunday job prepends the week's totals (`weekly_digest`)
+
 **Analytics**: `/analytics` → `AnalyticsService.generate_3day_report()` → text summary + pie/bar charts as PNG
 
 ## Google Sheets Structure
@@ -78,6 +80,7 @@ Required:
 Optional:
 - `GEMINI_API_KEY` - Enables AI features; `GEMINI_MODEL` (default `gemini-flash-latest`), `GEMINI_FALLBACK_MODELS` (default `gemini-flash-lite-latest`, tried on 503/429)
 - `ANALYTICS_CHAT_ID`, `ANALYTICS_TIME`, `ANALYTICS_TIMEZONE` - daily report (JobQueue); the time zone also defines "today"
+- `WEEKLY_DIGEST_TIME` - Sunday digest to the owner (`ANALYTICS_CHAT_ID` or the first allowed id), default `20:00`, `off` disables it
 - `WEBHOOK_URL` (or Render's `RENDER_EXTERNAL_URL`), `WEBHOOK_SECRET`, `PORT`, `LOCAL_RUN=True`
 
 ## Code Patterns
@@ -87,5 +90,6 @@ Optional:
 - The Google Sheets client is synchronous: call it with `asyncio.to_thread` from handlers; Gemini uses the async client (`client.aio`)
 - Writes that are not idempotent (row deletion) are not retried: a lost response would make the retry delete other rows
 - Business rules live in `app/domain.py` as pure functions — test them table-driven
+- PTB 20+ `run_daily(days=...)`: 0 = Sunday … 6 = Saturday
 - Never show raw exceptions in the chat: use `errors.user_message(e)`; log with `logger.exception`
 - httpx logger stays at WARNING: at INFO it logs Telegram URLs with the bot token
