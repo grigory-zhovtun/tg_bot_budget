@@ -32,9 +32,18 @@ def gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "GEMINI_API_KEY", "test")
 
 
-def attach_document(update: SimpleNamespace, name: str | None, mime: str, file: Any):
+def attach_document(
+    update: SimpleNamespace,
+    name: str | None,
+    mime: str,
+    file: Any,
+    file_unique_id: str = "doc-1",
+):
     update.message.document = SimpleNamespace(
-        file_name=name, mime_type=mime, get_file=AsyncMock(return_value=file)
+        file_name=name,
+        mime_type=mime,
+        file_unique_id=file_unique_id,
+        get_file=AsyncMock(return_value=file),
     )
 
 
@@ -99,7 +108,9 @@ async def test_photo_goes_to_ai_as_jpeg_bytes_and_file_is_removed() -> None:
     file = FakeFile(
         lambda path: PIL.Image.new("RGB", (4, 4), "white").save(path, "JPEG")
     )
-    update.message.photo = [SimpleNamespace(get_file=AsyncMock(return_value=file))]
+    update.message.photo = [
+        SimpleNamespace(file_unique_id="photo-1", get_file=AsyncMock(return_value=file))
+    ]
     update.message.caption = None
 
     await messages.text_handler(update, context)

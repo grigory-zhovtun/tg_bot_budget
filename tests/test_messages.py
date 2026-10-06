@@ -9,7 +9,7 @@ import pytest
 
 from app import config
 from app.domain import Rates, local_today
-from app.handlers import messages
+from app.handlers import messages, undo
 from app.services.google_sheets import BALANCE_FORMULA, row_values
 
 CATEGORIES = ["🏚️ ДОМ", "🍔 ЕДА", "🌛 ЕЖЕМЕСЯЧНО", "🚧 РАЗНОЕ", "💳 СЧЕТА", "💰 ДОХОДЫ"]
@@ -51,6 +51,16 @@ class FakeSheets:
 
     def get_rates(self) -> Rates:
         return Rates({"UZS": 1.0, "USD": 12000.0, "RUB": 150.0})
+
+    table_balances: dict[str, float] = {}
+    undo_allowed = True
+
+    def get_table_balances(self) -> dict[str, float]:
+        return self.table_balances
+
+    def delete_rows_if_match(self, first: int, last: int, rows: list[Any]) -> bool:
+        self.undone = (first, last, rows)
+        return self.undo_allowed
 
 
 class FakeAI:
@@ -231,3 +241,109 @@ async def test_sheet_failure_is_reported_without_crash() -> None:
     context.bot_data["gs_service"] = BrokenSheets()
     await messages.text_handler(update, context)
     assert summary(update).startswith("❌ Не записал в Google Таблицу (1 шт.)")
+
+
+SMS = "Pokupka: OOO SHAVI CAFE, 48000.00 UZS, 06.10.2026 12:00, karta *9120"
+COFFEE = {
+    "amount": 48000,
+    "source": "VISA 9120 UZS",
+    "category": "🍔 ЕДА",
+    "subcategory": "кофе",
+    "comment": "Shavi",
+}
+
+
+def again(update: SimpleNamespace, context: SimpleNamespace, text: str):
+    """Тот же чат, новое сообщение."""
+    fresh, _, _ = make_chat(text, {})
+    fresh.effective_chat.send_message = update.effective_chat.send_message
+    return fresh, context
+
+
+def test_fingerprints() -> None:
+    assert messages.input_fingerprint("48000 латте") is None  # ручной ввод
+    assert messages.input_fingerprint(None, "AgADx") == "file:AgADx"
+    same = messages.input_fingerprint("  " + SMS.upper().replace(" ", "  ") + "\n")
+    assert same == messages.input_fingerprint(SMS)
+    assert messages.input_fingerprint(SMS + " ") != messages.input_fingerprint(
+        SMS.replace("48000", "48001")
+    )
+
+
+async def test_same_sms_twice_is_written_once() -> None:
+    ai = FakeAI([COFFEE])
+    update, context, sheets = make_chat(SMS, {}, ai)
+    await messages.text_handler(update, context)
+    assert len(sheets.rows) == 1
+    assert "/undo" in summary(update)
+
+    second, _ = again(update, context, SMS)
+    await messages.text_handler(second, context)
+    assert ai.calls == 1 and len(sheets.rows) == 1
+    warning = update.effective_chat.send_message.await_args.args[0]
+    assert warning.startswith("⚠️ Это уже записано (строка 4169,")
+    second.message.delete.assert_awaited()
+
+
+async def test_manual_entries_may_repeat() -> None:
+    update, context, sheets = make_chat("48000 латте", manual_state())
+    await messages.text_handler(update, context)
+    context.user_data.update(manual_state())
+    second, _ = again(update, context, "48000 латте")
+    await messages.text_handler(second, context)
+    assert len(sheets.rows) == 2
+
+
+@pytest.mark.parametrize(
+    ("table", "expected"),
+    [
+        (15_000_000.5, "🟰 VISA 9120 UZS: остаток сходится с банком"),
+        (
+            14_900_000.0,
+            "⚠️ VISA 9120 UZS: в банке 15 000 000, в таблице 14 900 000 "
+            "(разница 100 000)",
+        ),
+    ],
+)
+async def test_bank_balance_is_compared_with_the_table(
+    table: float, expected: str
+) -> None:
+    ai = FakeAI([{**COFFEE, "balance": "15 000 000,50"}])
+    update, context, sheets = make_chat(SMS, {}, ai)
+    sheets.table_balances = {"VISA 9120 UZS": table}
+    await messages.text_handler(update, context)
+    assert expected in summary(update)
+
+
+async def test_undo_deletes_the_last_write_and_forgets_the_sms() -> None:
+    ai = FakeAI([COFFEE])
+    update, context, sheets = make_chat(SMS, {}, ai)
+    await messages.text_handler(update, context)
+
+    command, _ = again(update, context, "/undo")
+    await undo.undo(command, context)
+    first, last, rows = sheets.undone
+    assert (first, last, [r.amount for r in rows]) == (4169, 4169, [48000.0])
+    assert command.message.reply_text.await_args.args[0] == (
+        "↩️ Удалил из таблицы: строка 4169."
+    )
+
+    # после отмены то же SMS снова записывается
+    resent, _ = again(update, context, SMS)
+    await messages.text_handler(resent, context)
+    assert ai.calls == 2
+
+    nothing, _ = again(update, context, "/undo")
+    context.user_data.pop("last_write")
+    await undo.undo(nothing, context)
+    assert "Нечего отменять" in nothing.message.reply_text.await_args.args[0]
+
+
+async def test_undo_keeps_rows_changed_in_the_sheet() -> None:
+    update, context, sheets = make_chat("48000 латте", manual_state())
+    await messages.text_handler(update, context)
+    sheets.undo_allowed = False
+    command, _ = again(update, context, "/undo")
+    await undo.undo(command, context)
+    assert "уже изменились" in command.message.reply_text.await_args.args[0]
+    assert "last_write" not in context.user_data

@@ -291,3 +291,24 @@ def test_table_balances() -> None:
         "VISA 9120 UZS": 14982569.45,
         "VISA 4058 USD": 1273.5,
     }
+
+
+def test_undo_deletes_rows_only_if_they_are_unchanged() -> None:
+    written = [46301, "🍔 ЕДА", "кофе", 48000, 1, "латте", "UZS", "VISA 9120 UZS"]
+    ws = RangeWorksheet({"A4169:H4170": [written, written]}, sheet_id=3)
+    service = make_service(ws)
+    assert service.delete_rows_if_match(4169, 4170, [ROW, ROW]) is True
+    [batch] = service.sheet.batch
+    assert batch["requests"][0]["deleteDimension"]["range"] == {
+        "sheetId": 3,
+        "dimension": "ROWS",
+        "startIndex": 4168,
+        "endIndex": 4170,
+    }
+
+    edited = [*written[:5], "латте с сиропом", *written[6:]]
+    ws.ranges["A4169:H4170"] = [written, edited]
+    assert service.delete_rows_if_match(4169, 4170, [ROW, ROW]) is False
+    ws.ranges["A4169:H4170"] = [written]  # строку уже удалили вручную
+    assert service.delete_rows_if_match(4169, 4170, [ROW, ROW]) is False
+    assert len(service.sheet.batch) == 1

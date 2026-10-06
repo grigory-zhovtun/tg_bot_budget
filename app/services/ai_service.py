@@ -25,10 +25,11 @@ logger = logging.getLogger(__name__)
 HINTS_TTL_SECONDS = 30 * 60
 MAX_HINTS = 300
 SELF_CHECK_SMS = "Pokupka: TEST CAFE, 1000.00 UZS, 01.10.2026 12:00, karta *0000"
-# Перегрузка и временные сбои Gemini: повтор с паузой, затем запасная модель
+# Перегрузка и временные сбои Gemini: два коротких повтора, затем запасная модель.
+# Длинные повторы держали пользователя без ответа почти минуту.
 OVERLOADED = frozenset({429, 500, 503, 504})
 RETRY = types.HttpRetryOptions(
-    attempts=4, initial_delay=2.0, max_delay=20.0, http_status_codes=sorted(OVERLOADED)
+    attempts=3, initial_delay=1.0, max_delay=8.0, http_status_codes=sorted(OVERLOADED)
 )
 TIMEOUT_MS = 120_000
 MAX_MERCHANTS = 60  # магазинов в одном запросе на раскладку

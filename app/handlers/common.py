@@ -8,6 +8,10 @@ from app.utils.keyboards import generate_categories_keyboard, generate_sources_k
 
 logger = logging.getLogger(__name__)
 
+# user_data: последняя запись (для /undo) и уже записанные SMS/файлы
+LAST_WRITE = "last_write"
+SEEN_INPUTS = "seen_inputs"
+
 
 def track_message(context: ContextTypes.DEFAULT_TYPE, message: Message):
     """Track a bot message for later cleanup."""
