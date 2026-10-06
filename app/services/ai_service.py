@@ -5,6 +5,7 @@ from typing import Any
 import google.generativeai as genai
 
 from app import config
+from app.domain import local_today
 from app.services.google_sheets import GoogleSheetsService
 
 logger = logging.getLogger(__name__)
@@ -79,7 +80,8 @@ class GeminiService:
         image_part: Any = None,
         known_categories: list[str] | None = None,
         known_sources: list[str] | None = None,
-    ) -> dict[str, Any]:
+        known_subcategories: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any] | list[dict[str, Any]]:
         """
         Parses text or image input using Gemini to extract transaction details.
         """
@@ -87,35 +89,37 @@ class GeminiService:
             raise ValueError("AI Service not configured (missing API Key).")
         known_categories = known_categories or []
         known_sources = known_sources or []
+        known_subcategories = known_subcategories or {}
 
         # Increase context to 5000 transactions as requested.
         # Gemini 1.5 Flash (1M tokens) can easily handle this (~100k-150k tokens).
         history_context = self.get_history_context(limit=5000)
 
-        cats_str = ", ".join(known_categories)
+        cats_str = "\n".join(
+            f"- {cat}: {', '.join(known_subcategories.get(cat, []))}"
+            for cat in known_categories
+        )
         sources_str = ", ".join(known_sources)
-
-        # Get today's date for fallback
-        from datetime import datetime
-
-        today_str = datetime.now().strftime("%d.%m.%Y")
+        today_str = local_today(config.ANALYTICS_TIMEZONE).strftime("%d.%m.%Y")
 
         prompt_parts = [
             "You are a personal finance assistant. Analyze the input and extract transaction details.",
-            f"Allowed Categories: {cats_str}",
+            "Allowed categories and their subcategories "
+            f"(copy the strings EXACTLY, emoji included):\n{cats_str}",
             f"Allowed Sources: {sources_str}",
             f"\nCONTEXT (User's habits):\n{history_context}\n",
             "INSTRUCTION:",
-            "1. Extract: Amount (float, ALWAYS POSITIVE), Currency (ISO code if found, else null), Date (DD.MM.YYYY), Category, Subcategory, Comment, Source.",
+            "1. Extract: Amount (float, ALWAYS POSITIVE), Currency (ISO code of the amount exactly as written in the input: UZS, USD, RUB, EUR, SGD...; null if not stated), Date (DD.MM.YYYY), Category, Subcategory (must belong to the chosen category), Comment, Source, Direction.",
             "2. Use the History Context to predict the Category and Subcategory based on the Comment/Merchant name.",
             "3. IMPORTANT: The 'Comment' field MUST contain the Merchant Name, Sender Name, or the raw description of the transaction (e.g. 'IP IVANOV', 'Uber', 'Vkusvill'). Do NOT leave it empty if there is any text identifier.",
-            "4. If Source is not explicitly mentioned in input, try to infer it from context, otherwise return null.",
+            "4. Source: the exact name from Allowed Sources whose card number appears in the input (e.g. '*9120' -> the source containing 9120); also put the last 4 card digits into 'card_identifier'. If no card is mentioned, return null.",
             f"5. DATE EXTRACTION (CRITICAL): Look carefully for the transaction date on receipts, bank statements, screenshots. Extract the ACTUAL date shown (formats: DD.MM.YYYY, DD/MM/YYYY, DD-MM-YYYY, YYYY-MM-DD, 'January 15, 2025', etc). Convert to DD.MM.YYYY format. Only use today's date ({today_str}) if NO date is visible anywhere in the input.",
-            "6. AMOUNT (CRITICAL): Always return POSITIVE amount. If the receipt/statement shows negative number (e.g. -1500, -$50), remove the minus sign and return positive value (1500, 50). Expenses are recorded as positive numbers.",
+            "6. AMOUNT (CRITICAL): Always return POSITIVE amount. If the receipt/statement shows negative number (e.g. -1500, -$50), remove the minus sign and return positive value (1500, 50). The sign is expressed by 'direction', not by the amount.",
+            "6a. DIRECTION (CRITICAL): 'expense' = purchase/payment/fee (Xarid, Pokupka, Oplata, Spisanie); 'transfer_out' = money sent from the card to another card or cash withdrawal; 'transfer_in' = money received on the card that is NOT salary (popolnen, zachislenie, perevod na kartu, P2P received); 'refund' = return of a purchase (vozvrat, otmena); 'income' = salary, bonus, advance (ZP, zarplata, avans, premiya).",
             "7. BALANCE EXTRACTION (ONLY IF EXPLICITLY PRESENT): Extract 'balance' (float) and 'card_identifier' (last 4 digits) ONLY if the input explicitly contains balance/remaining amount keywords like: 'Остаток', 'Ostatok', 'Balance', 'Баланс', 'Available', 'Доступно', 'Qoldiq'. If NO such keywords found - return null for both fields. NEVER guess or calculate balance.",
             "8. Return ONLY valid JSON. No markdown formatting.",
             "9. If input contains MULTIPLE transactions, return a JSON ARRAY of objects. If single transaction, return a single object.",
-            "JSON Schema for single: {'amount': float, 'currency': str, 'date': str, 'category': str, 'subcategory': str, 'comment': str, 'source': str, 'balance': float|null, 'card_identifier': str|null}",
+            "JSON Schema for single: {'amount': float, 'currency': str|null, 'date': str, 'category': str, 'subcategory': str, 'comment': str, 'source': str|null, 'direction': 'expense'|'income'|'transfer_out'|'transfer_in'|'refund', 'balance': float|null, 'card_identifier': str|null}",
             "JSON Schema for multiple: [{'amount': float, ...}, {'amount': float, ...}]",
             f"\nINPUT: {user_input}",
         ]

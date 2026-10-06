@@ -4,8 +4,10 @@ from typing import Any
 
 import gspread
 from google.oauth2.service_account import Credentials
+from gspread.utils import ValueRenderOption
 
 from app import config
+from app.domain import Rates
 
 logger = logging.getLogger(__name__)
 
@@ -190,3 +192,25 @@ class GoogleSheetsService:
             except Exception as retry_e:
                 logger.error(f"Retry failed: {retry_e}")
                 return False
+
+    def get_rates(self) -> Rates:
+        """Курсы к суму из system!H2:I10: код валюты в H, курс (GOOGLEFINANCE) в I.
+
+        Если лист недоступен, остаётся только UZS: операции в другой валюте
+        тогда не записываются, а бот просит внести их вручную.
+        """
+        rates = {"UZS": 1.0}
+        try:
+            if not self.sheet:
+                self._authenticate()
+            ws = self.sheet.worksheet(config.SYSTEM_SHEET_NAME)
+            values = ws.get("H2:I10", value_render_option=ValueRenderOption.unformatted)
+            for row in values:
+                if len(row) < 2 or not str(row[0]).strip():
+                    continue
+                code, rate = str(row[0]).strip().upper(), row[1]
+                if isinstance(rate, int | float) and rate > 0:
+                    rates[code] = float(rate)
+        except Exception:
+            logger.exception("Could not read currency rates from the system sheet")
+        return Rates(rates)

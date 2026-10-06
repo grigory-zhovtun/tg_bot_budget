@@ -1,13 +1,23 @@
 import logging
-from datetime import datetime
+from collections.abc import Sequence
 
-from telegram import Update
+from pydantic import ValidationError
+from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from app import config
+from app.domain import (
+    INCOME_GROUP,
+    Catalog,
+    ParsedTransaction,
+    SheetRow,
+    Skipped,
+    build_row,
+    local_today,
+    manual_row,
+)
 from app.handlers.common import (
     clear_tracked_messages,
-    get_currency_from_source,
     show_main_menu,
     track_message,
 )
@@ -18,6 +28,30 @@ from app.utils.keyboards import (
 )
 
 logger = logging.getLogger(__name__)
+
+BALANCE_FORMULA = (
+    '=СУММЕСЛИМН($D$2:D{r}; $H$2:H{r}; $H{r}; $G$2:G{r}; $G{r}; $B$2:B{r}; "💰 ДОХОДЫ")'
+    " - "
+    'СУММЕСЛИМН($D$2:D{r}; $H$2:H{r}; $H{r}; $G$2:G{r}; $G{r}; $B$2:B{r}; "<>💰 ДОХОДЫ")'
+)
+
+
+async def _delete_quietly(message: Message | None) -> None:
+    """Убрать сообщение пользователя из чата; если не вышло — не страшно."""
+    if message is None:
+        return
+    try:
+        await message.delete()
+    except Exception as error:  # нет прав, сообщение уже удалено и т. п.
+        logger.debug("Could not delete message: %s", error)
+
+
+def _catalog(context: ContextTypes.DEFAULT_TYPE) -> Catalog:
+    return Catalog(
+        categories=context.bot_data.get("categories", []),
+        subcategories=context.bot_data.get("subcategories", {}),
+        sources=context.bot_data.get("sources", []),
+    )
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -43,11 +77,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if clean_text in sources:
             context.user_data["source"] = clean_text
-            # Delete user's source selection message to keep chat clean
-            try:
-                await update.message.delete()
-            except Exception:
-                pass
+            await _delete_quietly(update.message)
             # Silent update - just show keyboards
             msg1 = await update.effective_chat.send_message(
                 "ㅤ",  # Invisible character for minimal text
@@ -67,11 +97,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if msg_text == "⬅️ Назад":
             context.user_data.pop("category", None)
             context.user_data.pop("subcategory", None)
-            # Delete user's back message
-            try:
-                await update.message.delete()
-            except Exception:
-                pass
+            await _delete_quietly(update.message)
             current_source = context.user_data.get("source")
             if current_source:
                 msg = await update.effective_chat.send_message(
@@ -88,52 +114,30 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 track_message(context, msg)
             return
 
-    # 3. Decision Logic: Manual Entry (Strict) vs AI Parsing
-    # Manual Entry requires: Source + Category + Subcategory + Text matches "float string" pattern.
+    # 3. Manual entry: source + category + subcategory are chosen, text is "amount comment"
     current_source = context.user_data.get("source")
     category = context.user_data.get("category")
     subcategory = context.user_data.get("subcategory")
 
-    is_manual_candidate = (
-        current_source and category and subcategory and msg_text and not is_photo
-    )
-    manual_success = False
-
-    if is_manual_candidate:
-        try:
-            parts = msg_text.split(" ", 1)
-            amount = float(parts[0].replace(",", "."))
-            comment = parts[1] if len(parts) > 1 else ""
-
-            # Delete user's message
-            try:
-                await update.message.delete()
-            except Exception:
-                pass
-
-            # Execute Manual Entry logic
-            await _save_transaction(
-                update, context, current_source, category, subcategory, amount, comment
-            )
-            manual_success = True
-        except ValueError:
-            # Not a simple number, so fall through to AI
-            manual_success = False
-
-    if manual_success:
-        return
+    if current_source and category and subcategory and msg_text and not is_photo:
+        row = manual_row(
+            msg_text,
+            current_source,
+            category,
+            subcategory,
+            local_today(config.ANALYTICS_TIMEZONE),
+        )
+        if row is not None:
+            await _delete_quietly(update.message)
+            await _save_rows(update, context, [row], [])
+            return
 
     # 4. AI Parsing (Fallthrough)
     ai_service = context.bot_data.get("ai_service")
     if not ai_service or not config.GEMINI_API_KEY:
-        if is_manual_candidate:
-            await update.message.reply_text(
-                "Неверный формат суммы для ручного ввода. AI сервис недоступен."
-            )
-        else:
-            await update.message.reply_text(
-                "AI сервис не настроен. Пожалуйста, используйте кнопки для ручного ввода."
-            )
+        await update.message.reply_text(
+            "AI сервис не настроен. Пожалуйста, используйте кнопки для ручного ввода."
+        )
         return
 
     # Prepare Image if photo
@@ -148,156 +152,120 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         image_part = PIL.Image.open(file_path)
 
     # Delete user's message (text/SMS/photo) to keep chat clean
-    try:
-        await update.message.delete()
-    except Exception:
-        pass
+    await _delete_quietly(update.message)
 
     analyzing_msg = await update.effective_chat.send_message("🔍")
     track_message(context, analyzing_msg)
 
     try:
-        known_cats = context.bot_data.get("categories", [])
-        known_srcs = context.bot_data.get("sources", [])
-
+        catalog = _catalog(context)
         result = await ai_service.parse_transaction(
             user_input=msg_text or "Image Input",
             image_part=image_part,
-            known_categories=known_cats,
-            known_sources=known_srcs,
+            known_categories=catalog.categories,
+            known_sources=catalog.sources,
+            known_subcategories=catalog.subcategories,
         )
-
-        # Handle both single transaction (dict) and multiple transactions (list)
-        transactions = result if isinstance(result, list) else [result]
-
-        if not transactions:
-            await update.message.reply_text("Не удалось распознать транзакции.")
-            return
+        items = result if isinstance(result, list) else [result]
 
         # Для скриншотов разворачиваем порядок: нижняя транзакция → первая запись
         # Для SMS оставляем как есть: верхняя транзакция → первая запись
-        if is_photo and len(transactions) > 1:
-            transactions = transactions[::-1]
+        if is_photo and len(items) > 1:
+            items = items[::-1]
 
-        # Process each transaction
-        for txn in transactions:
-            ai_amount = txn.get("amount")
-            ai_cat = txn.get("category")
-            ai_sub = txn.get("subcategory")
-            ai_comment = txn.get("comment") or "AI Recognized"
-            ai_source = txn.get("source") or current_source
-            ai_date = txn.get("date")  # Date extracted by AI from receipt/screenshot
-            ai_balance = txn.get("balance")  # Card balance if mentioned
-            ai_card_id = txn.get("card_identifier")  # Last 4 digits of card
-
-            if not ai_amount:
-                continue  # Skip transactions without amount
-
-            if not ai_source:
-                await update.message.reply_text(
-                    f"Пропущено (нет источника): {ai_comment}"
-                )
-                continue
-
-            # Check defaults if missing
-            if not ai_cat or ai_cat not in known_cats:
-                ai_cat = "Прочее"
-                ai_sub = "AI (Не распознано)"
-            if not ai_sub:
-                ai_sub = "Общее"
-
-            await _save_transaction(
-                update,
-                context,
-                ai_source,
-                ai_cat,
-                ai_sub,
-                ai_amount,
-                ai_comment,
-                ai_date,
-                ai_balance,
-                ai_card_id,
-            )
+        rows, skipped = _to_rows(items, context, current_source)
+        await _save_rows(update, context, rows, skipped)
 
     except Exception as e:
-        logger.error(f"AI Error: {e}")
-        await update.message.reply_text(f"Ошибка AI: {e}")
+        logger.exception("AI parsing failed")
+        await update.effective_chat.send_message(f"Ошибка AI: {e}")
 
 
-async def _save_transaction(
-    update,
-    context,
-    source,
-    category,
-    subcategory,
-    amount,
-    comment,
-    date_str=None,
-    balance=None,
-    card_identifier=None,
-):
-    """Helper to save to Google Sheets.
+def _to_rows(
+    items: Sequence[object],
+    context: ContextTypes.DEFAULT_TYPE,
+    default_source: str | None,
+) -> tuple[list[SheetRow], list[Skipped]]:
+    """Ответ AI → строки fact по правилам таблицы плюс то, что записать нельзя."""
+    gs_service: GoogleSheetsService = context.bot_data["gs_service"]
+    catalog = _catalog(context)
+    rates = gs_service.get_rates()
+    now = local_today(config.ANALYTICS_TIMEZONE)
 
-    Args:
-        date_str: Optional date string in DD.MM.YYYY format. If None, uses today's date.
-        balance: Optional card balance to update in the sheet.
-        card_identifier: Last 4 digits of card number for balance update.
-    """
-    gs_service: GoogleSheetsService = context.bot_data.get("gs_service")
-    last_row = gs_service.get_last_row_index()
-    next_row = last_row + 1
+    rows: list[SheetRow] = []
+    skipped: list[Skipped] = []
+    for item in items:
+        try:
+            parsed = ParsedTransaction.model_validate(item)
+        except ValidationError:
+            comment = item.get("comment") if isinstance(item, dict) else None
+            skipped.append(Skipped("не нашёл сумму", str(comment or item)[:60]))
+            continue
+        result = build_row(parsed, catalog, rates, now, default_source)
+        (skipped if isinstance(result, Skipped) else rows).append(result)
+    return rows, skipped
 
-    balance_formula_ru = (
-        f'=СУММЕСЛИМН($D$2:D{next_row}; $H$2:H{next_row}; $H{next_row}; $G$2:G{next_row}; $G{next_row}; $B$2:B{next_row}; "💰 ДОХОДЫ")'
-        f" - "
-        f'СУММЕСЛИМН($D$2:D{next_row}; $H$2:H{next_row}; $H{next_row}; $G$2:G{next_row}; $G{next_row}; $B$2:B{next_row}; "<>💰 ДОХОДЫ")'
-    )
 
-    currency = get_currency_from_source(source)
+def _format_amount(row: SheetRow) -> str:
+    """«48 000 UZS», «+1 000 000 UZS», «12.21 USD»."""
+    incoming = row.category == INCOME_GROUP or row.amount < 0
+    value = abs(row.amount)
+    digits = f"{value:,.0f}" if row.currency == "UZS" else f"{value:,.2f}"
+    return f"{'+' if incoming else ''}{digits.replace(',', ' ')} {row.currency}"
 
-    # Use provided date or fallback to today
-    transaction_date = date_str if date_str else datetime.now().strftime("%d.%m.%Y")
 
-    # Ensure amount is positive (remove minus sign from expenses)
-    positive_amount = abs(float(amount))
+def _card_number(row: SheetRow) -> str | None:
+    if row.card_identifier:
+        return row.card_identifier
+    return next((part for part in row.source.split() if part.isdigit()), None)
 
-    row_data = [
-        transaction_date,
-        category.upper(),
-        subcategory,
-        positive_amount,
-        balance_formula_ru,
-        comment,
-        currency,
-        source,
-    ]
 
-    if gs_service.add_transaction(row_data):
-        # Clear specific manual selection state
-        context.user_data.pop("category", None)
-        context.user_data.pop("subcategory", None)
-        context.user_data["source"] = source
+async def _save_rows(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    rows: Sequence[SheetRow],
+    skipped: Sequence[Skipped],
+) -> None:
+    """Записать строки в fact, обновить остатки карт и показать одну сводку."""
+    gs_service: GoogleSheetsService = context.bot_data["gs_service"]
+    lines: list[str] = []
+    failed = 0
+    for row in rows:
+        next_row = gs_service.get_last_row_index() + 1
+        values = [
+            row.date_text,
+            row.category,
+            row.subcategory,
+            row.amount,
+            BALANCE_FORMULA.format(r=next_row),
+            row.comment,
+            row.currency,
+            row.source,
+        ]
+        if not gs_service.add_transaction(values):
+            failed += 1
+            continue
+        context.user_data["source"] = row.source
+        line = f"✅ {_format_amount(row)} • {row.category} ({row.subcategory}) • {row.source}"
+        card = _card_number(row)
+        cell = config.CARD_BALANCE_CELLS.get(card) if card else None
+        if row.balance is not None and cell:
+            if gs_service.update_cell(config.FACT_SHEET_NAME, cell, row.balance):
+                line += f" | 💳 {row.balance:,.0f}".replace(",", " ")
+                logger.info("Updated balance for card %s", card)
+        lines.append(line)
 
-        # Update card balance if provided
-        balance_msg = ""
-        if balance is not None and card_identifier:
-            cell = config.CARD_BALANCE_CELLS.get(card_identifier)
-            if cell:
-                if gs_service.update_cell(config.FACT_SHEET_NAME, cell, balance):
-                    balance_msg = f" | 💳 {balance:,.0f}"
-                    logger.info(
-                        f"Updated balance for card {card_identifier}: {balance}"
-                    )
+    lines += [f"⚠️ Не записал: {s.comment} — {s.reason}" for s in skipped]
+    if failed:
+        lines.append(f"❌ Ошибка записи в Google Таблицу: {failed} шт.")
+    if not lines:
+        lines.append("Не удалось распознать транзакции.")
 
-        # Clear previous bot messages
-        chat_id = update.effective_chat.id
-        await clear_tracked_messages(context, chat_id)
-
-        # Concise success message: amount Category (subcategory) • Source
-        success_msg = f"✅ {positive_amount:,.0f} {currency} • {category} ({subcategory}) • {source}{balance_msg}"
-        await show_main_menu(update, context, success_msg)
-    else:
-        await update.message.reply_text("❌ Ошибка при записи в Google Таблицу.")
+    # Clear specific manual selection state
+    context.user_data.pop("category", None)
+    context.user_data.pop("subcategory", None)
+    await clear_tracked_messages(context, update.effective_chat.id)
+    await show_main_menu(update, context, "\n".join(lines))
 
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -329,11 +297,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("AI сервис не настроен.")
         return
 
-    # Delete user's document message to keep chat clean
-    try:
-        await update.message.delete()
-    except Exception:
-        pass
+    await _delete_quietly(update.message)
 
     analyzing_msg = await update.effective_chat.send_message("📄")
     track_message(context, analyzing_msg)
@@ -370,94 +334,35 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     extracted_text += page.extract_text() or ""
 
         elif is_excel:
-            try:
-                import pandas as pd
+            import pandas as pd
 
-                df = pd.read_excel(file_path)
-                # Convert to string representation
-                extracted_text = df.head(500).to_string()  # Limit rows
-            except ImportError:
-                await update.message.reply_text(
-                    "❌ Для обработки Excel установите pandas и openpyxl."
-                )
-                return
+            df = pd.read_excel(file_path)
+            extracted_text = df.head(500).to_string()  # Limit rows
 
         elif is_csv:
-            try:
-                import pandas as pd
+            import pandas as pd
 
-                df = pd.read_csv(file_path)
-                extracted_text = df.head(500).to_string()
-            except ImportError:
-                # Fallback without pandas
-                with open(file_path, encoding="utf-8", errors="ignore") as f:
-                    extracted_text = f.read()[:50000]  # Limit size
+            df = pd.read_csv(file_path)
+            extracted_text = df.head(500).to_string()
 
         if not extracted_text and not image_part:
-            await update.message.reply_text("❌ Не удалось извлечь данные из файла.")
+            await update.effective_chat.send_message(
+                "❌ Не удалось извлечь данные из файла."
+            )
             return
 
-        # Send to AI for parsing
-        current_source = context.user_data.get("source")
-        known_cats = context.bot_data.get("categories", [])
-        known_srcs = context.bot_data.get("sources", [])
-
+        catalog = _catalog(context)
         result = await ai_service.parse_transaction(
             user_input=extracted_text or "Document with transactions",
             image_part=image_part,
-            known_categories=known_cats,
-            known_sources=known_srcs,
+            known_categories=catalog.categories,
+            known_sources=catalog.sources,
+            known_subcategories=catalog.subcategories,
         )
-
-        # Handle results (same logic as text_handler)
-        transactions = result if isinstance(result, list) else [result]
-
-        if not transactions:
-            await update.message.reply_text("Не удалось распознать транзакции в файле.")
-            return
-
-        saved_count = 0
-        for txn in transactions:
-            ai_amount = txn.get("amount")
-            ai_cat = txn.get("category")
-            ai_sub = txn.get("subcategory")
-            ai_comment = txn.get("comment") or "From document"
-            ai_source = txn.get("source") or current_source
-            ai_date = txn.get("date")  # Date extracted by AI from document
-            ai_balance = txn.get("balance")  # Card balance if mentioned
-            ai_card_id = txn.get("card_identifier")  # Last 4 digits of card
-
-            if not ai_amount:
-                continue
-
-            if not ai_source:
-                continue
-
-            if not ai_cat or ai_cat not in known_cats:
-                ai_cat = "Прочее"
-                ai_sub = "AI (Не распознано)"
-            if not ai_sub:
-                ai_sub = "Общее"
-
-            await _save_transaction(
-                update,
-                context,
-                ai_source,
-                ai_cat,
-                ai_sub,
-                ai_amount,
-                ai_comment,
-                ai_date,
-                ai_balance,
-                ai_card_id,
-            )
-            saved_count += 1
-
-        if saved_count == 0:
-            await update.message.reply_text(
-                "❌ Не удалось сохранить транзакции. Проверьте, что выбран источник."
-            )
+        items = result if isinstance(result, list) else [result]
+        rows, skipped = _to_rows(items, context, context.user_data.get("source"))
+        await _save_rows(update, context, rows, skipped)
 
     except Exception as e:
-        logger.error(f"Document processing error: {e}")
-        await update.message.reply_text(f"❌ Ошибка обработки файла: {e}")
+        logger.exception("Document processing failed")
+        await update.effective_chat.send_message(f"❌ Ошибка обработки файла: {e}")

@@ -61,6 +61,7 @@ CARD_BALANCE_CELLS = {
     "9959": "N4",  # МИР 9959
     "4058": "N5",  # VISA 4058
     "6845": "N6",  # HUMO 6845
+    "7450": "N7",  # VISA 7450 (Сбербанк)
 }
 
 # Daily Analytics
