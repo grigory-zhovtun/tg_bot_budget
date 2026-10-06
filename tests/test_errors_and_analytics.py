@@ -7,6 +7,7 @@ from telegram.error import BadRequest, Conflict
 
 from app.errors import MAX_LENGTH, on_error, user_message
 from app.handlers import analytics
+from app.services.analytics_service import CAPTION_DAYS, CAPTION_PIE
 
 FAKE_TOKEN = "1234567:" + "A" * 35
 
@@ -87,10 +88,13 @@ async def test_broken_markdown_falls_back_per_chunk_without_duplicates(
 
 class FakeAnalytics:
     def __init__(self) -> None:
-        self.charts = [BytesIO(b"pie"), BytesIO(b"bars")]
+        self.charts = [(CAPTION_PIE, BytesIO(b"pie")), (CAPTION_DAYS, BytesIO(b"bars"))]
 
-    def generate_3day_report(self) -> tuple[str, list[BytesIO]]:
+    def generate_3day_report(self) -> tuple[str, list[tuple[str, BytesIO]]]:
         return "📊 *Отчёт*", self.charts
+
+    def advice_context(self) -> str:
+        return "Траты месяца: 100 сум"
 
 
 async def test_analytics_command_sends_report_and_closes_charts() -> None:
@@ -107,8 +111,8 @@ async def test_analytics_command_sends_report_and_closes_charts() -> None:
     status.delete.assert_awaited_once()
     assert message.reply_text.await_args_list[-1].args == ("📊 *Отчёт*",)
     captions = [c.kwargs["caption"] for c in message.reply_photo.await_args_list]
-    assert captions == list(analytics.CAPTIONS)
-    assert all(chart.closed for chart in service.charts)
+    assert captions == [CAPTION_PIE, CAPTION_DAYS]
+    assert all(chart.closed for _, chart in service.charts)
 
 
 async def test_analytics_failure_is_shown_in_status_message() -> None:
@@ -130,3 +134,18 @@ async def test_daily_report_goes_to_owner_chat() -> None:
     await analytics.send_daily_analytics(bot, 42, FakeAnalytics())
     assert bot.send_message.await_args.args == (42, "📊 *Отчёт*")
     assert bot.send_photo.await_count == 2
+
+
+async def test_advice_sends_computed_numbers_to_ai() -> None:
+    class AI:
+        async def analyze_finances(self, numbers: str) -> str:
+            assert numbers == "Траты месяца: 100 сум"
+            return "📊 Анализ: всё в плане"
+
+    status = SimpleNamespace(delete=AsyncMock(), edit_text=AsyncMock())
+    message = SimpleNamespace(reply_text=AsyncMock(return_value=status))
+    context = SimpleNamespace(
+        bot_data={"ai_service": AI(), "analytics_service": FakeAnalytics()}
+    )
+    await analytics.advice_command(SimpleNamespace(message=message), context)
+    assert message.reply_text.await_args_list[-1].args == ("📊 Анализ: всё в плане",)

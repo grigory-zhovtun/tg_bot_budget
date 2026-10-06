@@ -63,6 +63,7 @@ ALLOWED_USER_IDS="123456789"
 # AI parsing of SMS, screenshots and documents (Google Gemini)
 GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 # GEMINI_MODEL="gemini-flash-latest"   # any Gemini model id; the resolved version is logged
+# GEMINI_FALLBACK_MODELS="gemini-flash-lite-latest"  # used when the main model is overloaded (503/429)
 
 # Optional daily report
 # ANALYTICS_CHAT_ID="123456789"

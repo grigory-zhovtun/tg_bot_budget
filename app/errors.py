@@ -3,6 +3,7 @@
 import logging
 import re
 
+from google.genai import errors as genai_errors
 from telegram.error import Conflict
 from telegram.ext import ContextTypes
 
@@ -18,6 +19,8 @@ MAX_LENGTH = 200
 
 def user_message(error: BaseException) -> str:
     """Первая строка ошибки без секретов, не длиннее MAX_LENGTH символов."""
+    if isinstance(error, genai_errors.APIError) and error.code in (429, 503):
+        return "Gemini сейчас перегружен, попробуйте через минуту"
     text = (str(error).strip().splitlines() or [type(error).__name__])[0]
     for pattern in _SECRETS:
         text = pattern.sub("•••", text)

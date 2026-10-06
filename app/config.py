@@ -54,6 +54,12 @@ LOCAL_RUN = os.getenv("LOCAL_RUN", "False").lower() == "true"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # Псевдоним на актуальную Flash-модель; конкретную версию видно в логах
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+# Запасные модели, если основная перегружена (503/429): «a,b»
+GEMINI_FALLBACK_MODELS = [
+    m.strip()
+    for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-flash-lite-latest").split(",")
+    if m.strip()
+]
 # We don't raise error immediately to allow bot to start if key is missing (feature flag logic),
 # but for this specific request, it's critical.
 # However, user might deploy first then add key.
