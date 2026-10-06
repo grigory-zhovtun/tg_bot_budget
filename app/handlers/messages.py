@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import tempfile
 from collections.abc import AsyncIterator, Sequence
@@ -32,12 +33,6 @@ from app.utils.keyboards import (
 )
 
 logger = logging.getLogger(__name__)
-
-BALANCE_FORMULA = (
-    '=СУММЕСЛИМН($D$2:D{r}; $H$2:H{r}; $H{r}; $G$2:G{r}; $G{r}; $B$2:B{r}; "💰 ДОХОДЫ")'
-    " - "
-    'СУММЕСЛИМН($D$2:D{r}; $H$2:H{r}; $H{r}; $G$2:G{r}; $G{r}; $B$2:B{r}; "<>💰 ДОХОДЫ")'
-)
 
 
 @asynccontextmanager
@@ -192,7 +187,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if is_photo and len(items) > 1:
             items = items[::-1]
 
-        rows, skipped = _to_rows(items, context, current_source)
+        rows, skipped = await _to_rows(items, context, current_source)
         await _save_rows(update, context, rows, skipped)
 
     except Exception as e:
@@ -203,7 +198,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             image_part.close()
 
 
-def _to_rows(
+async def _to_rows(
     items: Sequence[object],
     context: ContextTypes.DEFAULT_TYPE,
     default_source: str | None,
@@ -211,7 +206,7 @@ def _to_rows(
     """Ответ AI → строки fact по правилам таблицы плюс то, что записать нельзя."""
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
     catalog = _catalog(context)
-    rates = gs_service.get_rates()
+    rates = await asyncio.to_thread(gs_service.get_rates)
     now = local_today(config.ANALYTICS_TIMEZONE)
 
     rows: list[SheetRow] = []
@@ -236,50 +231,42 @@ def _format_amount(row: SheetRow) -> str:
     return f"{'+' if incoming else ''}{digits.replace(',', ' ')} {row.currency}"
 
 
-def _card_number(row: SheetRow) -> str | None:
-    if row.card_identifier:
-        return row.card_identifier
-    return next((part for part in row.source.split() if part.isdigit()), None)
-
-
 async def _save_rows(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
     rows: Sequence[SheetRow],
     skipped: Sequence[Skipped],
 ) -> None:
-    """Записать строки в fact, обновить остатки карт и показать одну сводку."""
+    """Записать строки в fact одним запросом, обновить остатки и показать сводку."""
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
     lines: list[str] = []
-    failed = 0
+    if rows:
+        try:
+            await asyncio.to_thread(gs_service.append_transactions, rows)
+        except Exception:
+            logger.exception("Writing %d rows failed", len(rows))
+            lines.append(
+                f"❌ Не записал в Google Таблицу ({len(rows)} шт.), попробуйте ещё раз"
+            )
+            rows = []
+
+    updated: list[str] = []
+    balances = {row.source: row.balance for row in rows if row.balance is not None}
+    if balances:
+        try:
+            updated = await asyncio.to_thread(gs_service.update_balances, balances)
+        except Exception:
+            logger.exception("Updating card balances failed")
+
     for row in rows:
-        next_row = gs_service.get_last_row_index() + 1
-        values = [
-            row.date_text,
-            row.category,
-            row.subcategory,
-            row.amount,
-            BALANCE_FORMULA.format(r=next_row),
-            row.comment,
-            row.currency,
-            row.source,
-        ]
-        if not gs_service.add_transaction(values):
-            failed += 1
-            continue
-        context.user_data["source"] = row.source
         line = f"✅ {_format_amount(row)} • {row.category} ({row.subcategory}) • {row.source}"
-        card = _card_number(row)
-        cell = config.CARD_BALANCE_CELLS.get(card) if card else None
-        if row.balance is not None and cell:
-            if gs_service.update_cell(config.FACT_SHEET_NAME, cell, row.balance):
-                line += f" | 💳 {row.balance:,.0f}".replace(",", " ")
-                logger.info("Updated balance for card %s", card)
+        if row.balance is not None and row.source in updated:
+            line += f" | 💳 {row.balance:,.0f}".replace(",", " ")
         lines.append(line)
+    if rows:
+        context.user_data["source"] = rows[-1].source
 
     lines += [f"⚠️ Не записал: {s.comment} — {s.reason}" for s in skipped]
-    if failed:
-        lines.append(f"❌ Ошибка записи в Google Таблицу: {failed} шт.")
     if not lines:
         lines.append("Не удалось распознать транзакции.")
 
@@ -343,7 +330,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             known_subcategories=catalog.subcategories,
         )
         items = result if isinstance(result, list) else [result]
-        rows, skipped = _to_rows(items, context, context.user_data.get("source"))
+        rows, skipped = await _to_rows(items, context, context.user_data.get("source"))
         await _save_rows(update, context, rows, skipped)
 
     except Exception as e:
