@@ -37,6 +37,7 @@ app/
 │   ├── messages.py      # Text/photo/document handling, manual entry, AI parsing flow
 │   ├── statement_import.py # Statement preview (JobQueue debounce), confirm buttons, apply_plan
 │   ├── transactions.py  # Callback query handler for inline buttons
+│   ├── undo.py          # /undo: delete the last write after checking the rows are unchanged
 │   └── analytics.py     # /advice, /analytics, daily report
 ├── services/
 │   ├── google_sheets.py # GoogleSheetsService — synchronous gspread wrapper
@@ -81,7 +82,7 @@ Optional:
 ## Code Patterns
 
 - Dependencies injected via `context.bot_data` (gs_service, ai_service, analytics_service, categories, subcategories, sources)
-- User state stored in `context.user_data` (source, category, subcategory)
+- User state stored in `context.user_data` (source, category, subcategory; `last_write` for /undo, `seen_inputs` — fingerprints of SMS/files already written)
 - The Google Sheets client is synchronous: call it with `asyncio.to_thread` from handlers; Gemini uses the async client (`client.aio`)
 - Writes that are not idempotent (row deletion) are not retried: a lost response would make the retry delete other rows
 - Business rules live in `app/domain.py` as pure functions — test them table-driven

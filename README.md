@@ -138,6 +138,8 @@ Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this
 2.  **Pick a category and a subcategory** on the inline keyboards.
 3.  **Type the amount and an optional comment**: `48000 latte`, `5 000,50 lunch`. A leading `+` records incoming money: `+20000 refund`.
 4.  **Or just send an SMS, a screenshot, a PDF/Excel/CSV file** — Gemini extracts the transactions; the bot converts currencies, picks the card by its number, checks categories against `system` and writes all rows in one request. Rows it cannot write are listed in the reply.
+    *   The same SMS, screenshot or file sent twice is written once: the bot remembers what it wrote during the last week and answers which rows already hold it.
+    *   When an SMS shows the card balance, the reply compares it with the balance in the sheet: «🟰 сходится» or the difference.
 5.  **Send Kapitalbank statements** (PDF «История операций», one or several cards at once). The bot waits a few seconds for all files, then shows one preview: new rows, rows already in the sheet, how each card balance changes and rows worth checking. **✅ Записать** writes everything in one go:
     *   operations booked up to the date in `system!G` («выписка по», next to the card) were loaded before and are skipped; after the import the date moves to the last full day of the statement;
     *   a row the bot once converted at the sheet rate (comment with `≈`) gets the bank amount instead of a second row;
@@ -148,6 +150,7 @@ Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this
 
 *   **`/analytics`** — report for the last 3 days with charts.
 *   **`/advice`** — AI analysis of spending vs. the current month plan.
+*   **`/undo`** — delete the rows of the last write, if nobody changed them in the sheet since.
 *   **`/reboot`** — reload categories, subcategories and sources from the `system` sheet.
 
 ## Development
