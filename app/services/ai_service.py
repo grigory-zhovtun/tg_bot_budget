@@ -8,7 +8,7 @@ import time
 from typing import Any, Literal
 
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 from pydantic import BaseModel, TypeAdapter
 
 from app import config
@@ -20,21 +20,12 @@ logger = logging.getLogger(__name__)
 HINTS_TTL_SECONDS = 30 * 60
 MAX_HINTS = 300
 SELF_CHECK_SMS = "Pokupka: TEST CAFE, 1000.00 UZS, 01.10.2026 12:00, karta *0000"
-# Листы месяцев называются «Oct 26»; список, а не strftime — не зависит от локали
-MONTHS = (
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
+# Перегрузка и временные сбои Gemini: повтор с паузой, затем запасная модель
+OVERLOADED = frozenset({429, 500, 503, 504})
+RETRY = types.HttpRetryOptions(
+    attempts=4, initial_delay=2.0, max_delay=20.0, http_status_codes=sorted(OVERLOADED)
 )
+TIMEOUT_MS = 120_000
 
 
 class AiTransaction(BaseModel):
@@ -141,8 +132,12 @@ class GeminiService:
     def __init__(self, gs_service: GoogleSheetsService) -> None:
         self.gs_service = gs_service
         self.model_name = config.GEMINI_MODEL
+        self.models = [config.GEMINI_MODEL, *config.GEMINI_FALLBACK_MODELS]
         self.client = (
-            genai.Client(api_key=config.GEMINI_API_KEY)
+            genai.Client(
+                api_key=config.GEMINI_API_KEY,
+                http_options=types.HttpOptions(retry_options=RETRY, timeout=TIMEOUT_MS),
+            )
             if config.GEMINI_API_KEY
             else None
         )
@@ -179,11 +174,20 @@ class GeminiService:
                 "response_mime_type": "application/json",
                 "response_json_schema": schema,
             }
-        return await self.client.aio.models.generate_content(
-            model=self.model_name,
-            contents=contents,
-            config=types.GenerateContentConfig(**config_args),
-        )
+        last_error: errors.APIError | None = None
+        for model in self.models:
+            try:
+                return await self.client.aio.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(**config_args),
+                )
+            except errors.APIError as error:
+                if error.code not in OVERLOADED:
+                    raise
+                logger.warning("Gemini %s unavailable (%s)", model, error.code)
+                last_error = error
+        raise last_error
 
     async def parse_transaction(
         self,
@@ -235,6 +239,13 @@ class GeminiService:
                 response.model_version,
                 len(items),
             )
+        except errors.APIError as error:
+            if error.code in OVERLOADED:
+                logger.warning(
+                    "Gemini self-check: overloaded (%s), will retry", error.code
+                )
+            else:
+                logger.exception("Gemini self-check failed")
         except Exception:
             logger.exception("Gemini self-check failed")
 

@@ -70,7 +70,7 @@ Required:
 - `ALLOWED_USER_IDS` — Telegram user ids allowed to use the bot (falls back to `ANALYTICS_CHAT_ID`; empty = nobody)
 
 Optional:
-- `GEMINI_API_KEY` - Enables AI features; `GEMINI_MODEL` (default `gemini-flash-latest`)
+- `GEMINI_API_KEY` - Enables AI features; `GEMINI_MODEL` (default `gemini-flash-latest`), `GEMINI_FALLBACK_MODELS` (default `gemini-flash-lite-latest`, tried on 503/429)
 - `ANALYTICS_CHAT_ID`, `ANALYTICS_TIME`, `ANALYTICS_TIMEZONE` - daily report (JobQueue); the time zone also defines "today"
 - `WEBHOOK_URL` (or Render's `RENDER_EXTERNAL_URL`), `WEBHOOK_SECRET`, `PORT`, `LOCAL_RUN=True`
 

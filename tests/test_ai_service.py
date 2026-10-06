@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from google.genai import types
+from google.genai import errors, types
 
 from app.services import ai_service
 from app.services.ai_service import (
@@ -107,6 +107,7 @@ def make_service(text: str | None) -> tuple[GeminiService, FakeModels, FakeSheet
     models = FakeModels(text)
     service.gs_service = sheets
     service.model_name = "gemini-flash-latest"
+    service.models = ["gemini-flash-latest", "gemini-flash-lite-latest"]
     service.client = SimpleNamespace(aio=SimpleNamespace(models=models))
     service._hints = None
     return service, models, sheets
@@ -174,3 +175,72 @@ async def test_without_key_parsing_is_refused() -> None:
     service.client = None
     with pytest.raises(ValueError, match="GEMINI_API_KEY"):
         await service.parse_transaction("1")
+
+
+def overloaded(code: int = 503) -> errors.APIError:
+    body = {"error": {"code": code, "message": "high demand", "status": "UNAVAILABLE"}}
+    return (
+        errors.ServerError(code, body)
+        if code >= 500
+        else errors.ClientError(code, body)
+    )
+
+
+class FlakyModels(FakeModels):
+    """Первые N вызовов падают с заданной ошибкой, дальше — обычный ответ."""
+
+    def __init__(self, failures: list[errors.APIError]) -> None:
+        super().__init__("[]")
+        self.failures = failures
+
+    async def generate_content(self, **kwargs: Any) -> SimpleNamespace:
+        self.calls.append(kwargs)
+        if self.failures:
+            raise self.failures.pop(0)
+        return SimpleNamespace(text=self.text, model_version=kwargs["model"])
+
+
+def with_models(models: FakeModels) -> GeminiService:
+    service, _, _ = make_service("[]")
+    service.client = SimpleNamespace(aio=SimpleNamespace(models=models))
+    return service
+
+
+async def test_overloaded_model_falls_back_to_the_next_one() -> None:
+    models = FlakyModels([overloaded(503)])
+    assert await with_models(models).parse_transaction("1") == []
+    assert [call["model"] for call in models.calls] == [
+        "gemini-flash-latest",
+        "gemini-flash-lite-latest",
+    ]
+
+
+async def test_other_api_errors_are_not_retried_on_another_model() -> None:
+    models = FlakyModels([overloaded(400)])
+    with pytest.raises(errors.ClientError):
+        await with_models(models).parse_transaction("1")
+    assert len(models.calls) == 1
+
+
+async def test_all_models_overloaded_raises_the_last_error() -> None:
+    models = FlakyModels([overloaded(503), overloaded(429)])
+    with pytest.raises(errors.ClientError) as caught:
+        await with_models(models).parse_transaction("1")
+    assert caught.value.code == 429
+
+
+async def test_self_check_overload_is_only_a_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    models = FlakyModels([overloaded(503), overloaded(503)])
+    await with_models(models).self_check()
+    assert [r.levelname for r in caplog.records].count("ERROR") == 0
+    assert "overloaded (503)" in caplog.text
+
+
+def test_overload_message_for_the_chat() -> None:
+    from app.errors import user_message
+
+    assert user_message(overloaded(503)) == (
+        "Gemini сейчас перегружен, попробуйте через минуту"
+    )
