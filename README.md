@@ -74,6 +74,7 @@ GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 # ANALYTICS_TIME="07:00"
 # ANALYTICS_TIMEZONE="Asia/Tashkent"   # also used for "today" in new rows
 # WEEKLY_DIGEST_TIME="20:00"           # Sunday digest to the owner; "off" disables it
+# IGNORED_CARDS="1234"                 # cards (last 4 digits) never matched from screenshots
 
 # Optional webhook mode (otherwise the bot polls Telegram)
 # WEBHOOK_URL="https://your-domain.com"   # RENDER_EXTERNAL_URL is used if empty
@@ -144,6 +145,7 @@ Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this
 4.  **Or just send an SMS, a screenshot, a PDF/Excel/CSV file** — Gemini extracts the transactions; the bot converts currencies, picks the card by its number, checks categories against `system` and writes all rows in one request. Rows it cannot write are listed in the reply.
     *   The same SMS, screenshot or file sent twice is written once: the bot remembers what it wrote during the last week and answers which rows already hold it.
     *   When an SMS shows the card balance, the reply compares it with the balance in the sheet: «🟰 сходится» or the difference.
+6.  **Send screenshots of the banks' main screens** (the card list with balances). The bot reads every card's balance (Gemini decides whether a photo shows balances or transactions — one request), writes it to «Проверка» with the time in «Сверено» (`fact!Q`) and answers card by card: «✅ сходится» or «⚠️ в таблице больше/меньше на …». Transactions visible on such a screen are ignored (they come from SMS and statements). For each mismatch there is a **Выровнять** button: it recomputes the difference at the moment of the tap and adds one row to «🚧 РАЗНОЕ / неучтенка» (undo with `/undo`). Hidden balances, non-card products and cards from `IGNORED_CARDS` are skipped; a card that is not in `system` is reported.
 5.  **Send Kapitalbank statements** (PDF «История операций», one or several cards at once). The bot waits a few seconds for all files, then shows one preview: new rows, rows already in the sheet, how each card balance changes and rows worth checking. **✅ Записать** writes everything in one go:
     *   operations booked up to the date in `system!G` («выписка по», next to the card) were loaded before and are skipped; after the import the date moves to the last full day of the statement;
     *   a row the bot once converted at the sheet rate (comment with `≈`) gets the bank amount instead of a second row;
@@ -152,7 +154,7 @@ Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this
 
 ### Weekly digest
 
-On Sundays at `WEEKLY_DIGEST_TIME` (default `20:00`, `off` disables it) the owner gets the week's spending against the previous week, the three biggest subcategories and the `/plan` report.
+On Sundays at `WEEKLY_DIGEST_TIME` (default `20:00`, `off` disables it) the owner gets the week's spending against the previous week, the three biggest subcategories, the `/plan` report and a reminder to send bank screenshots (cards not checked for more than a week are named).
 
 ### Monthly plan tabs
 
