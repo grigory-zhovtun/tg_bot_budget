@@ -65,6 +65,37 @@ class AiTransaction(BaseModel):
 RESPONSE_SCHEMA = TypeAdapter(list[AiTransaction]).json_schema()
 
 
+class CardBalance(BaseModel):
+    """Остаток карты на главном экране банковского приложения."""
+
+    card: str | None = None  # последние 4 цифры номера
+    balance: float | None = None
+    currency: str | None = None
+    name: str | None = None
+
+
+class ScreenParse(BaseModel):
+    """Скриншот: остатки по картам или операции (чек, SMS, история)."""
+
+    kind: Literal["balances", "transactions"]
+    balances: list[CardBalance] = []
+    transactions: list[AiTransaction] = []
+
+
+SCREEN_SCHEMA = ScreenParse.model_json_schema()
+SCREEN_RULES = """Image type — decide first:
+- "balances": a bank app main screen or card list whose main content is
+  cards with their balances. Put every card with a visible balance into
+  "balances": card = last 4 digits of its number, balance = the amount as
+  shown, currency = ISO code (₽ → RUB, сум → UZS, $ → USD), name = its label.
+  Skip balances hidden with asterisks and products that are not cards
+  (digital ruble, deposits, bonuses). Return no transactions for such a
+  screen even if a short history list is visible.
+- "transactions": receipts, SMS, transaction lists — fill "transactions"
+  by the rules above and leave "balances" empty.
+"""
+
+
 class MerchantCategory(BaseModel):
     """Категория магазина из выписки (ответ Gemini)."""
 
@@ -131,6 +162,7 @@ def build_parse_prompt(
     subcategories: dict[str, list[str]],
     sources: list[str],
     hints: list[str],
+    extra_rules: str = "",
 ) -> str:
     tree = "\n".join(
         f"- {cat}: {', '.join(subcategories.get(cat, []))}" for cat in categories
@@ -172,7 +204,7 @@ Rules:
 9. Marketplace orders (Uzum Market, Ozon, Wildberries, AliExpress) hold different
    goods: if the input does not say what was bought, use
    "{FALLBACK_CATEGORY} / {FALLBACK_SUBCATEGORY}".
-
+{extra_rules}
 Input:
 {user_input}"""
 
@@ -351,6 +383,53 @@ class GeminiService:
             if isinstance(item, dict):
                 use_history(item, book)
         return items
+
+    async def parse_screenshot(
+        self,
+        image: bytes,
+        caption: str | None = None,
+        known_categories: list[str] | None = None,
+        known_sources: list[str] | None = None,
+        known_subcategories: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
+        """Фото: остатки по картам (главный экран банка) или операции — один запрос.
+
+        Возвращает {"kind": "balances"|"transactions", "balances": [...],
+        "transactions": [...]}; у операций категория известного магазина — из истории.
+        """
+        hints, book = await asyncio.to_thread(self._history)
+        prompt = build_parse_prompt(
+            user_input=caption or "Скриншот банковского приложения или фото чека",
+            today=local_today(config.ANALYTICS_TIMEZONE).strftime("%d.%m.%Y"),
+            categories=known_categories or [],
+            subcategories=known_subcategories or {},
+            sources=known_sources or [],
+            hints=hints,
+            extra_rules=SCREEN_RULES,
+        )
+        image_part = types.Part.from_bytes(data=image, mime_type="image/jpeg")
+        response = await self._generate(
+            [prompt, image_part], SCREEN_SCHEMA, FILE_TIMEOUT_MS
+        )
+        if not response.text:
+            raise ValueError("Gemini не вернул ответ (пустой ответ или фильтр)")
+        data = json.loads(response.text)
+        screen = {
+            "kind": data.get("kind", "transactions"),
+            "balances": [b for b in data.get("balances") or [] if isinstance(b, dict)],
+            "transactions": [
+                t for t in data.get("transactions") or [] if isinstance(t, dict)
+            ],
+        }
+        for item in screen["transactions"]:
+            use_history(item, book)
+        logger.info(
+            "Gemini %s: screenshot with %d balance(s), %d transaction(s)",
+            response.model_version,
+            len(screen["balances"]),
+            len(screen["transactions"]),
+        )
+        return screen
 
     async def self_check(self) -> None:
         """Ключ и модели при старте — без генерации, квоту запросов не тратит.

@@ -89,6 +89,11 @@ class Sheets:
     def get_rates(self):
         return RATES
 
+    checks: dict[str, Any] = {}
+
+    def get_balance_checks(self) -> dict[str, Any]:
+        return self.checks
+
 
 def test_missing_month_tab_is_explained() -> None:
     service = AnalyticsService(Sheets({}))
@@ -142,3 +147,19 @@ async def test_weekly_digest_is_sent_and_errors_stay_in_the_log() -> None:
     bot = SimpleNamespace(send_message=AsyncMock())
     await analytics.send_weekly_digest(bot, 42, SimpleNamespace(weekly_digest=broken))
     bot.send_message.assert_not_awaited()
+
+
+def test_weekly_digest_asks_for_bank_screens_and_names_stale_cards() -> None:
+    from datetime import datetime
+
+    sheets = Sheets({"fact": FACT, "Oct 26": OCTOBER})
+    sheets.checks = {
+        "VISA 9120 UZS": datetime(2026, 10, 5, 10, 0),  # 1 день — свежая
+        "UZCARD 5837 UZS": datetime(2026, 9, 24, 9, 0),  # 12 дней
+        "МИР 9959 RUB": None,  # не сверяли ни разу — не напоминаем
+    }
+    text = AnalyticsService(sheets).weekly_digest(date(2026, 10, 6))
+    assert text.endswith(
+        "📸 Пришлите скрины главных экранов банков — сверю остатки по картам.\n"
+        "Давно не сверяли: UZCARD 5837 UZS (12 дн.)"
+    )

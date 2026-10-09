@@ -101,6 +101,10 @@ class AttachmentAI(FakeAI):
         self.seen.append(kwargs)
         return []
 
+    async def parse_screenshot(self, image: bytes, **kwargs: Any) -> dict[str, Any]:
+        self.seen.append({"image": image, **kwargs})
+        return {"kind": "transactions", "balances": [], "transactions": []}
+
 
 async def test_photo_goes_to_ai_as_jpeg_bytes_and_file_is_removed() -> None:
     ai = AttachmentAI()
@@ -116,8 +120,8 @@ async def test_photo_goes_to_ai_as_jpeg_bytes_and_file_is_removed() -> None:
     await messages.text_handler(update, context)
 
     [call] = ai.seen
-    assert call["mime_type"] == "image/jpeg"
-    assert call["attachment"][:2] == b"\xff\xd8"  # JPEG
+    assert call["image"][:2] == b"\xff\xd8"  # JPEG, прямо в Gemini
+    assert call["caption"] is None
     assert file.path is not None and not file.path.exists()
 
 

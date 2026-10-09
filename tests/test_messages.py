@@ -42,7 +42,10 @@ class FakeSheets:
         self.last_row += len(rows)
         return first, self.last_row
 
-    def update_balances(self, balances: dict[str, float]) -> list[str]:
+    def update_balances(
+        self, balances: dict[str, float], checked_at: Any = None
+    ) -> list[str]:
+        self.checked_at = checked_at
         known = {k: v for k, v in balances.items() if k in self.BALANCE_CELLS}
         self.cells.update(
             {f"fact!{self.BALANCE_CELLS[k]}": v for k, v in known.items()}
@@ -72,6 +75,17 @@ class FakeAI:
         self.calls += 1
         assert kwargs["known_subcategories"] == SUBCATEGORIES
         return self.result
+
+    screen: dict[str, Any] | None = None  # ответ на фото; по умолчанию — операции
+
+    async def parse_screenshot(self, image: bytes, **kwargs: Any) -> dict[str, Any]:
+        self.calls += 1
+        assert kwargs["known_subcategories"] == SUBCATEGORIES
+        return self.screen or {
+            "kind": "transactions",
+            "balances": [],
+            "transactions": self.result,
+        }
 
 
 ids = count(100)
