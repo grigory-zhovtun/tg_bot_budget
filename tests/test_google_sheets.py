@@ -314,6 +314,39 @@ def test_undo_deletes_rows_only_if_they_are_unchanged() -> None:
     assert len(service.sheet.batch) == 1
 
 
+def test_recategorize_writes_group_subgroup_and_amount_of_an_unchanged_row() -> None:
+    written = [46301, "🍔 ЕДА", "кофе", 48000, 1, "латте", "UZS", "VISA 9120 UZS"]
+    ws = RangeWorksheet({"A4169:H4169": [written]})
+    service = make_service(ws)
+    assert service.recategorize_row(4169, ROW, "🎁 ПОДАРКИ", "сувениры", 48000.0)
+    [(asked, options)] = ws.asked
+    assert asked == "A4169:H4169"
+    assert options["value_render_option"] == "UNFORMATTED_VALUE"
+    assert service.sheet.values_batch == [
+        {
+            "valueInputOption": "RAW",
+            "data": [
+                {
+                    "range": "fact!B4169:D4169",
+                    "values": [["🎁 ПОДАРКИ", "сувениры", 48000.0]],
+                }
+            ],
+        }
+    ]
+
+    ws.ranges["A4169:H4169"] = [
+        [*written[:2], "кафе", *written[3:]]
+    ]  # поправили руками
+    assert (
+        service.recategorize_row(4169, ROW, "🚧 РАЗНОЕ", "неучтенка", 48000.0) is False
+    )
+    ws.ranges["A4169:H4169"] = []  # строку удалили
+    assert (
+        service.recategorize_row(4169, ROW, "🚧 РАЗНОЕ", "неучтенка", 48000.0) is False
+    )
+    assert len(service.sheet.values_batch) == 1
+
+
 def test_balances_get_a_check_stamp_next_to_the_card() -> None:
     from datetime import datetime
 

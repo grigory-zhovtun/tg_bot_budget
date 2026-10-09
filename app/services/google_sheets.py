@@ -589,3 +589,38 @@ class GoogleSheetsService:
             )
             result.dates_fixed = not result.created
         return result
+
+    def recategorize_row(
+        self, number: int, row: SheetRow, category: str, subcategory: str, amount: float
+    ) -> bool:
+        """Новые группа, подгруппа и сумма D строки fact, если в таблице всё ещё она.
+
+        Строку сверяем с тем, что записал бот: если её поправили руками или
+        она сдвинулась, ничего не меняем. Сумма пишется вместе с группой: при
+        переносе между доходами и прочими статьями у неё меняется знак.
+        """
+        worksheet = self._worksheet(config.FACT_SHEET_NAME)
+        current = self._with_retry(
+            "Reading row to recategorize",
+            lambda: worksheet.get(
+                f"A{number}:H{number}",
+                value_render_option=ValueRenderOption.unformatted,
+            ),
+        )
+        if len(current) != 1 or not _same_row(current[0], row):
+            return False
+        self._with_retry(
+            "Recategorizing row",
+            lambda: self.sheet.values_batch_update(
+                {
+                    "valueInputOption": "RAW",
+                    "data": [
+                        {
+                            "range": f"{config.FACT_SHEET_NAME}!B{number}:D{number}",
+                            "values": [[category, subcategory, amount]],
+                        }
+                    ],
+                }
+            ),
+        )
+        return True

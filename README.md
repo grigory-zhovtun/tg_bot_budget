@@ -166,6 +166,7 @@ Every day at 00:05 (`ANALYTICS_TIMEZONE`) and right after start the bot checks t
 *   **`/plan`** — month plan vs fact without AI: spending pace against the calendar, what is left per day, lines over plan, close to the plan (80%+) and outside the plan. Lines of one subcategory in different currencies are added up in UZS.
 *   **`/advice`** — AI analysis of spending vs. the current month plan.
 *   **`/undo`** — delete the rows of the last write, if nobody changed them in the sheet since.
+*   **`/fix`** — change the group and subgroup of the last write when the AI picked the wrong one (SMS, receipt or screenshot): the bot asks which operation (if there were several), then the group and the subgroup from `system`. The row is changed only if nobody edited it in the sheet; the money keeps its direction (an incoming row moved to or from «💰 ДОХОДЫ» flips the sign in `D`), and the merchant goes to the new category from the next message on.
 *   **`/reboot`** — reload categories, subcategories and sources from the `system` sheet.
 
 ## Development

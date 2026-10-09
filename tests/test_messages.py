@@ -289,7 +289,7 @@ async def test_same_sms_twice_is_written_once() -> None:
     update, context, sheets = make_chat(SMS, {}, ai)
     await messages.text_handler(update, context)
     assert len(sheets.rows) == 1
-    assert "/undo" in summary(update)
+    assert "/undo" in summary(update) and "/fix" in summary(update)
 
     second, _ = again(update, context, SMS)
     await messages.text_handler(second, context)

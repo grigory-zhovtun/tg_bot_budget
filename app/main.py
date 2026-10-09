@@ -26,6 +26,7 @@ from app.handlers import (
     analytics,
     balances,
     common,
+    fix,
     messages,
     month,
     statement_import,
@@ -43,6 +44,7 @@ COMMANDS = [
     ("analytics", "Аналитика за 3 дня 📊"),
     ("plan", "План-факт месяца 📋"),
     ("advice", "Финансовый совет 🧠"),
+    ("fix", "Исправить категорию последней записи ✏️"),
     ("undo", "Отменить последнюю запись ↩️"),
     ("reboot", "Обновить настройки 🔄"),
 ]
@@ -170,11 +172,13 @@ def build_application(
     app.add_handler(CommandHandler("start", common.start))
     app.add_handler(CommandHandler("reboot", admin.reboot))
     app.add_handler(CommandHandler("undo", undo.undo))
+    app.add_handler(CommandHandler("fix", fix.fix_command))
     app.add_handler(CommandHandler("advice", analytics.advice_command))
     app.add_handler(CommandHandler("analytics", analytics.analytics_command))
     app.add_handler(CommandHandler("plan", analytics.plan_command))
-    # Кнопки импорта выписок и выравнивания — раньше общего обработчика без фильтра
+    # Кнопки импорта выписок, выравнивания и /fix — раньше общего обработчика без фильтра
     app.add_handler(CallbackQueryHandler(balances.align_button, pattern=r"^align:"))
+    app.add_handler(CallbackQueryHandler(fix.fix_button, pattern=r"^fix:"))
     app.add_handler(CallbackQueryHandler(statement_import.button, pattern=r"^import:"))
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
     app.add_handler(
