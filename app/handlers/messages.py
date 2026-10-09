@@ -16,12 +16,12 @@ from telegram.ext import ContextTypes
 
 from app import config
 from app.domain import (
-    INCOME_GROUP,
     Catalog,
     ParsedTransaction,
     SheetRow,
     Skipped,
     build_row,
+    format_amount,
     local_today,
     manual_row,
 )
@@ -290,14 +290,6 @@ async def _to_rows(
     return rows, skipped
 
 
-def _format_amount(row: SheetRow) -> str:
-    """«48 000 UZS», «+1 000 000 UZS», «12.21 USD»."""
-    incoming = row.category == INCOME_GROUP or row.amount < 0
-    value = abs(row.amount)
-    digits = f"{value:,.0f}" if row.currency == "UZS" else f"{value:,.2f}"
-    return f"{'+' if incoming else ''}{digits.replace(',', ' ')} {row.currency}"
-
-
 def _balance_check(source: str, bank: float, table: float) -> str:
     """Сверка остатка из SMS с остатком по таблице (колонка J блока остатков)."""
     currency = source.strip()[-3:].upper()
@@ -356,7 +348,7 @@ async def _save_rows(
             logger.exception("Updating card balances failed")
 
     for row in rows:
-        line = f"✅ {_format_amount(row)} • {row.category} ({row.subcategory}) • {row.source}"
+        line = f"✅ {format_amount(row)} • {row.category} ({row.subcategory}) • {row.source}"
         if row.balance is not None and row.source in updated:
             line += f" | 💳 {row.balance:,.0f}".replace(",", " ")
         lines.append(line)
@@ -379,7 +371,7 @@ async def _save_rows(
     if not lines:
         lines.append("Не удалось распознать транзакции.")
     if rows:
-        lines.append("↩️ Ошиблись? /undo — удалить эту запись")
+        lines.append("✏️ Не та категория? /fix  ↩️ Удалить запись: /undo")
 
     # Clear specific manual selection state
     context.user_data.pop("category", None)

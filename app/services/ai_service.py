@@ -278,6 +278,10 @@ class GeminiService:
         self._hints = (now, hints, book)
         return hints, book
 
+    def forget_history(self) -> None:
+        """Сбросить кэш подсказок: владелец поправил категорию — учесть сразу."""
+        self._hints = None
+
     def _load_hints(self) -> list[str]:
         return self._history()[0]
 

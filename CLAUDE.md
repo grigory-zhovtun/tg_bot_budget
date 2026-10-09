@@ -38,6 +38,7 @@ app/
 │   ├── statement_import.py # Statement preview (JobQueue debounce), confirm buttons, apply_plan
 │   ├── transactions.py  # Callback query handler for inline buttons
 │   ├── undo.py          # /undo: delete the last write after checking the rows are unchanged
+│   ├── fix.py           # /fix: new group/subgroup for a row of the last write (B:D, checked like /undo)
 │   ├── month.py         # Daily job: month plan tab exists (copy of the last one), owner notified
 │   ├── balances.py      # Bank main-screen screenshots: «Проверка» + «Сверено», «Выровнять» buttons
 │   └── analytics.py     # /advice, /analytics, daily report
@@ -88,7 +89,7 @@ Optional:
 ## Code Patterns
 
 - Dependencies injected via `context.bot_data` (gs_service, ai_service, analytics_service, categories, subcategories, sources)
-- User state stored in `context.user_data` (source, category, subcategory; `last_write` for /undo, `seen_inputs` — fingerprints of SMS/files already written)
+- User state stored in `context.user_data` (source, category, subcategory; `last_write` for /undo and /fix, `fix_state` — the /fix dialog, `seen_inputs` — fingerprints of SMS/files already written)
 - The Google Sheets client is synchronous: call it with `asyncio.to_thread` from handlers; Gemini uses the async client (`client.aio`)
 - Writes that are not idempotent (row deletion) are not retried: a lost response would make the retry delete other rows
 - Gemini quota: a free key gives ~20 generate requests a day per model. Never generate on start-up (self-check uses `models.get`); 429 pauses the model for RetryInfo.retryDelay (`GeminiService._paused`) instead of retrying

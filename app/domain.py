@@ -360,6 +360,14 @@ def signed_amount(amount: float, direction: Direction, category: str) -> float:
     return -amount if direction in INCOMING else amount
 
 
+def format_amount(row: SheetRow) -> str:
+    """«48 000 UZS», «+1 000 000 UZS», «12.21 USD»."""
+    incoming = row.category == INCOME_GROUP or row.amount < 0
+    value = abs(row.amount)
+    digits = f"{value:,.0f}" if row.currency == "UZS" else f"{value:,.2f}"
+    return f"{'+' if incoming else ''}{digits.replace(',', ' ')} {row.currency}"
+
+
 def parse_day(value: str | None, now: date) -> date:
     """Дата операции из текста; будущее и слишком старое → сегодня."""
     if not value:
