@@ -29,6 +29,7 @@ MONTHS_RU = ("январь", "февраль", "март", "апрель", "ма
              "август", "сентябрь", "октябрь", "ноябрь", "декабрь")  # fmt: skip
 NEAR_LIMIT = 0.8  # с этой доли плана статья попадает в «почти всё»
 PACE_SLACK = 0.05  # траты могут обгонять календарь на 5 п. п. без тревоги
+STALE_CHECK_DAYS = 7  # остаток банка старше недели — напомнить в сводке
 CAPTION_PIE = "📈 Расходы по категориям"
 CAPTION_DAYS = "📊 Динамика по дням"
 
@@ -467,4 +468,21 @@ class AnalyticsService:
                 "Больше всего: "
                 + ", ".join(f"{g} / {s} {money(v)}" for (g, s), v in top.items())
             )
-        return "\n".join([*lines, "", self.plan_report(today)])
+        return "\n".join(
+            [*lines, "", self.plan_report(today), "", self.balance_reminder(today)]
+        )
+
+    def balance_reminder(self, today: date) -> str:
+        """Напоминание прислать скрины банков; карты, которые давно не сверяли."""
+        text = "📸 Пришлите скрины главных экранов банков — сверю остатки по картам."
+        try:
+            checks = self.gs_service.get_balance_checks()
+        except Exception:
+            logger.exception("Could not read balance checks")
+            return text
+        stale = [
+            f"{source} ({(today - when.date()).days} дн.)"
+            for source, when in checks.items()
+            if when is not None and (today - when.date()).days > STALE_CHECK_DAYS
+        ]
+        return text + ("\nДавно не сверяли: " + ", ".join(stale) if stale else "")

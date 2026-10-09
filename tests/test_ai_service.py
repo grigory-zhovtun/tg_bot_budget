@@ -519,3 +519,24 @@ def test_mixed_merchants_get_no_hint_and_marketplaces_a_rule() -> None:
     assert merchant_hints(rows) == ["UZUM TEZKOR → 🍔 ЕДА / кафе"]
     prompt = build_parse_prompt("Uzum Market 250000", "06.10.2026", [], {}, [], [])
     assert "Marketplace orders" in prompt and "🚧 РАЗНОЕ / неучтенка" in prompt
+
+
+async def test_screenshot_is_classified_in_the_same_call() -> None:
+    answer = {
+        "kind": "balances",
+        "balances": [{"card": "9120", "balance": 11251471, "currency": "UZS"}],
+        "transactions": [{"amount": 189, "direction": "expense", "comment": "Shavi"}],
+    }
+    service, models, _ = make_service(json.dumps(answer))
+    screen = await service.parse_screenshot(b"\xff\xd8img", caption=None)
+
+    assert screen["kind"] == "balances"
+    assert screen["balances"] == answer["balances"]
+    assert screen["transactions"][0]["category"] == "🍔 ЕДА"  # история применена
+    [call] = models.calls
+    config: types.GenerateContentConfig = call["config"]
+    assert config.response_json_schema == ai_service.SCREEN_SCHEMA
+    assert config.http_options.timeout == ai_service.FILE_TIMEOUT_MS
+    prompt, image = call["contents"]
+    assert "Image type" in prompt and "hidden with asterisks" in prompt
+    assert image.inline_data.mime_type == "image/jpeg"

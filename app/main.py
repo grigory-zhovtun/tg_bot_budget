@@ -24,6 +24,7 @@ from app.errors import on_error
 from app.handlers import (
     admin,
     analytics,
+    balances,
     common,
     messages,
     month,
@@ -172,7 +173,8 @@ def build_application(
     app.add_handler(CommandHandler("advice", analytics.advice_command))
     app.add_handler(CommandHandler("analytics", analytics.analytics_command))
     app.add_handler(CommandHandler("plan", analytics.plan_command))
-    # Кнопки импорта выписок — раньше общего обработчика кнопок без фильтра
+    # Кнопки импорта выписок и выравнивания — раньше общего обработчика без фильтра
+    app.add_handler(CallbackQueryHandler(balances.align_button, pattern=r"^align:"))
     app.add_handler(CallbackQueryHandler(statement_import.button, pattern=r"^import:"))
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
     app.add_handler(

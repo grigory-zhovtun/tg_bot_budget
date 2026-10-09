@@ -5,7 +5,7 @@ import os
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, TypeVar
 
 import gspread
@@ -38,6 +38,11 @@ BALANCE_FORMULA = (
 # таблице, N — остаток из банка
 BALANCE_BLOCK = "I2:I30"
 BALANCE_COLUMN = "N"
+# Когда остаток банка в «Проверке» обновлён (SMS или скрин приложения).
+# O — расхождение, P — оно же с обратным знаком; Q свободна
+CHECKED_COLUMN = "Q"
+CHECKED_HEADER = "Сверено"
+CHECKED_BLOCK = "I2:Q30"
 TABLE_BALANCES = "I2:J30"
 # Лист system: F — источники, G рядом — по какой день загружены выписки
 MARKS_RANGE = "F1:G60"
@@ -257,18 +262,36 @@ class GoogleSheetsService:
             }
         return self._balance_cells
 
-    def update_balances(self, balances: dict[str, float]) -> list[str]:
-        """Записать остатки из банка в колонку «Проверка»; вернуть обновлённые источники."""
+    def update_balances(
+        self, balances: dict[str, float], checked_at: datetime | None = None
+    ) -> list[str]:
+        """Остатки из банка → колонка «Проверка» (и «Сверено», если время дано).
+
+        Возвращает источники, для которых нашлась строка в блоке остатков.
+        """
         cells = self.balance_cells()
         known = {source: value for source, value in balances.items() if source in cells}
         for source in balances.keys() - known.keys():
             logger.warning("No balance cell for source %r", source)
         if not known:
             return []
+        sheet = config.FACT_SHEET_NAME
         data = [
-            {"range": f"{config.FACT_SHEET_NAME}!{cells[source]}", "values": [[value]]}
+            {"range": f"{sheet}!{cells[source]}", "values": [[value]]}
             for source, value in known.items()
         ]
+        if checked_at is not None:
+            stamp = checked_at.strftime("%d.%m.%Y %H:%M")
+            data.append(
+                {"range": f"{sheet}!{CHECKED_COLUMN}1", "values": [[CHECKED_HEADER]]}
+            )
+            data += [
+                {
+                    "range": f"{sheet}!{CHECKED_COLUMN}{cells[source][len(BALANCE_COLUMN):]}",
+                    "values": [[stamp]],
+                }
+                for source in known
+            ]
         self._with_retry(
             "Updating balances",
             lambda: self.sheet.values_batch_update(
@@ -276,6 +299,27 @@ class GoogleSheetsService:
             ),
         )
         return list(known)
+
+    def get_balance_checks(self) -> dict[str, datetime | None]:
+        """Когда по каждой карте блока остатков последний раз сверялись с банком."""
+        values = self._with_retry(
+            "Reading balance checks",
+            lambda: self._worksheet(config.FACT_SHEET_NAME).get(
+                CHECKED_BLOCK, value_render_option=ValueRenderOption.unformatted
+            ),
+        )
+        checks: dict[str, datetime | None] = {}
+        for row in values:
+            if not row or not str(row[0]).strip():
+                continue
+            stamp = row[8] if len(row) > 8 else None
+            checks[str(row[0]).strip()] = (
+                datetime.combine(SERIAL_ZERO, datetime.min.time())
+                + timedelta(days=stamp)
+                if isinstance(stamp, int | float) and not isinstance(stamp, bool)
+                else None
+            )
+        return checks
 
     def get_all_records(self, worksheet_name: str) -> list[list[Any]]:
         """Retrieves all records from a worksheet with retry logic."""

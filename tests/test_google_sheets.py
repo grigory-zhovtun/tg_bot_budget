@@ -312,3 +312,35 @@ def test_undo_deletes_rows_only_if_they_are_unchanged() -> None:
     ws.ranges["A4169:H4170"] = [written]  # строку уже удалили вручную
     assert service.delete_rows_if_match(4169, 4170, [ROW, ROW]) is False
     assert len(service.sheet.batch) == 1
+
+
+def test_balances_get_a_check_stamp_next_to_the_card() -> None:
+    from datetime import datetime
+
+    ws = FakeWorksheet(cells=[["VISA 9120 UZS"], ["UZCARD 5837 UZS"]])
+    service = make_service(ws)
+    service.update_balances(
+        {"UZCARD 5837 UZS": 253324.14}, datetime(2026, 10, 9, 11, 41)
+    )
+    [body] = service.sheet.values_batch
+    assert body["data"] == [
+        {"range": "fact!N3", "values": [[253324.14]]},
+        {"range": "fact!Q1", "values": [["Сверено"]]},
+        {"range": "fact!Q3", "values": [["09.10.2026 11:41"]]},
+    ]
+
+
+def test_balance_checks_are_read_as_datetimes() -> None:
+    from datetime import datetime
+
+    block = [
+        ["VISA 9120 UZS", 1, 1, 1, 1, 1, 0, 0, 46304.4868055556],  # 09.10.2026 11:41
+        ["UZCARD 5837 UZS", 1, 1, 1, 1, 1, 0, 0],
+        [],
+    ]
+    service = make_service(RangeWorksheet({"I2:Q30": block}))
+    checks = service.get_balance_checks()
+    assert checks["VISA 9120 UZS"].replace(second=0, microsecond=0) == datetime(
+        2026, 10, 9, 11, 41
+    )
+    assert checks["UZCARD 5837 UZS"] is None

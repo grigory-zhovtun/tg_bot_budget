@@ -39,6 +39,7 @@ app/
 │   ├── transactions.py  # Callback query handler for inline buttons
 │   ├── undo.py          # /undo: delete the last write after checking the rows are unchanged
 │   ├── month.py         # Daily job: month plan tab exists (copy of the last one), owner notified
+│   ├── balances.py      # Bank main-screen screenshots: «Проверка» + «Сверено», «Выровнять» buttons
 │   └── analytics.py     # /advice, /analytics, daily report
 ├── services/
 │   ├── google_sheets.py # GoogleSheetsService — synchronous gspread wrapper
@@ -66,7 +67,7 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 - **`fact` sheet**: Date (DD.MM.YYYY), Category, Subcategory, Amount, Balance (formula), Comment, Currency, Source.
   - Amount sign: expenses and income (`💰 ДОХОДЫ`) positive; incoming money that is not income (transfer to the card, refund) negative.
   - Balance formula: `google_sheets.BALANCE_FORMULA` uses `INDEX(...;ROW())`, no row numbers.
-  - Balance block `I2:N…`: column I = source name, column N = bank balance written from SMS ("Остаток", "Dostupno"). The bot finds the cell by source name.
+  - Balance block `I2:Q…`: I = source name, J = balance by the sheet, N = bank balance («Проверка», from SMS or a screenshot), O = N − J, P = −O, Q = «Сверено» (when N was written). The bot finds the row by source name.
 - **`system` sheet**: Column A: Categories, Column B: Subcategories, Column F: Sources (last 3 chars = currency code), G: statements loaded up to this day (written by the bot), H:I currency rates to UZS.
 - **Monthly sheets** ("Oct 26", `domain.month_title`): plan vs fact by Subcategory + Currency (`SUMIFS` on `fact` between the dates in `M1:M2`), used by `/advice`. Created by `GoogleSheetsService.ensure_month_tab` (duplicate of the latest month, new `M1:M2`, past months hidden).
 
@@ -80,6 +81,7 @@ Required:
 Optional:
 - `GEMINI_API_KEY` - Enables AI features; `GEMINI_MODEL` (default `gemini-flash-latest`), `GEMINI_FALLBACK_MODELS` (default `gemini-flash-lite-latest`, tried on 503/429)
 - `ANALYTICS_CHAT_ID`, `ANALYTICS_TIME`, `ANALYTICS_TIMEZONE` - daily report (JobQueue); the time zone also defines "today"
+- `IGNORED_CARDS` - last 4 digits of cards the screenshot check skips (e.g. a child's card)
 - `WEEKLY_DIGEST_TIME` - Sunday digest to the owner (`ANALYTICS_CHAT_ID` or the first allowed id), default `20:00`, `off` disables it
 - `WEBHOOK_URL` (or Render's `RENDER_EXTERNAL_URL`), `WEBHOOK_SECRET`, `PORT`, `LOCAL_RUN=True`
 

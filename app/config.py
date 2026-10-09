@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -71,6 +72,10 @@ ANALYTICS_CHAT_ID = os.getenv("ANALYTICS_CHAT_ID")
 ANALYTICS_TIME = os.getenv("ANALYTICS_TIME", "07:00")
 # Timezone for scheduling (e.g., "Asia/Tashkent", "Europe/Moscow")
 ANALYTICS_TIMEZONE = os.getenv("ANALYTICS_TIMEZONE", "Asia/Tashkent")
+# Карты, которые бот не сверяет по скринам (чужие, детские): «2513, 1111»
+IGNORED_CARDS = frozenset(
+    d for d in re.findall(r"\d{4}", os.getenv("IGNORED_CARDS", ""))
+)
 # Воскресная сводка владельцу: «HH:MM» по ANALYTICS_TIMEZONE, «off» — выключить
 WEEKLY_DIGEST_TIME = os.getenv("WEEKLY_DIGEST_TIME", "20:00")
 

@@ -26,7 +26,7 @@ from app.domain import (
     manual_row,
 )
 from app.errors import user_message
-from app.handlers import statement_import
+from app.handlers import balances, statement_import
 from app.handlers.common import (
     CHOOSE_SOURCE,
     LAST_WRITE,
@@ -234,20 +234,28 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         catalog = _catalog(context)
-        result = await ai_service.parse_transaction(
-            user_input=msg_text or "Скриншот банка или фото чека",
-            attachment=photo,
-            mime_type="image/jpeg" if photo else None,
-            known_categories=catalog.categories,
-            known_sources=catalog.sources,
-            known_subcategories=catalog.subcategories,
-        )
-        items = result if isinstance(result, list) else [result]
-
-        # Для скриншотов разворачиваем порядок: нижняя транзакция → первая запись
-        # Для SMS оставляем как есть: верхняя транзакция → первая запись
-        if is_photo and len(items) > 1:
-            items = items[::-1]
+        known = {
+            "known_categories": catalog.categories,
+            "known_sources": catalog.sources,
+            "known_subcategories": catalog.subcategories,
+        }
+        if photo is not None:
+            screen = await ai_service.parse_screenshot(
+                photo, caption=msg_text or None, **known
+            )
+            if screen["kind"] == "balances" and screen["balances"]:
+                # главный экран банка: остатки карт, операции на нём не записываем
+                await _delete_quietly(analyzing_msg)
+                await balances.report_screen_balances(
+                    update, context, screen["balances"]
+                )
+                return
+            # Скриншот операций: нижняя транзакция → первая запись
+            items = screen["transactions"][::-1]
+        else:
+            # SMS: верхняя транзакция → первая запись
+            result = await ai_service.parse_transaction(user_input=msg_text, **known)
+            items = result if isinstance(result, list) else [result]
 
         rows, skipped = await _to_rows(items, context, current_source)
         await _save_rows(update, context, rows, skipped, fingerprint)
@@ -340,7 +348,10 @@ async def _save_rows(
     balances = {row.source: row.balance for row in rows if row.balance is not None}
     if balances:
         try:
-            updated = await asyncio.to_thread(gs_service.update_balances, balances)
+            checked_at = datetime.now(ZoneInfo(config.ANALYTICS_TIMEZONE))
+            updated = await asyncio.to_thread(
+                gs_service.update_balances, balances, checked_at
+            )
         except Exception:
             logger.exception("Updating card balances failed")
 
