@@ -12,6 +12,7 @@ from app import config
 from app.domain import Rates, entry_row, local_today
 from app.handlers import messages, undo
 from app.services.google_sheets import BALANCE_FORMULA, row_values
+from app.web.auth import check_launch_token
 
 CATEGORIES = ["🏚️ ДОМ", "🍔 ЕДА", "🌛 ЕЖЕМЕСЯЧНО", "🚧 РАЗНОЕ", "💳 СЧЕТА", "💰 ДОХОДЫ"]
 SUBCATEGORIES = {
@@ -488,3 +489,16 @@ async def test_save_rows_failure_is_reported_and_not_remembered() -> None:
     assert (result.written, result.first, result.last) == (0, None, None)
     assert "app:2" not in context.user_data.get("seen_inputs", {})
     assert summary(update).startswith("❌ Не записал в Google Таблицу")
+
+
+async def test_cards_keyboard_opens_the_mini_app_with_a_fresh_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "WEBAPP_URL", "https://budget.onrender.com/app/")
+    update, context, _ = make_chat("48000 латте", manual_state())
+    await messages.text_handler(update, context)
+    [button] = summary_call(update).kwargs["reply_markup"].keyboard[-1]
+    prefix = "https://budget.onrender.com/app/?launch="
+    assert button.web_app.url.startswith(prefix)
+    token = button.web_app.url.removeprefix(prefix)
+    assert check_launch_token(token, config.TELEGRAM_TOKEN).id == 1  # чат make_chat

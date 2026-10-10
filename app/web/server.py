@@ -7,8 +7,10 @@ Telegram присылает обновления на POST /telegram с секр
 
 import hmac
 import logging
+import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from starlette.applications import Starlette
@@ -17,6 +19,7 @@ from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Mount, Route
+from starlette.staticfiles import StaticFiles
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from telegram import Update
 from telegram.ext import Application
@@ -56,6 +59,24 @@ class SecurityHeaders:
         await self.app(scope, receive, send_with_headers)
 
 
+class WebAppFiles(StaticFiles):
+    """Страница Mini App: index.html без кэша, файлы сборки с хэшем в имени — на год."""
+
+    def file_response(
+        self,
+        full_path: str | os.PathLike[str],
+        stat_result: os.stat_result,
+        scope: Scope,
+        status_code: int = 200,
+    ) -> Response:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        hashed = Path(full_path).parent.name == "assets"
+        response.headers["Cache-Control"] = (
+            "public, max-age=31536000, immutable" if hashed else "no-cache"
+        )
+        return response
+
+
 def telegram_lifespan(
     application: Application,
     webhook_url: str,
@@ -83,9 +104,12 @@ def telegram_lifespan(
 
 
 def create_app(
-    application: Application, secret: str, lifespan: Lifespan | None = None
+    application: Application,
+    secret: str,
+    lifespan: Lifespan | None = None,
+    webapp_dist: Path | None = None,
 ) -> Starlette:
-    """Маршруты сервиса; lifespan=None — без запуска PTB (для тестов)."""
+    """Маршруты сервиса; lifespan=None — без запуска PTB, webapp_dist — сборка страницы."""
 
     async def telegram_webhook(request: Request) -> Response:
         received = request.headers.get(SECRET_HEADER, "")
@@ -125,6 +149,9 @@ def create_app(
         Route("/health", health),
         Mount("/api", routes=api.routes(application)),
     ]
+    if webapp_dist is not None and webapp_dist.is_dir():
+        page = WebAppFiles(directory=webapp_dist, html=True)
+        routes.append(Mount("/app", app=page, name="webapp"))
     return Starlette(
         routes=routes,
         middleware=[Middleware(SecurityHeaders)],

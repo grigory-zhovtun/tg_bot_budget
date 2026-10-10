@@ -37,6 +37,7 @@ from app.handlers.common import (
     clear_tracked_messages,
     premium_icons,
     show_main_menu,
+    sources_keyboard,
     track_message,
 )
 from app.services.analytics_service import TRANSFERS_GROUP
@@ -45,7 +46,6 @@ from app.statements import is_kapitalbank_statement, parse_statement, pdf_text
 from app.utils.keyboards import (
     category_prompt,
     generate_categories_keyboard,
-    generate_sources_keyboard,
     with_icon,
 )
 
@@ -166,7 +166,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # текст Telegram отвергает (Message_empty) — показываем выбранную карту
             msg1 = await update.effective_chat.send_message(
                 f"💳 {clean_text}",
-                reply_markup=generate_sources_keyboard(sources, clean_text),
+                reply_markup=sources_keyboard(
+                    context, update.effective_chat.id, clean_text
+                ),
             )
             track_message(context, msg1)
             msg2 = await update.effective_chat.send_message(
@@ -194,7 +196,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 track_message(context, msg)
             else:
                 msg = await update.effective_chat.send_message(
-                    CHOOSE_SOURCE, reply_markup=generate_sources_keyboard(sources)
+                    CHOOSE_SOURCE,
+                    reply_markup=sources_keyboard(context, update.effective_chat.id),
                 )
                 track_message(context, msg)
             return

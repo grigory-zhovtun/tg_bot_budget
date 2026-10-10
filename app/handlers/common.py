@@ -1,6 +1,6 @@
 import logging
 
-from telegram import Chat, Message, Update
+from telegram import Chat, Message, ReplyKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
 from app import config
@@ -11,6 +11,7 @@ from app.utils.keyboards import (
     generate_categories_keyboard,
     generate_sources_keyboard,
 )
+from app.web.auth import launch_token
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,22 @@ def premium_icons(context: ContextTypes.DEFAULT_TYPE) -> CustomIcons:
     if found is None or not context.bot_data.get("premium"):
         return EMPTY
     return found
+
+
+def app_url(user_id: int) -> str | None:
+    """Ссылка на Mini App с личным токеном; None — страницы нет (локальный опрос)."""
+    if not config.WEBAPP_URL:
+        return None
+    return f"{config.WEBAPP_URL}?launch={launch_token(user_id, config.TELEGRAM_TOKEN)}"
+
+
+def sources_keyboard(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, current: str | None = None
+) -> ReplyKeyboardMarkup:
+    """Клавиатура карт с кнопкой Mini App: токен в ссылке обновляется с клавиатурой."""
+    return generate_sources_keyboard(
+        context.bot_data.get("sources", []), current, app_url(chat_id)
+    )
 
 
 def track_message(context: ContextTypes.DEFAULT_TYPE, message: Message):
@@ -57,7 +74,6 @@ async def show_main_menu(
     chat — куда отправить: чат сообщения пользователя или, для Mini App, его личный
     чат с ботом.
     """
-    sources = context.bot_data.get("sources", [])
     current_source = context.user_data.get("source")
 
     # Пустой или «невидимый» текст Telegram отвергает (Message_empty)
@@ -65,7 +81,7 @@ async def show_main_menu(
         f"💳 {current_source}" if current_source else CHOOSE_SOURCE
     )
     msg1 = await chat.send_message(
-        text, reply_markup=generate_sources_keyboard(sources, current_source)
+        text, reply_markup=sources_keyboard(context, chat.id, current_source)
     )
     track_message(context, msg1)
 
@@ -112,7 +128,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Show keyboards
     msg1 = await update.message.reply_text(
         f"👋 {user.first_name}",
-        reply_markup=generate_sources_keyboard(sources, current_source),
+        reply_markup=sources_keyboard(
+            context, update.effective_chat.id, current_source
+        ),
     )
     track_message(context, msg1)
 

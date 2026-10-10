@@ -1,6 +1,7 @@
 """Веб-сервис: вебхук Telegram, проверка Render, заголовки безопасности."""
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -100,3 +101,22 @@ def test_lifespan_starts_the_bot_after_the_webhook_and_stops_it() -> None:
             "start",
         ]
     assert calls[-2:] == ["stop", "shutdown"]
+
+
+def test_mini_app_page_and_assets_have_their_cache_rules(
+    application: SimpleNamespace, tmp_path: Path
+) -> None:
+    (tmp_path / "assets").mkdir()
+    (tmp_path / "index.html").write_text('<div id="root"></div>')
+    (tmp_path / "assets" / "index-abc123.js").write_text("console.log(1)")
+    client = TestClient(create_app(application, SECRET, webapp_dist=tmp_path))
+    page = client.get("/app/?launch=42.1.sig")
+    assert page.status_code == 200 and 'id="root"' in page.text
+    assert page.headers["Cache-Control"] == "no-cache"
+    asset = client.get("/app/assets/index-abc123.js")
+    assert asset.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+
+
+def test_no_page_without_a_build(application: SimpleNamespace, tmp_path: Path) -> None:
+    app = create_app(application, SECRET, webapp_dist=tmp_path / "missing")
+    assert TestClient(app).get("/app/").status_code == 404

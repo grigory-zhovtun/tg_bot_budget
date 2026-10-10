@@ -302,7 +302,10 @@ def serve(app: Application) -> None:
     secret = config.WEBHOOK_SECRET or webhook_secret(config.TELEGRAM_TOKEN)
     url = f"{config.WEBHOOK_URL.rstrip('/')}/{WEBHOOK_PATH}"
     web = server.create_app(
-        app, secret, server.telegram_lifespan(app, url, secret, _post_init)
+        app,
+        secret,
+        server.telegram_lifespan(app, url, secret, _post_init),
+        config.WEBAPP_DIST,
     )
     logger.info("Starting the web service on port %s...", config.PORT)
     # access-лог выключен: в строке запроса была бы ссылка запуска Mini App

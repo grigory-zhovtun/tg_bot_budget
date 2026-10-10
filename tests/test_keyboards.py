@@ -7,7 +7,7 @@ from telegram.constants import KeyboardButtonStyle
 
 from app.handlers import transactions
 from app.utils import keyboards
-from tests.test_messages import SUBCATEGORIES
+from tests.test_messages import SOURCES, SUBCATEGORIES
 
 ICONS = {"кофе": "☕", "кафе": "🍽️"}
 
@@ -54,7 +54,7 @@ def tap(
         data=data,
         answer=AsyncMock(),
         edit_message_text=AsyncMock(),
-        message=SimpleNamespace(reply_text=AsyncMock()),
+        message=SimpleNamespace(reply_text=AsyncMock(), chat_id=1),
     )
     context = SimpleNamespace(
         bot_data={"subcategories": SUBCATEGORIES, "icons": ICONS, **bot_data},
@@ -97,3 +97,17 @@ def test_action_buttons_are_coloured() -> None:
     assert keyboards.action("✅ Записать", "import:ok:1", "success").style == (
         KeyboardButtonStyle.SUCCESS
     )
+
+
+def test_app_button_is_the_last_row_of_the_cards_keyboard() -> None:
+    url = "https://budget.onrender.com/app/?launch=42.1.sig"
+    rows = keyboards.generate_sources_keyboard(SOURCES, "VISA 9120 UZS", url).keyboard
+    [button] = rows[-1]
+    assert (button.text, button.web_app.url) == (keyboards.APP_BUTTON, url)
+    assert button.style == KeyboardButtonStyle.PRIMARY
+    assert rows[0][0].text == "✅ VISA 9120 UZS"
+
+
+def test_no_app_button_without_the_page() -> None:
+    rows = keyboards.generate_sources_keyboard(SOURCES).keyboard
+    assert all(button.web_app is None for row in rows for button in row)

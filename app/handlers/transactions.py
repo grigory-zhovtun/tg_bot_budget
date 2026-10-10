@@ -3,12 +3,11 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from app.handlers.common import premium_icons, track_message
+from app.handlers.common import premium_icons, sources_keyboard, track_message
 from app.utils.keyboards import (
     amount_prompt,
     category_prompt,
     generate_categories_keyboard,
-    generate_sources_keyboard,
     generate_subcategories_keyboard,
     subcategory_prompt,
 )
@@ -39,9 +38,7 @@ async def transaction_button_handler(
             if query.message:
                 msg = await query.message.reply_text(
                     text="⚠️ Выберите источник",
-                    reply_markup=generate_sources_keyboard(
-                        context.bot_data.get("sources", [])
-                    ),
+                    reply_markup=sources_keyboard(context, query.message.chat_id),
                 )
                 track_message(context, msg)
             return
