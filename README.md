@@ -179,6 +179,7 @@ Every day at 00:05 (`ANALYTICS_TIMEZONE`) and right after start the bot checks t
 
 *   **`/analytics`** — report for the last 3 days with charts.
 *   **`/today`** — the daily limit: how much can be spent today, spent so far and left, yesterday against its limit, frozen money, lines over plan and the next incomes/payments.
+*   **`/subs`** — subscriptions and other monthly payments found in `fact` (last 4 months): the same merchant (first two words of the name without digits and signs) with a similar amount (±25 %) in at least two months, the last three on the same day of the month (±4 days), and not a shop visited 3+ times a month. The list goes by day with the monthly total, subscriptions against their plan line, «⚠️ в октябре дважды», «(ждём 14.10)» / «(в октябре не было)» and payments not seen for 40+ days. The morning message adds «🔁 Сегодня/Завтра спишется: …» and warns the day after a second charge.
 *   **`/plan`** — month plan vs fact without AI: spending pace against the calendar, what is left per day, lines over plan, close to the plan (80%+) and outside the plan. Lines of one subcategory in different currencies are added up in UZS.
 *   **`/advice`** — AI analysis of spending vs. the current month plan; the answer appears as it is generated (streamed draft), with a plain request as a fallback.
 *   **`/undo`** — delete the rows of the last write, if nobody changed them in the sheet since.

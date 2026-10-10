@@ -50,6 +50,7 @@ app/
 │   ├── google_sheets.py # GoogleSheetsService — synchronous gspread wrapper
 │   ├── ai_service.py    # GeminiService (google-genai, JSON schema output, merchant hints from fact)
 │   ├── analytics_service.py # AnalyticsService - reports with matplotlib charts
+│   ├── recurring.py     # Monthly payments from fact: recurring_key, amount clusters, day ±4, /subs text and morning lines
 │   └── day_budget.py    # Daily limit from the month tab forecast block, frozen money, morning text
 └── utils/
     └── keyboards.py     # Keyboards: icons from system!D (`with_icon`), prompts naming card/choice (inline buttons are as wide as the message), `action(..., style)` coloured buttons
