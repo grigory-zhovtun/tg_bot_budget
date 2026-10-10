@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import AsyncIterator
 from typing import Any, Literal
 
 import httpx
@@ -237,6 +238,26 @@ Return one object per shop: "name" copied exactly from the list, "category"
 and "subcategory". If you cannot tell what the shop sells, or it is a
 marketplace with all kinds of goods (Uzum Market, Ozon, Wildberries), use
 "{FALLBACK_CATEGORY}" with its subcategory."""
+
+
+def advice_prompt(numbers: str) -> str:
+    """Запрос для /advice: цифры уже посчитаны, модель их объясняет."""
+    return "\n".join(
+        [
+            "You are a strict and concise financial analyst for a family budget.",
+            "All numbers below are already calculated; do not recalculate them.",
+            "",
+            numbers,
+            "",
+            "Write in simple Russian, max 250 words, with sections:",
+            "'📊 Анализ' — how this month compares with the 3-month average;",
+            "'⚠️ Перерасход' — plan lines where fact exceeds plan or that are"
+            " outside the plan, biggest first;",
+            "'🔮 Прогноз' — the month forecast vs the average month;",
+            "'💡 Совет' — 2-3 concrete steps for the rest of the month.",
+            "Use the category names as given. No intro or outro.",
+        ]
+    )
 
 
 class GeminiService:
@@ -494,24 +515,27 @@ class GeminiService:
         logger.info("Gemini categorized %d of %d merchant(s)", len(result), len(names))
         return result
 
+    async def stream_analysis(self, numbers: str) -> AsyncIterator[str]:
+        """То же, что analyze_finances, но текст по мере генерации (для /advice)."""
+        if self.client is None:
+            raise ValueError("AI сервис не настроен (нет GEMINI_API_KEY)")
+        stream = await self.client.aio.models.generate_content_stream(
+            model=self._available_models()[0],
+            contents=[advice_prompt(numbers)],
+            config=types.GenerateContentConfig(
+                temperature=0,
+                automatic_function_calling=NO_AFC,
+                http_options=types.HttpOptions(timeout=TEXT_TIMEOUT_MS),
+            ),
+        )
+        text = ""
+        async for chunk in stream:
+            text += chunk.text or ""
+            yield text
+
     async def analyze_finances(self, numbers: str) -> str:
         """Выводы по готовым цифрам (/advice): считает Python, модель — объясняет."""
-        prompt = "\n".join(
-            [
-                "You are a strict and concise financial analyst for a family budget.",
-                "All numbers below are already calculated; do not recalculate them.",
-                "",
-                numbers,
-                "",
-                "Write in simple Russian, max 250 words, with sections:",
-                "'📊 Анализ' — how this month compares with the 3-month average;",
-                "'⚠️ Перерасход' — plan lines where fact exceeds plan or that are"
-                " outside the plan, biggest first;",
-                "'🔮 Прогноз' — the month forecast vs the average month;",
-                "'💡 Совет' — 2-3 concrete steps for the rest of the month.",
-                "Use the category names as given. No intro or outro.",
-            ]
-        )
+        prompt = advice_prompt(numbers)
         response = await self._generate([prompt])
         text = response.text or "Не удалось провести анализ."
         return text if len(text) <= 4000 else text[:3900] + "..."

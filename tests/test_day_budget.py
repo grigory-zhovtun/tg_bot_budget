@@ -262,15 +262,15 @@ def test_read_error_is_not_reported_as_a_missing_tab() -> None:
 
 async def test_morning_brief_is_sent_and_errors_stay_in_the_log() -> None:
     bot = SimpleNamespace(send_message=AsyncMock())
-    service = SimpleNamespace(morning_brief=lambda: "☀️")
+    service = SimpleNamespace(morning_message=lambda: ("☀️", False))
     await analytics.send_morning_brief(bot, 42, service)
-    bot.send_message.assert_awaited_once_with(42, "☀️")
+    bot.send_message.assert_awaited_once_with(42, "☀️", message_effect_id=None)
 
-    def broken() -> str:
+    def broken() -> tuple[str, bool]:
         raise ConnectionError("Google is down")
 
     bot = SimpleNamespace(send_message=AsyncMock())
-    await analytics.send_morning_brief(bot, 42, SimpleNamespace(morning_brief=broken))
+    await analytics.send_morning_brief(bot, 42, SimpleNamespace(morning_message=broken))
     bot.send_message.assert_not_awaited()
 
 

@@ -362,3 +362,10 @@ def today_line(budget: DayBudget) -> str:
             f"💸 Сегодня сверх лимита на {money(-left)} (лимит {money(budget.limit)})"
         )
     return f"💸 На сегодня осталось {money(left)} из {money(budget.limit)}"
+
+
+def celebrate(budget: DayBudget) -> bool:
+    """Вчера (в этом месяце) потратили не больше лимита — утром 🎉."""
+    if budget.yesterday_limit is None:
+        return False
+    return budget.yesterday_spent <= max(budget.yesterday_limit, 0)

@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 from telegram import File, Message, Update
+from telegram.constants import ReactionEmoji
 from telegram.ext import ContextTypes
 
 from app import config
@@ -27,7 +28,7 @@ from app.domain import (
     manual_row,
 )
 from app.errors import user_message
-from app.handlers import balances, icons, statement_import
+from app.handlers import balances, icons, live, statement_import
 from app.handlers.common import (
     CHOOSE_SOURCE,
     LAST_WRITE,
@@ -235,12 +236,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with _downloaded(photo_file, ".jpg") as path:
             photo = path.read_bytes()
 
-    # Delete user's message (text/SMS/photo) to keep chat clean
-    await _delete_quietly(update.message)
-
-    analyzing_msg = await update.effective_chat.send_message("🔍")
-    track_message(context, analyzing_msg)
-
+    # SMS и скрин остаются в чате: статус — реакцией, ожидание — «Думаю…»
+    message = update.message
+    await live.react(message, ReactionEmoji.EYES)
     try:
         catalog = _catalog(context)
         known = {
@@ -248,29 +246,37 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "known_sources": catalog.sources,
             "known_subcategories": catalog.subcategories,
         }
-        if photo is not None:
-            screen = await ai_service.parse_screenshot(
-                photo, caption=msg_text or None, **known
-            )
-            if screen["kind"] == "balances" and screen["balances"]:
-                # главный экран банка: остатки карт, операции на нём не записываем
-                await _delete_quietly(analyzing_msg)
-                await balances.report_screen_balances(
-                    update, context, screen["balances"]
+        async with live.thinking(context, update.effective_chat.id, message.message_id):
+            if photo is not None:
+                screen = await ai_service.parse_screenshot(
+                    photo, caption=msg_text or None, **known
                 )
-                return
+            else:
+                result = await ai_service.parse_transaction(
+                    user_input=msg_text, **known
+                )
+
+        if photo is not None and screen["kind"] == "balances" and screen["balances"]:
+            # главный экран банка: остатки карт, операции на нём не записываем
+            await balances.report_screen_balances(update, context, screen["balances"])
+            await live.react(message, ReactionEmoji.THUMBS_UP)
+            return
+        if photo is not None:
             # Скриншот операций: нижняя транзакция → первая запись
             items = screen["transactions"][::-1]
         else:
             # SMS: верхняя транзакция → первая запись
-            result = await ai_service.parse_transaction(user_input=msg_text, **known)
             items = result if isinstance(result, list) else [result]
 
         rows, skipped = await _to_rows(items, context, current_source)
-        await _save_rows(update, context, rows, skipped, fingerprint)
+        written = await _save_rows(update, context, rows, skipped, fingerprint)
+        await live.react(
+            message, ReactionEmoji.THUMBS_UP if written else ReactionEmoji.THINKING_FACE
+        )
 
     except Exception as e:
         logger.exception("AI parsing failed")
+        await live.react(message, ReactionEmoji.THINKING_FACE)
         await update.effective_chat.send_message(f"Ошибка AI: {user_message(e)}")
 
 
@@ -347,8 +353,8 @@ async def _save_rows(
     rows: Sequence[SheetRow],
     skipped: Sequence[Skipped],
     fingerprint: str | None = None,
-) -> None:
-    """Записать строки в fact одним запросом, обновить остатки и показать сводку."""
+) -> int:
+    """Записать строки в fact, обновить остатки, показать сводку; сколько записано."""
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
     lines: list[str] = []
     if rows:
@@ -414,6 +420,7 @@ async def _save_rows(
     await clear_tracked_messages(context, update.effective_chat.id)
     # после записи под сводкой — «✏️ Исправить запись» и «↩️ Отменить запись»
     await show_main_menu(update, context, "\n".join(lines), actions=bool(rows))
+    return len(rows)
 
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

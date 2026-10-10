@@ -80,6 +80,9 @@ IGNORED_CARDS = frozenset(
 WEEKLY_DIGEST_TIME = os.getenv("WEEKLY_DIGEST_TIME", "20:00")
 # Утреннее сообщение с лимитом на день: «HH:MM» по ANALYTICS_TIMEZONE, «off» — выключить
 MORNING_TIME = os.getenv("MORNING_TIME", "08:00")
+# Эффект 🎉 у утреннего сообщения, если вчера уложились; «off» — без эффекта
+_EFFECT = os.getenv("CELEBRATE_EFFECT_ID", "5046509860389126442").strip()
+CELEBRATE_EFFECT_ID = None if _EFFECT.lower() in ("", "off") else _EFFECT
 # Заморозка — карты в этой валюте (отложенные деньги) без платежей в ней из жёлтого
 # списка вкладки месяца; пусто или «off» — не показывать
 _FROZEN = os.getenv("FROZEN_CURRENCY", "USD").strip().upper()

@@ -441,6 +441,16 @@ class AnalyticsService:
 
     def morning_brief(self, today: date | None = None, now: bool = False) -> str:
         """Лимит на сегодня по вкладке месяца: утреннее сообщение и /today."""
+        return self._brief(today, now)[0]
+
+    def morning_message(self, today: date | None = None) -> tuple[str, bool]:
+        """Утреннее сообщение и нужен ли 🎉 (вчера уложились в лимит)."""
+        from app.services.day_budget import celebrate
+
+        text, budget = self._brief(today, now=False)
+        return text, budget is not None and celebrate(budget)
+
+    def _brief(self, today: date | None, now: bool) -> tuple[str, Any]:
         # day_budget сам берёт отсюда plan_lines и expenses
         from app.services.day_budget import day_budget, format_day_budget
 
@@ -451,7 +461,7 @@ class AnalyticsService:
         except WorksheetNotFound:
             # сбой сети — не «вкладки нет»: ошибка уйдёт в лог или ответ /today
             logger.info("No plan sheet %s", sheet)
-            return f"Вкладки «{sheet}» с планом нет — бот создаёт её 1-го числа."
+            return f"Вкладки «{sheet}» с планом нет — бот создаёт её 1-го числа.", None
         rates = self.gs_service.get_rates()
         frame = transactions_frame(
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
@@ -462,8 +472,8 @@ class AnalyticsService:
                 f"Во вкладке «{sheet}» нет списка поступлений и платежей (блок "
                 "прогноза справа) — лимит на день не посчитать.\n\n"
                 + format_plan_report(rows, today)
-            )
-        return format_day_budget(budget, now=now)
+            ), None
+        return format_day_budget(budget, now=now), budget
 
     def write_feedback(
         self,

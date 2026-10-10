@@ -76,6 +76,7 @@ GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 # WEEKLY_DIGEST_TIME="20:00"           # Sunday digest to the owner; "off" disables it
 # MORNING_TIME="08:00"                 # morning message with the daily limit; "off" disables it
 # FROZEN_CURRENCY="USD"                # cards in this currency are savings ("off" — none)
+# CELEBRATE_EFFECT_ID="5046509860389126442"  # 🎉 on the morning message after a day within the limit ("off" — none)
 # IGNORED_CARDS="1234"                 # cards (last 4 digits) never matched from screenshots
 
 # Optional webhook mode (otherwise the bot polls Telegram)
@@ -146,7 +147,7 @@ Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this
 1.  **Send `/start`** and pick a source (card) on the keyboard. After a restart the bot takes the card of the last record, so it does not ask again.
 2.  **Pick a category and a subcategory** on the buttons under the message (two per row, subcategories with their icons; the line above names the card and the choice so far). Action buttons are coloured: «✅ Записать» green, «Выровнять» blue.
 3.  **Type the amount and an optional comment**: `48000 latte`, `5 000,50 lunch`. A leading `+` records incoming money: `+20000 refund`.
-4.  **Or just send an SMS, a screenshot, a PDF/Excel/CSV file** — Gemini extracts the transactions; the bot converts currencies, picks the card by its number, checks categories against `system` and writes all rows in one request. Rows it cannot write are listed in the reply.
+4.  **Or just send an SMS, a screenshot, a PDF/Excel/CSV file** — Gemini extracts the transactions; the bot converts currencies, picks the card by its number, checks categories against `system` and writes all rows in one request. Rows it cannot write are listed in the reply. The SMS or screenshot stays in the chat with the bot's reaction — 👀 while Gemini reads it, 👍 written, 🤔 nothing recognised — and Telegram shows «Думаю…» meanwhile (message draft, Bot API 9.3).
     *   The same SMS, screenshot or file sent twice is written once: the bot remembers what it wrote during the last week and answers which rows already hold it.
     *   When an SMS shows the card balance, the reply compares it with the balance in the sheet: «🟰 сходится» or the difference.
     *   Under the written rows the summary shows how each subcategory of the month stands — «🟢 ☕ кофе: 1,07 из 2,00 млн (53%)», «🟡 … — осталось …» from 80 %, «🔴 … — сверх плана на …», «⚪ … вне плана, в октябре уже …» — and what is left for today: «💸 На сегодня осталось 227 993 из 533 541». Incomes and transfers between own cards get no lines; if the sheet is slow, the record is still written and the lines are skipped.
@@ -166,6 +167,8 @@ On Sundays at `WEEKLY_DIGEST_TIME` (default `20:00`, `off` disables it) the owne
 
 Every morning at `MORNING_TIME` (default `08:00`, `off` disables it) the owner gets how much can be spent today, and `/today` shows the same at any moment with what is spent and left today. The limit uses the forecast block of the month tab (columns `O:S`): money on all cards at the end of yesterday, plus incomes and big payments from the yellow list that are still ahead, minus the balance needed at the end of the month, divided by the days left including today. The needed balance is the plan (balance on the 1st + the list − the daily budget × days) or more, if the savings goal of the month (yellow row «🎯 Отложить за месяц») is above the plan's savings. Overspending lowers the limit for the rest of the month.
 
+When yesterday stayed within its limit, the morning message comes with the 🎉 effect (`CELEBRATE_EFFECT_ID`; if Telegram rejects the effect, the message is sent without it).
+
 Frozen money is the balance of the cards in `FROZEN_CURRENCY` (the dollar card) minus payments in that currency from the list that are still ahead (rent until it is paid). The limit never spends it: everything on the cards on the 1st is part of the balance needed at the end of the month, and transfers between own cards do not change it. The message shows how much is frozen and how it changed since the 1st. Payments from the list are not counted as spending of their day. The tab cell «Лимит на сегодня» uses the same formula.
 
 ### Monthly plan tabs
@@ -177,7 +180,7 @@ Every day at 00:05 (`ANALYTICS_TIMEZONE`) and right after start the bot checks t
 *   **`/analytics`** — report for the last 3 days with charts.
 *   **`/today`** — the daily limit: how much can be spent today, spent so far and left, yesterday against its limit, frozen money, lines over plan and the next incomes/payments.
 *   **`/plan`** — month plan vs fact without AI: spending pace against the calendar, what is left per day, lines over plan, close to the plan (80%+) and outside the plan. Lines of one subcategory in different currencies are added up in UZS.
-*   **`/advice`** — AI analysis of spending vs. the current month plan.
+*   **`/advice`** — AI analysis of spending vs. the current month plan; the answer appears as it is generated (streamed draft), with a plain request as a fallback.
 *   **`/undo`** — delete the rows of the last write, if nobody changed them in the sheet since.
 *   **`/fix`** — change the group and subgroup of the last write when the AI picked the wrong one (SMS, receipt or screenshot): the bot asks which operation (if there were several), then the group and the subgroup from `system`. The row is changed only if nobody edited it in the sheet; the money keeps its direction (an incoming row moved to or from «💰 ДОХОДЫ» flips the sign in `D`), and the merchant goes to the new category from the next message on.
 *   **`/icons`** — pictures on the buttons (custom emoji, Bot API 9.4): after `/icons` send any custom emoji of a pack you like (several packs in one message are fine). The bot connects the whole pack and matches pictures by the plain emoji of `system!D` and of the group names, then reports how many subcategories and groups got a picture. Packs are kept in `system!J`; `/icons off` brings plain emoji back. Telegram shows such buttons only while the bot owner has Telegram Premium — the bot sees it in the owner's updates and falls back to plain emoji otherwise.

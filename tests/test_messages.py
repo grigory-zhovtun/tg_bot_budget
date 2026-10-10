@@ -99,7 +99,13 @@ def make_chat(text: str, user_data: dict[str, Any], ai: FakeAI | None = None):
     sheets = FakeSheets()
     reply = AsyncMock(side_effect=lambda *a, **k: sent_message())
     message = SimpleNamespace(
-        photo=[], text=text, caption=None, delete=AsyncMock(), reply_text=reply
+        message_id=next(ids),
+        photo=[],
+        text=text,
+        caption=None,
+        delete=AsyncMock(),
+        reply_text=reply,
+        set_reaction=AsyncMock(),
     )
     update = SimpleNamespace(
         message=message,
@@ -117,7 +123,11 @@ def make_chat(text: str, user_data: dict[str, Any], ai: FakeAI | None = None):
             "sources": SOURCES,
         },
         user_data=user_data,
-        bot=SimpleNamespace(delete_message=AsyncMock()),
+        bot=SimpleNamespace(
+            delete_message=AsyncMock(),
+            send_message_draft=AsyncMock(),
+            send_message=AsyncMock(side_effect=lambda *a, **k: sent_message()),
+        ),
     )
     return update, context, sheets
 
