@@ -20,7 +20,13 @@ from typing import Any
 import pandas as pd
 
 from app.domain import INCOME_GROUP, Rates
-from app.services.analytics_service import PlanLine, expenses, money, plan_lines
+from app.services.analytics_service import (
+    SERIAL_ZERO,
+    PlanLine,
+    expenses,
+    money,
+    plan_lines,
+)
 
 COLUMN_O = 14  # блок прогноза: O название, P день, Q сумма, R валюта, S в сумах
 LIST_HEADER = "Поступления"  # «Поступления (+) и крупные платежи (−)»
@@ -118,6 +124,34 @@ def read_forecast(rows: list[list[Any]]) -> Forecast | None:
             code = str(currency).strip().upper() or "UZS"
             items.append(ForecastItem(name.strip(), int(day), amount, code, uzs))
     return Forecast(tuple(items), goal)
+
+
+@dataclass(frozen=True)
+class DayPoint:
+    """Строка таблицы дней вкладки: остаток на вечер дня по плану и по факту."""
+
+    day: date
+    plan: float
+    fact: float | None  # None — день ещё не прошёл («#N/A» в таблице)
+
+
+def read_daily(rows: list[list[Any]]) -> list[DayPoint]:
+    """Таблица дней под блоком прогноза (заголовок «Дата» в колонке O)."""
+    start = next(
+        (i for i, row in enumerate(rows) if _block(row)[0] == TABLE_HEADER), None
+    )
+    if start is None:
+        return []
+    points: list[DayPoint] = []
+    for row in rows[start + 1 :]:
+        day, plan, fact = _block(row)[:3]
+        serial, planned = _number(day), _number(plan)
+        if serial is None or planned is None:
+            break
+        points.append(
+            DayPoint(SERIAL_ZERO + timedelta(days=int(serial)), planned, _number(fact))
+        )
+    return points
 
 
 def _balance(frame: pd.DataFrame, through: date, column: str = "amount_uzs") -> float:
