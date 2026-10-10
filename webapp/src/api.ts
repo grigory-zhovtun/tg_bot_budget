@@ -46,6 +46,68 @@ export interface UndoResult {
   message: string;
 }
 
+export interface PlanItem {
+  name: string;
+  icon: string;
+  plan: number;
+  fact: number;
+}
+
+export interface GroupPlan {
+  name: string;
+  plan: number;
+  fact: number;
+  items: PlanItem[];
+}
+
+export interface DayPoint {
+  day: string;
+  plan: number;
+  fact: number | null;
+}
+
+export interface ForecastItem {
+  name: string;
+  day: number;
+  amount: number;
+  currency: string;
+  uzs: number;
+}
+
+export type SubscriptionState = "charged" | "twice" | "expected" | "missed";
+
+export interface Subscription {
+  name: string;
+  day: number;
+  amount: number;
+  currency: string;
+  uzs: number;
+  state: SubscriptionState;
+}
+
+export interface Dashboard {
+  status: "ok" | "no_month_tab" | "no_forecast";
+  month: string;
+  today: string;
+  limit: number | null;
+  spent_today: number | null;
+  left_today: number | null;
+  plan_per_day: number | null;
+  days_left: number | null;
+  balance: number | null;
+  planned_balance: number | null;
+  frozen: {
+    amount: number;
+    currency: string;
+    uzs: number;
+    change: number;
+  } | null;
+  groups: GroupPlan[];
+  daily: DayPoint[];
+  upcoming: ForecastItem[];
+  subscriptions: Subscription[];
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -146,6 +208,7 @@ export const api = {
       body: JSON.stringify(entry),
     }),
   undo: () => request<UndoResult>("/expenses/undo", { method: "POST" }),
+  dashboard: () => request<Dashboard>("/dashboard"),
 };
 
 export type Api = typeof api;

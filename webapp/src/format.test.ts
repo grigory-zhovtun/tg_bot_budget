@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { dayLabel, money, shiftDay, short, withCurrency } from "./format";
+import {
+  dayLabel,
+  itemAmount,
+  money,
+  shiftDay,
+  short,
+  withCurrency,
+} from "./format";
 
 describe("money", () => {
   it("groups thousands like the bot", () => {
@@ -28,5 +35,12 @@ describe("days", () => {
     expect(dayLabel("2026-10-10", "2026-10-10")).toBe("Сегодня");
     expect(dayLabel("2026-10-09", "2026-10-10")).toBe("Вчера");
     expect(dayLabel("2026-10-01", "2026-10-10")).toBe("01.10");
+  });
+});
+
+describe("itemAmount", () => {
+  it("shows incomes in sums and payments in their currency", () => {
+    expect(itemAmount(2_720_000, "UZS", 2_720_000)).toBe("+2,72 млн");
+    expect(itemAmount(-650, "USD", -7_800_000)).toBe("−650,00 USD");
   });
 });
