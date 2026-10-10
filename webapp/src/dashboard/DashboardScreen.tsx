@@ -34,6 +34,22 @@ function Today({ data }: { data: Dashboard }) {
   ) {
     return null;
   }
+  if (data.limit <= 0) {
+    // как /today: до плана на конец месяца уже не хватает — лимита на день нет
+    const missing = -data.limit * (data.days_left ?? 1);
+    return (
+      <section className="rounded-2xl bg-section p-4">
+        <p className="text-sm text-hint">Можно сегодня</p>
+        <p className="text-2xl font-semibold text-danger">
+          Лимита на сегодня нет
+        </p>
+        <p className="text-sm text-hint">
+          до плана на конец месяца не хватает {short(missing)} · потрачено{" "}
+          {money(data.spent_today)}
+        </p>
+      </section>
+    );
+  }
   return (
     <section className="rounded-2xl bg-section p-4">
       <p className="text-sm text-hint">Можно сегодня</p>

@@ -378,3 +378,15 @@ def test_dashboard_sheet_failure_is_503() -> None:
         503,
         "sheets_unavailable",
     )
+
+
+def test_left_today_follows_today_when_the_limit_is_gone() -> None:
+    month_ago = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 30_000_000)
+    coffee = fact_row(date(2026, 10, 2), "🍔 ЕДА", "кофе", 100_000)
+    found = build_dashboard(
+        frame(month_ago, coffee), tab(), date(2026, 10, 2), RATES, "USD"
+    )
+    body = dashboard_for(found).json()
+    assert body["limit"] < 0
+    # как /today: max(лимит, 0) − потрачено, то есть всё потраченное — сверх лимита
+    assert body["left_today"] == pytest.approx(-body["spent_today"])

@@ -174,7 +174,8 @@ def dashboard_out(
         today=today,
         limit=budget.limit,
         spent_today=budget.spent_today,
-        left_today=budget.limit - budget.spent_today,
+        # как /today: без лимита (отстаём от плана) всё потраченное — сверх него
+        left_today=max(budget.limit, 0) - budget.spent_today,
         plan_per_day=budget.plan_per_day,
         days_left=budget.days_left,
         balance=budget.balance,

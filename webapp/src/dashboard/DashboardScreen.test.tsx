@@ -59,4 +59,18 @@ describe("DashboardScreen", () => {
       ),
     ).toBeTruthy();
   });
+
+  it("says there is no limit today when the month is behind the plan", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      limit: -50_000,
+      left_today: -120_000,
+      days_left: 22,
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    expect(await screen.findByText("Лимита на сегодня нет")).toBeTruthy();
+    expect(
+      screen.getByText(/до плана на конец месяца не хватает 1,10 млн/),
+    ).toBeTruthy();
+  });
 });
