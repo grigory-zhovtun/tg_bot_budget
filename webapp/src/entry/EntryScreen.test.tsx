@@ -1,13 +1,24 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   type Api,
+  type Dashboard,
   type ExpenseInput,
   type ExpenseResult,
 } from "../api";
-import { bootstrapFixture, writtenFixture } from "../mocks/fixtures";
+import {
+  bootstrapFixture,
+  dashboardFixture,
+  writtenFixture,
+} from "../mocks/fixtures";
 import { fakeApi } from "../test/fakeApi";
 import EntryScreen from "./EntryScreen";
 
@@ -206,5 +217,91 @@ describe("EntryScreen", () => {
     expect(
       await screen.findByText("↩️ Удалил из таблицы: строка 4169."),
     ).toBeTruthy();
+  });
+
+  it("shows what is left in the plan on the tiles", async () => {
+    const user = userEvent.setup();
+    renderEntry(fakeApi());
+    expect(await screen.findByText("сверх на 300 000")).toBeTruthy(); // ЕДА
+    await user.click(screen.getByRole("button", { name: /ЕДА/ }));
+    expect(await screen.findByText("осталось 50 000")).toBeTruthy(); // кофе
+    expect(screen.getByText("сверх на 350 000")).toBeTruthy(); // кафе
+  });
+
+  it("works without the plan when the sheet does not answer", async () => {
+    const dashboard = vi
+      .fn<Api["dashboard"]>()
+      .mockRejectedValue(new ApiError(503, "sheets_unavailable", "нет"));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ dashboard }));
+    await user.click(screen.getByRole("button", { name: /ЕДА/ }));
+    expect(screen.getByRole("button", { name: /кофе/ })).toBeTruthy();
+    expect(screen.queryByText(/осталось|сверх/)).toBeNull();
+  });
+
+  it("updates what is left after a write", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    renderEntry(api);
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await screen.findByText(/✅ 48 000 UZS/);
+    expect(api.dashboard).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the fresh plan when an older answer comes late", async () => {
+    let answerFirst: (value: Dashboard) => void = () => undefined;
+    const fresh: Dashboard = {
+      ...dashboardFixture,
+      groups: dashboardFixture.groups.map((group) =>
+        group.name === "🍔 ЕДА" ? { ...group, fact: 3_400_000 } : group,
+      ),
+    };
+    const dashboard = vi
+      .fn<Api["dashboard"]>()
+      .mockImplementationOnce(
+        () =>
+          new Promise<Dashboard>((resolve) => {
+            answerFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(fresh);
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ dashboard }));
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    expect(await screen.findByText("сверх на 400 000")).toBeTruthy();
+    await act(async () => {
+      answerFirst(dashboardFixture);
+    });
+    expect(screen.getByText("сверх на 400 000")).toBeTruthy();
+    expect(screen.queryByText("сверх на 300 000")).toBeNull();
+  });
+
+  it("hides the plan it could not refresh after a write", async () => {
+    const dashboard = vi
+      .fn<Api["dashboard"]>()
+      .mockResolvedValueOnce(dashboardFixture)
+      .mockRejectedValueOnce(new ApiError(503, "sheets_unavailable", "нет"));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ dashboard }));
+    expect(await screen.findByText("сверх на 300 000")).toBeTruthy();
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await screen.findByText(/✅ 48 000 UZS/);
+    await waitFor(() => {
+      expect(screen.queryByText(/^(осталось|сверх на)/)).toBeNull();
+    });
+  });
+
+  it("updates what is left after an undo", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    renderEntry(api);
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(await screen.findByRole("button", { name: /Отменить/ }));
+    await screen.findByText(/Удалил из таблицы/);
+    expect(api.dashboard).toHaveBeenCalledTimes(3);
   });
 });
