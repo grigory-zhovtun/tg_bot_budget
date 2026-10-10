@@ -21,6 +21,7 @@ This Telegram bot is designed for convenient personal finance tracking. It allow
 *   **Bank Statements:** Kapitalbank PDF statements («История операций») are parsed without AI: transfers between own cards are paired, categories come from how the same shop was categorized before (Gemini suggests one for new shops), rows already in the sheet are skipped, and nothing is written before you confirm the preview.
 *   **Google Sheets Integration:** All data is saved and updated in real-time in the specified Google Sheet.
 *   **Dynamic Keyboards:** User-friendly interface with buttons for selecting categories, sources, and other actions.
+*   **Mini App:** the «📱 Приложение» button under the cards opens a Telegram Mini App — big tiles for groups and subcategories and a keypad for the amount. The expense is written exactly like a manual entry: the summary with «Исправить»/«Отменить» comes to the chat, `/undo` and `/fix` work with it.
 *   **On-the-fly Data Updates:** The `/reboot` command reloads categories, subcategories, and sources from the Google Sheet without restarting the bot.
 
 ## Installation and Setup
@@ -142,6 +143,18 @@ python -m app.main
 ```
 
 On Render the bot runs as a **web service**: Render sets `RENDER_EXTERNAL_URL`, and the bot serves `POST /telegram` (the Telegram webhook, checked with the secret header) and `GET /health` on `PORT`. The Build Command is `pip install -r requirements.txt && bash scripts/build_webapp.sh`, the Start Command `python -m app.main`. Without `WEBHOOK_URL`/`RENDER_EXTERNAL_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — but only while no webhook is set: polling would delete the production webhook, so a local run with the production token waits until `FORCE_POLLING=True`.
+
+### 8. Mini App (`webapp/`)
+
+React + TypeScript + Tailwind, built by Vite into `webapp/dist` and served by the bot at `/app/`. The page calls `/api/*` with Telegram's `initData` or — when it is opened from the keyboard button, where Telegram passes no `initData` — with the signed launch link the bot puts into the button (30 days, renewed with every cards keyboard).
+
+```bash
+cd webapp
+nvm use            # Node from .nvmrc
+npm ci
+npm run dev        # the page with test data in a browser, no Telegram and no bot
+npm run lint && npm test && npm run build
+```
 
 ## Usage
 
