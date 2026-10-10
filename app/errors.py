@@ -5,7 +5,7 @@ import re
 
 import httpx
 from google.genai import errors as genai_errors
-from telegram.error import Conflict
+from telegram.error import BadRequest, Conflict, NetworkError
 from telegram.ext import ContextTypes
 
 logger = logging.getLogger(__name__)
@@ -43,4 +43,13 @@ async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Во время деплоя Render минуту держит старый и новый инстансы вместе
         logger.warning("Another instance is polling Telegram (normal during deploy)")
         return
-    logger.error("Unhandled error", exc_info=context.error)
+    error = context.error
+    if (
+        update is None
+        and isinstance(error, NetworkError)
+        and not isinstance(error, BadRequest)
+    ):
+        # Сбой Telegram при опросе (Bad Gateway, таймаут): PTB сам повторяет get_updates
+        logger.warning("Telegram is unreachable, polling retries: %s", error)
+        return
+    logger.error("Unhandled error", exc_info=error)
