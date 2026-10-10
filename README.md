@@ -21,7 +21,7 @@ This Telegram bot is designed for convenient personal finance tracking. It allow
 *   **Bank Statements:** Kapitalbank PDF statements («История операций») are parsed without AI: transfers between own cards are paired, categories come from how the same shop was categorized before (Gemini suggests one for new shops), rows already in the sheet are skipped, and nothing is written before you confirm the preview.
 *   **Google Sheets Integration:** All data is saved and updated in real-time in the specified Google Sheet.
 *   **Dynamic Keyboards:** User-friendly interface with buttons for selecting categories, sources, and other actions.
-*   **Mini App:** the «📱 Приложение» button under the cards opens a Telegram Mini App — big tiles for groups and subcategories and a keypad for the amount. The expense is written exactly like a manual entry: the summary with «Исправить»/«Отменить» comes to the chat, `/undo` and `/fix` work with it.
+*   **Mini App:** the «📱 Приложение» button under the cards opens a Telegram Mini App. «Ввод» — big tiles for groups and subcategories and a keypad; the expense is written exactly like a manual entry (the summary with «Исправить»/«Отменить» comes to the chat, `/undo` and `/fix` work with it). «Сводка» — what is left for today, plan vs fact by groups, the balance chart from the month tab's daily table, frozen money, upcoming items of the yellow list and subscriptions.
 *   **On-the-fly Data Updates:** The `/reboot` command reloads categories, subcategories, and sources from the Google Sheet without restarting the bot.
 
 ## Installation and Setup

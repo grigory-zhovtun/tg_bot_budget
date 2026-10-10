@@ -38,3 +38,15 @@ export function dayLabel(isoDay: string, today: string): string {
   const [, month = "", day = ""] = isoDay.split("-");
   return `${day}.${month}`;
 }
+
+/** Пункт жёлтого списка: «+2,72 млн» или «−650,00 USD». */
+export function itemAmount(
+  amount: number,
+  currency: string,
+  uzs: number,
+): string {
+  const sign = amount > 0 ? "+" : "−";
+  return currency === "UZS"
+    ? `${sign}${short(Math.abs(uzs))}`
+    : `${sign}${withCurrency(Math.abs(amount), currency)}`;
+}

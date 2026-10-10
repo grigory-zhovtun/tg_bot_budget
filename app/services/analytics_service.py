@@ -10,7 +10,7 @@ import logging
 import re
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from gspread.exceptions import WorksheetNotFound
@@ -19,6 +19,9 @@ from matplotlib.figure import Figure
 from app import config
 from app.domain import INCOME_GROUP, Rates, local_today, month_title
 from app.services.google_sheets import GoogleSheetsService
+
+if TYPE_CHECKING:
+    from app.services.dashboard import Dashboard
 
 logger = logging.getLogger(__name__)
 
@@ -525,6 +528,23 @@ class AnalyticsService:
         except WorksheetNotFound:
             logger.info("No plan sheet for the subscriptions plan")
         return format_subs(found, today, plan)
+
+    def dashboard(self, today: date | None = None) -> "Dashboard | None":
+        """Экран «Сводка» Mini App; None — вкладки месяца нет."""
+        from app.services.dashboard import build_dashboard
+
+        today = today or local_today(config.ANALYTICS_TIMEZONE)
+        sheet = month_title(today)
+        try:
+            rows = self.gs_service.get_values(sheet)
+        except WorksheetNotFound:
+            logger.info("No plan sheet %s", sheet)
+            return None
+        rates = self.gs_service.get_rates()
+        frame = transactions_frame(
+            self.gs_service.get_values(config.FACT_SHEET_NAME), rates
+        )
+        return build_dashboard(frame, rows, today, rates, config.FROZEN_CURRENCY)
 
     def weekly_digest(self, today: date | None = None) -> str:
         """Воскресная сводка: траты недели против прошлой и план-факт месяца."""
