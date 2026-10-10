@@ -43,6 +43,7 @@ COMMANDS = [
     ("start", "Начать работу 🚀"),
     ("analytics", "Аналитика за 3 дня 📊"),
     ("plan", "План-факт месяца 📋"),
+    ("today", "Лимит на сегодня 💸"),
     ("advice", "Финансовый совет 🧠"),
     ("fix", "Исправить категорию последней записи ✏️"),
     ("undo", "Отменить последнюю запись ↩️"),
@@ -141,6 +142,33 @@ def _schedule_weekly_digest(app: Application) -> None:
     )
 
 
+async def _morning_brief(context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = month.owner_chat_id()
+    if chat_id is not None:
+        await analytics.send_morning_brief(
+            context.bot, chat_id, context.bot_data["analytics_service"]
+        )
+
+
+def _schedule_morning_brief(app: Application) -> None:
+    """Утреннее сообщение с лимитом на день; MORNING_TIME=off — выключить."""
+    if config.MORNING_TIME.strip().lower() == "off":
+        logger.info("Morning brief disabled")
+        return
+    try:
+        hour, minute = map(int, config.MORNING_TIME.split(":"))
+        when = dtime(hour, minute, tzinfo=ZoneInfo(config.ANALYTICS_TIMEZONE))
+    except (ValueError, ZoneInfoNotFoundError):
+        logger.exception("Bad MORNING_TIME, morning brief disabled")
+        return
+    app.job_queue.run_daily(_morning_brief, time=when, name="morning_brief")
+    logger.info(
+        "Morning brief scheduled for %s (%s)",
+        config.MORNING_TIME,
+        config.ANALYTICS_TIMEZONE,
+    )
+
+
 def build_application(
     gs_service: GoogleSheetsService,
     categories: list[str],
@@ -176,6 +204,7 @@ def build_application(
     app.add_handler(CommandHandler("advice", analytics.advice_command))
     app.add_handler(CommandHandler("analytics", analytics.analytics_command))
     app.add_handler(CommandHandler("plan", analytics.plan_command))
+    app.add_handler(CommandHandler("today", analytics.today_command))
     # Кнопки импорта выписок, выравнивания и /fix — раньше общего обработчика без фильтра
     app.add_handler(CallbackQueryHandler(balances.align_button, pattern=r"^align:"))
     app.add_handler(CallbackQueryHandler(fix.fix_button, pattern=r"^fix:"))
@@ -191,6 +220,7 @@ def build_application(
     _schedule_daily_report(app)
     _schedule_month_tab(app)
     _schedule_weekly_digest(app)
+    _schedule_morning_brief(app)
     return app
 
 
