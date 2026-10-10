@@ -26,12 +26,13 @@ from app.domain import (
     manual_row,
 )
 from app.errors import user_message
-from app.handlers import balances, statement_import
+from app.handlers import balances, icons, statement_import
 from app.handlers.common import (
     CHOOSE_SOURCE,
     LAST_WRITE,
     SEEN_INPUTS,
     clear_tracked_messages,
+    premium_icons,
     show_main_menu,
     track_message,
 )
@@ -141,6 +142,10 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not msg_text and not is_photo:
         return  # Ignore empty updates
 
+    # после /icons — кастомные эмодзи из набора для картинок на кнопках
+    if await icons.receive_pack(update, context):
+        return
+
     sources = context.bot_data.get("sources", [])
 
     # 1. Check if text is a Source Selection (Only if text exists)
@@ -161,7 +166,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg2 = await update.effective_chat.send_message(
                 category_prompt(clean_text),
                 reply_markup=generate_categories_keyboard(
-                    context.bot_data.get("categories", [])
+                    context.bot_data.get("categories", []), premium_icons(context)
                 ),
             )
             track_message(context, msg2)
@@ -177,7 +182,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 msg = await update.effective_chat.send_message(
                     category_prompt(current_source),
                     reply_markup=generate_categories_keyboard(
-                        context.bot_data.get("categories", [])
+                        context.bot_data.get("categories", []), premium_icons(context)
                     ),
                 )
                 track_message(context, msg)

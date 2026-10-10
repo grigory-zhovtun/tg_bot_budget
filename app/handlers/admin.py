@@ -6,6 +6,7 @@ from telegram.ext import ContextTypes
 
 from app.errors import user_message
 from app.handlers.common import start
+from app.handlers.icons import load_custom_icons
 from app.services.google_sheets import GoogleSheetsService
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,11 @@ async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data["subcategories"] = subcategories
     context.bot_data["sources"] = sources
     context.bot_data["icons"] = icons
+    if context.bot_data.get("emoji_packs"):
+        # иконки в system!D могли поменяться — подбираем картинки заново
+        await load_custom_icons(
+            context.bot, context.bot_data, context.bot_data["emoji_packs"]
+        )
     logger.info("Loaded %d sources and %d categories.", len(sources), len(categories))
 
     # Verify source consistency for the user

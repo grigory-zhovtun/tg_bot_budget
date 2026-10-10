@@ -20,11 +20,12 @@ from telegram import (
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
+from app.custom_icons import CustomIcons
 from app.domain import INCOME_GROUP, SheetRow, format_amount
 from app.errors import user_message
-from app.handlers.common import LAST_WRITE
+from app.handlers.common import LAST_WRITE, premium_icons
 from app.services.google_sheets import GoogleSheetsService
-from app.utils.keyboards import with_icon
+from app.utils.keyboards import group_button, subcategory_button
 
 logger = logging.getLogger(__name__)
 
@@ -61,19 +62,23 @@ def _grid(
     return [buttons[i : i + per_row] for i in range(0, len(buttons), per_row)]
 
 
-def categories_keyboard(categories: list[str]) -> InlineKeyboardMarkup:
+def categories_keyboard(
+    categories: list[str], custom: CustomIcons | None = None
+) -> InlineKeyboardMarkup:
     buttons = [
-        InlineKeyboardButton(name, callback_data=f"fix:c:{index}")
+        group_button(name, f"fix:c:{index}", custom)
         for index, name in enumerate(categories)
     ]
-    return InlineKeyboardMarkup([*_grid(buttons, 3), [CANCEL]])
+    return InlineKeyboardMarkup([*_grid(buttons, 2), [CANCEL]])
 
 
 def subcategories_keyboard(
-    subcategories: list[str], icons: dict[str, str] | None = None
+    subcategories: list[str],
+    icons: dict[str, str] | None = None,
+    custom: CustomIcons | None = None,
 ) -> InlineKeyboardMarkup:
     buttons = [
-        InlineKeyboardButton(with_icon(name, icons), callback_data=f"fix:s:{index}")
+        subcategory_button(name, f"fix:s:{index}", icons, custom)
         for index, name in enumerate(subcategories)
     ]
     back = InlineKeyboardButton("⬅️ Назад", callback_data="fix:b")
@@ -133,7 +138,9 @@ async def start_fix(
         state["row"] = 0
         return await reply(
             f"✏️ {describe(rows[0])}\nВыберите группу:",
-            reply_markup=categories_keyboard(context.bot_data.get("categories", [])),
+            reply_markup=categories_keyboard(
+                context.bot_data.get("categories", []), premium_icons(context)
+            ),
         )
     listing = "\n".join(f"{i + 1}) {describe(row)}" for i, row in enumerate(rows))
     return await reply(
@@ -173,7 +180,7 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await _edit(
             query,
             f"✏️ {describe(rows[index])}\nВыберите группу:",
-            categories_keyboard(categories),
+            categories_keyboard(categories, premium_icons(context)),
         )
         return
     if "row" not in state:
@@ -185,7 +192,7 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await _edit(
             query,
             f"✏️ {describe(row)}\nВыберите группу:",
-            categories_keyboard(categories),
+            categories_keyboard(categories, premium_icons(context)),
         )
         return
     if action == "c":
@@ -198,7 +205,9 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             query,
             f"✏️ {describe(row)}\n{category} — выберите подгруппу:",
             subcategories_keyboard(
-                subcategories.get(category, []), context.bot_data.get("icons")
+                subcategories.get(category, []),
+                context.bot_data.get("icons"),
+                premium_icons(context),
             ),
         )
         return

@@ -43,6 +43,8 @@ BALANCE_COLUMN = "N"
 CHECKED_COLUMN = "Q"
 CHECKED_HEADER = "Сверено"
 CHECKED_BLOCK = "I2:Q30"
+# Наборы кастомных эмодзи для картинок на кнопках (system!J)
+PACKS_HEADER = "наборы эмодзи"
 TABLE_BALANCES = "I2:J30"
 # Лист system: F — источники, G рядом — по какой день загружены выписки
 MARKS_RANGE = "F1:G60"
@@ -212,6 +214,37 @@ class GoogleSheetsService:
             if name and icon:
                 icons[name] = icon
         return icons
+
+    def get_emoji_packs(self) -> list[str]:
+        """Наборы кастомных эмодзи для картинок на кнопках: system!J под заголовком."""
+        rows = self._read_packs()
+        return [str(row[0]).strip() for row in rows if row and str(row[0]).strip()]
+
+    def set_emoji_packs(self, packs: list[str]) -> None:
+        """Записать наборы в system!J; лишние старые ячейки очистить."""
+        size = max(len(self._read_packs()), len(packs))
+        values = [[PACKS_HEADER], *[[name] for name in packs]]
+        values += [[""]] * (size + 1 - len(values))
+        self._with_retry(
+            "Writing emoji packs",
+            lambda: self.sheet.values_batch_update(
+                {
+                    "valueInputOption": "RAW",
+                    "data": [
+                        {
+                            "range": f"{config.SYSTEM_SHEET_NAME}!J1:J{len(values)}",
+                            "values": values,
+                        }
+                    ],
+                }
+            ),
+        )
+
+    def _read_packs(self) -> list[list[Any]]:
+        return self._with_retry(
+            "Reading emoji packs",
+            lambda: self._worksheet(config.SYSTEM_SHEET_NAME).get("J2:J"),
+        )
 
     def last_source(self, sources: list[str]) -> str | None:
         """Карта последней строки fact: после перезапуска бот не спрашивает её снова."""

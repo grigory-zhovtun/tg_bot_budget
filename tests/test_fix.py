@@ -108,7 +108,7 @@ async def test_single_row_goes_straight_to_groups_and_is_fixed() -> None:
     assert text == (
         "✏️ 48 000 UZS • TEZKOR • 🚧 РАЗНОЕ (неучтенка) • VISA 9120 UZS\nВыберите группу:"
     )
-    assert callbacks(markup) == [["fix:c:0", "fix:c:1", "fix:c:2"], ["fix:x"]]
+    assert callbacks(markup) == [["fix:c:0", "fix:c:1"], ["fix:c:2"], ["fix:x"]]
 
     text, markup = await press(context, "fix:c:0")
     assert text.endswith("🍔 ЕДА — выберите подгруппу:")
@@ -180,7 +180,7 @@ async def test_back_and_cancel() -> None:
     text, markup = await press(context, "fix:b")
     assert text.endswith("Выберите группу:")
     assert "category" not in context.user_data[fix.STATE]
-    assert callbacks(markup)[0] == ["fix:c:0", "fix:c:1", "fix:c:2"]
+    assert callbacks(markup)[0] == ["fix:c:0", "fix:c:1"]
 
     text, markup = await press(context, "fix:x")
     assert (text, markup) == ("Исправление отменено.", None)
