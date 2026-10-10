@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock
 
 from app.handlers import fix, last_write, messages
 from app.handlers.common import LAST_WRITE
-from tests.test_messages import make_chat, manual_state, sent_message, summary
+from tests.test_messages import (
+    make_chat,
+    manual_state,
+    menu_after_summary,
+    sent_message,
+    summary,
+)
 
 ACTIONS = [
     ("✏️ Исправить запись", "last:fix", "primary"),
@@ -24,7 +30,7 @@ async def written() -> tuple[SimpleNamespace, SimpleNamespace, Any]:
 
 def menu(update: SimpleNamespace) -> Any:
     """Второе сообщение после записи: подпись и кнопки категорий."""
-    return update.effective_message.reply_text.await_args_list[1]
+    return menu_after_summary(update)
 
 
 def buttons(markup: Any) -> list[list[tuple[str, str, str | None]]]:

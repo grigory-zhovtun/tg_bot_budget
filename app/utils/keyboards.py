@@ -4,12 +4,19 @@
 называют карту и выбор: так кнопки шире, а пользователь видит, где он.
 """
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+    WebAppInfo,
+)
 from telegram.constants import KeyboardButtonStyle
 
 from app.custom_icons import CustomIcons, leading_emoji
 
 BACK = "⬅️ Назад"
+APP_BUTTON = "📱 Приложение"
 # Кнопки под сводкой записи (обработчик app/handlers/last_write.py)
 LAST_FIX, LAST_UNDO = "last:fix", "last:undo"
 LAST_UNDO_YES, LAST_UNDO_NO = "last:undo:yes", "last:undo:no"
@@ -109,13 +116,22 @@ def categories_menu(
 
 
 def generate_sources_keyboard(
-    sources: list[str], current_source: str | None = None
+    sources: list[str],
+    current_source: str | None = None,
+    app_url: str | None = None,
 ) -> ReplyKeyboardMarkup:
-    """Карты внизу экрана, выбранная — с галочкой."""
+    """Карты внизу экрана, выбранная — с галочкой; последней строкой — Mini App."""
     if not sources:
         return ReplyKeyboardMarkup([["Нет доступных источников"]], resize_keyboard=True)
     labels = [f"✅ {s}" if s == current_source else s for s in sources]
-    rows = [labels[i : i + 3] for i in range(0, len(labels), 3)]
+    rows: list[list[str | KeyboardButton]] = [
+        list(labels[i : i + 3]) for i in range(0, len(labels), 3)
+    ]
+    if app_url:
+        app = KeyboardButton(
+            APP_BUTTON, web_app=WebAppInfo(app_url), style=KeyboardButtonStyle.PRIMARY
+        )
+        rows.append([app])
     return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 

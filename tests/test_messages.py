@@ -6,11 +6,13 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
+from telegram import ReplyKeyboardMarkup
 
 from app import config
-from app.domain import Rates, local_today
+from app.domain import Rates, entry_row, local_today
 from app.handlers import messages, undo
 from app.services.google_sheets import BALANCE_FORMULA, row_values
+from app.web.auth import check_launch_token
 
 CATEGORIES = ["🏚️ ДОМ", "🍔 ЕДА", "🌛 ЕЖЕМЕСЯЧНО", "🚧 РАЗНОЕ", "💳 СЧЕТА", "💰 ДОХОДЫ"]
 SUBCATEGORIES = {
@@ -132,8 +134,28 @@ def make_chat(text: str, user_data: dict[str, Any], ai: FakeAI | None = None):
     return update, context, sheets
 
 
+def chat_messages(update: SimpleNamespace) -> list[Any]:
+    """Сообщения бота в чат (chat.send_message) по порядку."""
+    return update.effective_chat.send_message.await_args_list
+
+
+def summary_call(update: SimpleNamespace) -> Any:
+    """Сводка записи — первое сообщение с клавиатурой карт."""
+    return next(
+        call
+        for call in chat_messages(update)
+        if isinstance(call.kwargs.get("reply_markup"), ReplyKeyboardMarkup)
+    )
+
+
 def summary(update: SimpleNamespace) -> str:
-    return update.effective_message.reply_text.await_args_list[0].args[0]
+    return summary_call(update).args[0]
+
+
+def menu_after_summary(update: SimpleNamespace) -> Any:
+    """Сообщение с группами сразу под сводкой."""
+    calls = chat_messages(update)
+    return calls[calls.index(summary_call(update)) + 1]
 
 
 @pytest.fixture(autouse=True)
@@ -299,7 +321,7 @@ async def test_same_sms_twice_is_written_once() -> None:
     update, context, sheets = make_chat(SMS, {}, ai)
     await messages.text_handler(update, context)
     assert len(sheets.rows) == 1
-    menu = update.effective_message.reply_text.await_args_list[1]
+    menu = menu_after_summary(update)
     first_row = menu.kwargs["reply_markup"].inline_keyboard[0]
     assert [b.callback_data for b in first_row] == ["last:fix", "last:undo"]
 
@@ -422,8 +444,8 @@ async def test_menu_without_a_summary_still_has_text(
     from app.handlers.common import show_main_menu
 
     update, context, _ = make_chat("", user_data)
-    await show_main_menu(update, context)
-    assert update.effective_message.reply_text.await_args_list[0].args[0] == expected
+    await show_main_menu(update.effective_chat, context)
+    assert chat_messages(update)[0].args[0] == expected
 
 
 def test_no_invisible_message_texts_in_the_code() -> None:
@@ -435,3 +457,48 @@ def test_no_invisible_message_texts_in_the_code() -> None:
         found = [hex(ord(ch)) for ch in INVISIBLE if ch in source]
         assert not found, f"{path}: {found}"
     assert not visible("ㅤ") and visible("💳 VISA 9120 UZS")
+
+
+def coffee_row() -> Any:
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    return entry_row(48000.0, False, "латте", "VISA 9120 UZS", "🍔 ЕДА", "кофе", today)
+
+
+async def test_save_rows_reports_rows_and_answers_in_the_given_chat() -> None:
+    update, context, _ = make_chat("", {})
+    result = await messages.save_rows(
+        context, update.effective_chat, [coffee_row()], [], "app:1"
+    )
+    assert (result.written, result.first, result.last) == (1, 4169, 4169)
+    assert result.lines[0].startswith("✅ 48 000 UZS • 🍔 ЕДА (кофе)")
+    assert summary(update) == "\n".join(result.lines)
+    assert context.user_data["seen_inputs"]["app:1"]["rows"] == (4169, 4169)
+    assert context.user_data["last_write"]["fingerprint"] == "app:1"
+
+
+async def test_save_rows_failure_is_reported_and_not_remembered() -> None:
+    class BrokenSheets(FakeSheets):
+        def append_transactions(self, rows: list[Any]) -> tuple[int, int]:
+            raise ConnectionError("Google is down")
+
+    update, context, _ = make_chat("", {})
+    context.bot_data["gs_service"] = BrokenSheets()
+    result = await messages.save_rows(
+        context, update.effective_chat, [coffee_row()], [], "app:2"
+    )
+    assert (result.written, result.first, result.last) == (0, None, None)
+    assert "app:2" not in context.user_data.get("seen_inputs", {})
+    assert summary(update).startswith("❌ Не записал в Google Таблицу")
+
+
+async def test_cards_keyboard_opens_the_mini_app_with_a_fresh_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "WEBAPP_URL", "https://budget.onrender.com/app/")
+    update, context, _ = make_chat("48000 латте", manual_state())
+    await messages.text_handler(update, context)
+    [button] = summary_call(update).kwargs["reply_markup"].keyboard[-1]
+    prefix = "https://budget.onrender.com/app/?launch="
+    assert button.web_app.url.startswith(prefix)
+    token = button.web_app.url.removeprefix(prefix)
+    assert check_launch_token(token, config.TELEGRAM_TOKEN).id == 1  # чат make_chat

@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+/* Цвета темы Telegram; запасные — для браузера вне Telegram (npm run dev) */
+@theme inline {
+  --color-bg: var(--tg-theme-bg-color, #ffffff);
+  --color-text: var(--tg-theme-text-color, #1f2328);
+  --color-hint: var(--tg-theme-hint-color, #8a8f98);
+  --color-link: var(--tg-theme-link-color, #2481cc);
+  --color-button: var(--tg-theme-button-color, #2481cc);
+  --color-button-text: var(--tg-theme-button-text-color, #ffffff);
+  --color-section: var(--tg-theme-secondary-bg-color, #f1f3f5);
+  --color-danger: var(--tg-theme-destructive-text-color, #e5484d);
+  /* статусы плана — средние тона, читаются и в светлой, и в тёмной теме */
+  --color-ok: #30a46c;
+  --color-warn: #f5a524;
+  --color-over: #e5484d;
+  --color-off: #8a8f98;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+body {
+  margin: 0;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  padding: var(--tg-content-safe-area-inset-top, 0px)
+    var(--tg-content-safe-area-inset-right, 0px)
+    var(--tg-content-safe-area-inset-bottom, 0px)
+    var(--tg-content-safe-area-inset-left, 0px);
+  -webkit-tap-highlight-color: transparent;
+}

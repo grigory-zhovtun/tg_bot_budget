@@ -13,6 +13,7 @@ from app.domain import (
     SheetRow,
     Skipped,
     build_row,
+    entry_row,
     manual_row,
     parse_day,
     parse_manual_entry,
@@ -284,3 +285,21 @@ def test_manual_row_sign(text: str, category: str, expected: float) -> None:
     row = manual_row(text, "VISA 9120 UZS", category, "кофе", TODAY)
     assert row is not None
     assert (row.amount, row.currency, row.day) == (expected, "UZS", TODAY)
+
+
+@pytest.mark.parametrize(
+    ("category", "incoming", "expected"),
+    [
+        ("🍔 ЕДА", False, 48000.0),  # расход — плюс
+        ("💰 ДОХОДЫ", False, 48000.0),  # доход — плюс
+        ("💳 СЧЕТА", True, -48000.0),  # приход, который не доход, — минус
+    ],
+)
+def test_entry_row_signs_like_a_manual_entry(
+    category: str, incoming: bool, expected: float
+) -> None:
+    row = entry_row(
+        48000.0, incoming, "латте", "VISA 4058 USD", category, "кофе", TODAY
+    )
+    assert (row.amount, row.currency, row.source) == (expected, "USD", "VISA 4058 USD")
+    assert (row.day, row.comment, row.category) == (TODAY, "латте", category)

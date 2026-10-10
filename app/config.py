@@ -52,6 +52,13 @@ PORT = int(os.getenv("PORT", "8443"))
 LOCAL_RUN = os.getenv("LOCAL_RUN", "False").lower() == "true"
 # Опрос снимает вебхук: при стоящем вебхуке опрашивать только с FORCE_POLLING=true
 FORCE_POLLING = os.getenv("FORCE_POLLING", "False").lower() == "true"
+# Mini App: собранная страница и её адрес (кнопка «📱 Приложение» под картами)
+WEBAPP_DIST = BASE_DIR / "webapp" / "dist"
+WEBAPP_URL = (
+    f"{WEBHOOK_URL.rstrip('/')}/app/"
+    if WEBHOOK_URL and not LOCAL_RUN and WEBAPP_DIST.is_dir()
+    else None
+)
 
 # AI
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")

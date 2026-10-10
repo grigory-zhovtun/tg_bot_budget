@@ -6,12 +6,13 @@ import tempfile
 import time
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
-from telegram import File, Message, Update
+from telegram import Chat, File, Message, Update
 from telegram.constants import ReactionEmoji
 from telegram.ext import ContextTypes
 
@@ -36,6 +37,7 @@ from app.handlers.common import (
     clear_tracked_messages,
     premium_icons,
     show_main_menu,
+    sources_keyboard,
     track_message,
 )
 from app.services.analytics_service import TRANSFERS_GROUP
@@ -44,7 +46,6 @@ from app.statements import is_kapitalbank_statement, parse_statement, pdf_text
 from app.utils.keyboards import (
     category_prompt,
     generate_categories_keyboard,
-    generate_sources_keyboard,
     with_icon,
 )
 
@@ -97,7 +98,9 @@ def input_fingerprint(
     return "text:" + hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
 
-def _seen(context: ContextTypes.DEFAULT_TYPE, fingerprint: str | None) -> dict | None:
+def seen_input(
+    context: ContextTypes.DEFAULT_TYPE, fingerprint: str | None
+) -> dict | None:
     """Запись о том, что этот вход уже записан в таблицу (не старше недели)."""
     if fingerprint is None:
         return None
@@ -163,7 +166,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             # текст Telegram отвергает (Message_empty) — показываем выбранную карту
             msg1 = await update.effective_chat.send_message(
                 f"💳 {clean_text}",
-                reply_markup=generate_sources_keyboard(sources, clean_text),
+                reply_markup=sources_keyboard(
+                    context, update.effective_chat.id, clean_text
+                ),
             )
             track_message(context, msg1)
             msg2 = await update.effective_chat.send_message(
@@ -191,7 +196,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 track_message(context, msg)
             else:
                 msg = await update.effective_chat.send_message(
-                    CHOOSE_SOURCE, reply_markup=generate_sources_keyboard(sources)
+                    CHOOSE_SOURCE,
+                    reply_markup=sources_keyboard(context, update.effective_chat.id),
                 )
                 track_message(context, msg)
             return
@@ -211,7 +217,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if row is not None:
             await _delete_quietly(update.message)
-            await _save_rows(update, context, [row], [])
+            await save_rows(context, update.effective_chat, [row], [])
             return
 
     # 4. AI Parsing (Fallthrough)
@@ -225,7 +231,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     fingerprint = input_fingerprint(
         msg_text, update.message.photo[-1].file_unique_id if is_photo else None
     )
-    if entry := _seen(context, fingerprint):
+    if entry := seen_input(context, fingerprint):
         await _report_duplicate(update, context, entry)
         return
 
@@ -269,9 +275,12 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             items = result if isinstance(result, list) else [result]
 
         rows, skipped = await _to_rows(items, context, current_source)
-        written = await _save_rows(update, context, rows, skipped, fingerprint)
+        result = await save_rows(
+            context, update.effective_chat, rows, skipped, fingerprint
+        )
         await live.react(
-            message, ReactionEmoji.THUMBS_UP if written else ReactionEmoji.THINKING_FACE
+            message,
+            ReactionEmoji.THUMBS_UP if result.written else ReactionEmoji.THINKING_FACE,
         )
 
     except Exception as e:
@@ -347,16 +356,32 @@ async def _plan_feedback(
         return []
 
 
-async def _save_rows(
-    update: Update,
+@dataclass(frozen=True)
+class SaveResult:
+    """Итог записи: сколько строк записано, их номера в fact и строки сводки."""
+
+    written: int
+    first: int | None
+    last: int | None
+    lines: tuple[str, ...]
+
+
+async def save_rows(
     context: ContextTypes.DEFAULT_TYPE,
+    chat: Chat,
     rows: Sequence[SheetRow],
     skipped: Sequence[Skipped],
     fingerprint: str | None = None,
-) -> int:
-    """Записать строки в fact, обновить остатки, показать сводку; сколько записано."""
+) -> SaveResult:
+    """Записать строки в fact, обновить остатки, показать сводку в chat.
+
+    Общая для чата и Mini App: под сводкой — «✏️ Исправить запись» и «↩️ Отменить
+    запись», последняя запись и отпечаток входа — в user_data (для /undo и повторов).
+    """
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
     lines: list[str] = []
+    first: int | None = None
+    last: int | None = None
     if rows:
         try:
             first, last = await asyncio.to_thread(gs_service.append_transactions, rows)
@@ -417,10 +442,10 @@ async def _save_rows(
     # Clear specific manual selection state
     context.user_data.pop("category", None)
     context.user_data.pop("subcategory", None)
-    await clear_tracked_messages(context, update.effective_chat.id)
+    await clear_tracked_messages(context, chat.id)
     # после записи под сводкой — «✏️ Исправить запись» и «↩️ Отменить запись»
-    await show_main_menu(update, context, "\n".join(lines), actions=bool(rows))
-    return len(rows)
+    await show_main_menu(chat, context, "\n".join(lines), actions=bool(rows))
+    return SaveResult(len(rows), first, last, tuple(lines))
 
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -478,7 +503,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_chat.send_message("AI сервис не настроен.")
             return
         fingerprint = input_fingerprint(None, document.file_unique_id)
-        if entry := _seen(context, fingerprint):
+        if entry := seen_input(context, fingerprint):
             await _report_duplicate(update, context, entry)
             return
 
@@ -499,7 +524,7 @@ async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         items = result if isinstance(result, list) else [result]
         rows, skipped = await _to_rows(items, context, context.user_data.get("source"))
-        await _save_rows(update, context, rows, skipped, fingerprint)
+        await save_rows(context, update.effective_chat, rows, skipped, fingerprint)
 
     except Exception as e:
         logger.exception("Document processing failed")

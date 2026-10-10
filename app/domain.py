@@ -448,6 +448,28 @@ def parse_manual_entry(text: str) -> tuple[float, bool, str] | None:
     return number, sign == "+", (comment or "").strip()
 
 
+def entry_row(
+    amount: float,
+    incoming: bool,
+    comment: str,
+    source: str,
+    category: str,
+    subcategory: str,
+    day: date,
+) -> SheetRow:
+    """Строка ручного ввода по готовой сумме: из текста в чате или из формы Mini App."""
+    direction = Direction.TRANSFER_IN if incoming else Direction.EXPENSE
+    return SheetRow(
+        day=day,
+        category=category,
+        subcategory=subcategory,
+        amount=signed_amount(amount, direction, category),
+        comment=comment,
+        currency=currency_of(source),
+        source=source,
+    )
+
+
 def manual_row(
     text: str,
     source: str,
@@ -460,13 +482,4 @@ def manual_row(
     if parsed is None:
         return None
     amount, incoming, comment = parsed
-    direction = Direction.TRANSFER_IN if incoming else Direction.EXPENSE
-    return SheetRow(
-        day=now,
-        category=category,
-        subcategory=subcategory,
-        amount=signed_amount(amount, direction, category),
-        comment=comment,
-        currency=currency_of(source),
-        source=source,
-    )
+    return entry_row(amount, incoming, comment, source, category, subcategory, now)

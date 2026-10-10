@@ -19,6 +19,9 @@ ruff check . && black --check . && pytest -q
 
 # Run (web service when WEBHOOK_URL/RENDER_EXTERNAL_URL is set; otherwise polls — never while a webhook is set, unless FORCE_POLLING=True)
 python -m app.main
+
+# Mini App
+cd webapp && npm ci && npm run lint && npm test && npm run build
 ```
 
 ## Architecture
@@ -34,7 +37,9 @@ app/
 ├── statements.py        # Kapitalbank PDF statements: parsing, own-transfer pairs, categories, reconcile with fact
 ├── web/
 │   ├── server.py        # Starlette: POST /telegram (webhook → PTB update_queue), GET /health, security headers, PTB lifespan
-│   └── auth.py          # Mini App auth: initData (HMAC with the bot token), signed launch links for the keyboard button, webhook secret
+│   ├── auth.py          # Mini App auth: initData (HMAC with the bot token), signed launch links for the keyboard button, webhook secret
+│   ├── api.py           # /api/bootstrap (catalog from bot_data), /api/expenses (entry_row → save_rows, idempotent by entry_id), /api/expenses/undo
+│   └── schemas.py       # Pydantic models of the API
 ├── handlers/
 │   ├── common.py        # /start, keyboard helpers, message tracking
 │   ├── admin.py         # /reboot (reload categories from sheets)
@@ -57,12 +62,15 @@ app/
 │   └── day_budget.py    # Daily limit from the month tab forecast block, frozen money, morning text
 └── utils/
     └── keyboards.py     # Keyboards: icons from system!D (`with_icon`), prompts naming card/choice (inline buttons are as wide as the message), `action(..., style)` coloured buttons
+webapp/                  # Mini App: React + TS + Tailwind (Vite), served at /app/; src/entry — entry screen, src/api.ts — API client
 tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 ```
 
 ## Key Data Flows
 
 **Manual Entry**: /start → source → category → subcategory → "amount comment" (`+` prefix = incoming money) → `domain.manual_row` → `fact`
+
+**Mini App entry**: «📱 Приложение» (cards keyboard, URL with a signed launch token) or the home-screen icon (initData) → `GET /api/bootstrap` → tiles and keypad → `POST /api/expenses` → `domain.entry_row` → `messages.save_rows` (the same summary and buttons as a chat entry; `app:<entry_id>` in `seen_inputs`)
 
 **AI Parsing**: text/photo/document → `GeminiService.parse_transaction()` → each item validated by `domain.ParsedTransaction` → `domain.build_row` (source by card digits, currency conversion with rates from `system!H2:I10`, category/subcategory must exist in `system`, otherwise "🚧 РАЗНОЕ / неучтенка") → one `append_transactions` call → one summary message
 
