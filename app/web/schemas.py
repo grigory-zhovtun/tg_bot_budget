@@ -80,3 +80,67 @@ class ExpenseOut(ApiModel):
 
 class MessageOut(ApiModel):
     message: str
+
+
+class PlanItemOut(ApiModel):
+    name: str
+    icon: str
+    plan: float
+    fact: float
+
+
+class GroupPlanOut(ApiModel):
+    name: str
+    plan: float
+    fact: float
+    items: list[PlanItemOut]
+
+
+class DayPointOut(ApiModel):
+    day: date
+    plan: float
+    fact: float | None
+
+
+class ForecastItemOut(ApiModel):
+    name: str
+    day: int
+    amount: float
+    currency: str
+    uzs: float
+
+
+class SubscriptionOut(ApiModel):
+    name: str
+    day: int
+    amount: float
+    currency: str
+    uzs: float
+    state: Literal["charged", "twice", "expected", "missed"]
+
+
+class FrozenOut(ApiModel):
+    amount: float
+    currency: str
+    uzs: float
+    change: float
+
+
+class DashboardOut(ApiModel):
+    """Сводка: суммы в сумах; у пунктов списка и подписок amount — в их валюте."""
+
+    status: Literal["ok", "no_month_tab", "no_forecast"]
+    month: str
+    today: date
+    limit: float | None = None
+    spent_today: float | None = None
+    left_today: float | None = None
+    plan_per_day: float | None = None
+    days_left: int | None = None
+    balance: float | None = None
+    planned_balance: float | None = None
+    frozen: FrozenOut | None = None
+    groups: list[GroupPlanOut] = []
+    daily: list[DayPointOut] = []
+    upcoming: list[ForecastItemOut] = []
+    subscriptions: list[SubscriptionOut] = []

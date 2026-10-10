@@ -3,7 +3,7 @@
 import asyncio
 import time
 from collections import defaultdict
-from datetime import timedelta
+from datetime import date, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -15,9 +15,11 @@ from starlette.testclient import TestClient
 
 from app import config
 from app.domain import entry_row, local_today
+from app.services.dashboard import build_dashboard
 from app.services.google_sheets import row_values
 from app.web.auth import launch_token
 from app.web.server import create_app
+from tests.test_day_budget import RATES, fact_row, frame, plan_row, tab
 from tests.test_messages import (
     CATEGORIES,
     SOURCES,
@@ -317,3 +319,62 @@ def test_day_defaults_to_the_bots_today() -> None:
     )
     assert response.status_code == 200
     assert sheets.rows[0][0] == TODAY.strftime("%d.%m.%Y")
+
+
+class FakeAnalytics:
+    def __init__(self, result: Any = None, error: Exception | None = None) -> None:
+        self.result, self.error = result, error
+
+    def dashboard(self, today: Any) -> Any:
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+def dashboard_for(found: Any = None, error: Exception | None = None) -> Any:
+    application = make_application()
+    application.bot_data["analytics_service"] = FakeAnalytics(found, error)
+    return client_for(application).get("/api/dashboard", headers=auth())
+
+
+def test_dashboard_numbers_come_from_the_month_tab() -> None:
+    spent = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000)
+    found = build_dashboard(frame(spent), tab(), date(2026, 10, 2), RATES, "USD")
+    body = dashboard_for(found).json()
+    assert body["status"] == "ok"
+    assert body["limit"] == pytest.approx(90_000)  # тот же расчёт, что /today
+    assert body["left_today"] == pytest.approx(body["limit"] - body["spent_today"])
+    assert body["frozen"]["currency"] == "USD"
+    assert body["groups"][0]["items"][0] == {
+        "name": "кафе",
+        "icon": "",
+        "plan": 2_600_000,
+        "fact": 0,
+    }
+    assert body["daily"][0] == {
+        "day": "2026-10-01",
+        "plan": 16_900_000,
+        "fact": 16_600_000,
+    }
+    assert [item["name"] for item in body["upcoming"]] == ["Аванс", "Квартплата", "ЗП"]
+
+
+def test_dashboard_without_the_month_tab() -> None:
+    body = dashboard_for(None).json()
+    assert (body["status"], body["groups"]) == ("no_month_tab", [])
+
+
+def test_dashboard_without_the_forecast_block_has_groups_only() -> None:
+    rows = [["Статья"], plan_row("🍔 ЕДА", "кафе", 100, 50)]
+    found = build_dashboard(frame(), rows, date(2026, 10, 2), RATES, "USD")
+    body = dashboard_for(found).json()
+    assert (body["status"], body["limit"], body["daily"]) == ("no_forecast", None, [])
+    assert body["groups"][0]["fact"] == 50
+
+
+def test_dashboard_sheet_failure_is_503() -> None:
+    response = dashboard_for(error=ConnectionError("Google is down"))
+    assert (response.status_code, response.json()["error"]["code"]) == (
+        503,
+        "sheets_unavailable",
+    )

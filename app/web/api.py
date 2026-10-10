@@ -5,6 +5,7 @@
 тем же entry_id не пишет вторую строку.
 """
 
+import asyncio
 import logging
 from datetime import date, timedelta
 from typing import Any
@@ -18,21 +19,29 @@ from telegram.ext import Application, CallbackContext
 
 from app import config
 from app.custom_icons import leading_emoji
-from app.domain import currency_of, entry_row, local_today
+from app.domain import currency_of, entry_row, local_today, month_title
 from app.handlers.messages import save_rows, seen_input
 from app.handlers.undo import undo_last
+from app.services.dashboard import Dashboard
 from app.web.auth import WebUser, authenticate
 from app.web.schemas import (
     BootstrapOut,
+    DashboardOut,
+    DayPointOut,
     ErrorEnvelope,
     ErrorOut,
     ExpenseIn,
     ExpenseOut,
+    ForecastItemOut,
+    FrozenOut,
     GroupOut,
+    GroupPlanOut,
     MessageOut,
+    PlanItemOut,
     RowsOut,
     SourceOut,
     SubcategoryOut,
+    SubscriptionOut,
     UserOut,
 )
 
@@ -122,6 +131,84 @@ def check_entry(entry: ExpenseIn, bot_data: dict[str, Any], today: date) -> set[
     return bad
 
 
+def dashboard_out(
+    found: Dashboard | None, today: date, icons: dict[str, str]
+) -> DashboardOut:
+    """Сводка для экрана; без вкладки месяца — только статус, без прогноза — группы."""
+    month = month_title(today)
+    if found is None:
+        return DashboardOut(status="no_month_tab", month=month, today=today)
+    groups = [
+        GroupPlanOut(
+            name=group.name,
+            plan=group.plan,
+            fact=group.fact,
+            items=[
+                PlanItemOut(
+                    name=line.subcategory,
+                    icon=icons.get(line.subcategory, ""),
+                    plan=line.plan,
+                    fact=line.fact,
+                )
+                for line in group.items
+            ],
+        )
+        for group in found.groups
+    ]
+    budget = found.budget
+    if budget is None:
+        return DashboardOut(
+            status="no_forecast", month=month, today=today, groups=groups
+        )
+    frozen = None
+    if budget.frozen is not None and budget.frozen_currency:
+        frozen = FrozenOut(
+            amount=budget.frozen,
+            currency=budget.frozen_currency,
+            uzs=budget.frozen_uzs,
+            change=budget.frozen_change,
+        )
+    return DashboardOut(
+        status="ok",
+        month=month,
+        today=today,
+        limit=budget.limit,
+        spent_today=budget.spent_today,
+        left_today=budget.limit - budget.spent_today,
+        plan_per_day=budget.plan_per_day,
+        days_left=budget.days_left,
+        balance=budget.balance,
+        planned_balance=budget.planned_balance,
+        frozen=frozen,
+        groups=groups,
+        daily=[
+            DayPointOut(day=point.day, plan=point.plan, fact=point.fact)
+            for point in found.daily
+        ],
+        upcoming=[
+            ForecastItemOut(
+                name=item.name,
+                day=item.day,
+                amount=item.amount,
+                currency=item.currency,
+                uzs=item.uzs,
+            )
+            for item in found.upcoming
+        ],
+        subscriptions=[
+            SubscriptionOut(
+                name=sub.name,
+                day=sub.day,
+                amount=sub.amount,
+                currency=sub.currency,
+                uzs=sub.uzs,
+                state=sub.state,
+            )
+            for sub in found.subscriptions
+        ],
+    )
+
+
 def routes(application: Application) -> list[Route]:
     """Маршруты /api/*; application — приложение PTB (данные бота и пользователей)."""
 
@@ -198,8 +285,21 @@ def routes(application: Application) -> list[Route]:
         message = await undo_last(user_context(application, user.id))
         return JSONResponse(MessageOut(message=message).model_dump(mode="json"))
 
+    async def dashboard(request: Request) -> JSONResponse:
+        user = current_user(request)
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        analytics = application.bot_data["analytics_service"]
+        try:
+            found = await asyncio.to_thread(analytics.dashboard, today)
+        except Exception:
+            logger.exception("Dashboard failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        icons: dict[str, str] = application.bot_data.get("icons", {})
+        return JSONResponse(dashboard_out(found, today, icons).model_dump(mode="json"))
+
     return [
         Route("/bootstrap", bootstrap),
         Route("/expenses", add_expense, methods=["POST"]),
         Route("/expenses/undo", undo_expense, methods=["POST"]),
+        Route("/dashboard", dashboard),
     ]
