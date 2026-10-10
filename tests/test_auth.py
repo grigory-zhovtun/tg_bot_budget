@@ -5,7 +5,7 @@ import pytest
 from telegram import Chat
 from telegram.ext import ApplicationHandlerStop
 
-from app.auth import make_gatekeeper, parse_user_ids
+from app.auth import first_user_id, make_gatekeeper, parse_user_ids
 
 
 @pytest.mark.parametrize(
@@ -22,6 +22,22 @@ from app.auth import make_gatekeeper, parse_user_ids
 )
 def test_parse_user_ids(sources: tuple[str | None, ...], expected: set[int]) -> None:
     assert parse_user_ids(*sources) == frozenset(expected)
+
+
+@pytest.mark.parametrize(
+    ("sources", "expected"),
+    [
+        (("900, 100", None), 900),  # владелец — первый в списке, а не наименьший
+        (("", "456"), 456),
+        (("abc 5 7", None), 5),
+        ((None, "  "), None),
+        (("abc", "9"), None),  # первый непустой источник без чисел — владельца нет
+    ],
+)
+def test_owner_is_the_first_listed_id(
+    sources: tuple[str | None, ...], expected: int | None
+) -> None:
+    assert first_user_id(*sources) == expected
 
 
 def make_update(user_id: int | None, *, callback: bool = False) -> SimpleNamespace:

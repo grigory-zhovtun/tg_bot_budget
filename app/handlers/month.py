@@ -13,13 +13,13 @@ logger = logging.getLogger(__name__)
 
 
 def owner_chat_id() -> int | None:
-    """Куда писать владельцу: чат ежедневного отчёта или первый разрешённый id."""
+    """Куда писать владельцу: чат ежедневного отчёта или первый ID из ALLOWED_USER_IDS."""
     if config.ANALYTICS_CHAT_ID:
         try:
             return int(config.ANALYTICS_CHAT_ID)
         except ValueError:
             logger.warning("ANALYTICS_CHAT_ID is not a number")
-    return min(config.ALLOWED_USER_IDS) if config.ALLOWED_USER_IDS else None
+    return config.OWNER_ID
 
 
 def describe(tab: MonthTab) -> str | None:

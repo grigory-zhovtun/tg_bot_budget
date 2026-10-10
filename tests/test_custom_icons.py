@@ -76,6 +76,7 @@ def test_pictures_only_while_the_owner_has_premium() -> None:
 async def test_owner_premium_is_tracked_from_updates(monkeypatch) -> None:
     monkeypatch.setattr(config, "ANALYTICS_CHAT_ID", None)
     monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset({7, 9}))
+    monkeypatch.setattr(config, "OWNER_ID", 7)
     context = SimpleNamespace(bot_data={})
     owner = SimpleNamespace(effective_user=SimpleNamespace(id=7, is_premium=True))
     await main._track_premium(owner, context)
