@@ -307,7 +307,12 @@ def serve(app: Application) -> None:
     logger.info("Starting the web service on port %s...", config.PORT)
     # access-лог выключен: в строке запроса была бы ссылка запуска Mini App
     uvicorn.run(
-        web, host="0.0.0.0", port=config.PORT, access_log=False, log_config=None
+        web,
+        host="0.0.0.0",
+        port=config.PORT,
+        workers=1,  # не WEB_CONCURRENCY: процесс один, user_data в памяти
+        access_log=False,
+        log_config=None,
     )
 
 

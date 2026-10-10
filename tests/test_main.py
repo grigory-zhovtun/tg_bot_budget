@@ -10,6 +10,7 @@ import pytest
 from telegram.ext import CommandHandler, TypeHandler
 
 from app import config, main
+from app.web.auth import webhook_secret
 from tests.test_messages import CATEGORIES, SOURCES, SUBCATEGORIES, FakeSheets
 
 
@@ -234,6 +235,12 @@ def test_serve_runs_one_uvicorn_process_without_access_log(
     monkeypatch.setattr(
         main.uvicorn, "run", lambda web, **options: calls.update(web=web, **options)
     )
+    hooks: dict[str, object] = {}
+
+    def lifespan(app: object, url: str, secret: str, post_init: object) -> None:
+        hooks.update(url=url, secret=secret, post_init=post_init)
+
+    monkeypatch.setattr(main.server, "telegram_lifespan", lifespan)
     monkeypatch.setattr(config, "WEBHOOK_URL", "https://budget.onrender.com/")
     monkeypatch.setattr(config, "WEBHOOK_SECRET", None)
     monkeypatch.setattr(config, "PORT", 10000)
@@ -244,7 +251,12 @@ def test_serve_runs_one_uvicorn_process_without_access_log(
     main.serve(app)
     assert (calls["host"], calls["port"]) == ("0.0.0.0", 10000)
     assert (calls["access_log"], calls["log_config"]) == (False, None)
-    assert "workers" not in calls
+    # uvicorn без workers читает WEB_CONCURRENCY и при >1 не стартует с объектом app
+    assert calls["workers"] == 1
+    assert hooks["url"] == "https://budget.onrender.com/telegram"
+    # секрет из токена: у двух экземпляров во время деплоя он один и тот же
+    assert hooks["secret"] == webhook_secret(config.TELEGRAM_TOKEN)
+    assert hooks["post_init"] is main._post_init
 
 
 def test_build_script_skips_without_the_webapp(tmp_path: Path) -> None:
