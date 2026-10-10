@@ -53,3 +53,17 @@ export function telegram(): WebApp | null {
 export function haptic(type: "error" | "success"): void {
   telegram()?.HapticFeedback.notificationOccurred(type);
 }
+
+/** Ярлык на экран — с Bot API 8.0. */
+export function canUseHomeScreen(app: WebApp | null): app is WebApp {
+  return app !== null && app.isVersionAtLeast("8.0");
+}
+
+/** Открыли по ссылке «…?startapp=home» — сразу предложить ярлык. */
+export function offerHomeScreen(app: WebApp | null): boolean {
+  if (!canUseHomeScreen(app) || app.initDataUnsafe.start_param !== "home") {
+    return false;
+  }
+  app.addToHomeScreen();
+  return true;
+}
