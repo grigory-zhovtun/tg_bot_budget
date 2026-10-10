@@ -16,10 +16,13 @@ from starlette.datastructures import MutableHeaders
 from starlette.middleware import Middleware
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
-from starlette.routing import Route
+from starlette.routing import Mount, Route
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from telegram import Update
 from telegram.ext import Application
+
+from app.web import api
+from app.web.auth import AuthError
 
 logger = logging.getLogger(__name__)
 
@@ -100,10 +103,31 @@ def create_app(
     async def health(_: Request) -> Response:
         return PlainTextResponse("ok")
 
+    async def auth_failed(_: Request, error: Exception) -> Response:
+        if not isinstance(error, AuthError):
+            raise error
+        return api.error_response(error.status, error.code, error.message)
+
+    async def unexpected(request: Request, error: Exception) -> Response:
+        user_id = getattr(request.state, "user_id", None)
+        logger.error(
+            "Request failed for user_id=%s on %s: %s",
+            user_id,
+            request.url.path,
+            type(error).__name__,
+        )
+        return api.error_response(
+            500, "server_error", "Что-то пошло не так — попробуйте ещё раз"
+        )
+
     routes = [
         Route("/telegram", telegram_webhook, methods=["POST"]),
         Route("/health", health),
+        Mount("/api", routes=api.routes(application)),
     ]
     return Starlette(
-        routes=routes, middleware=[Middleware(SecurityHeaders)], lifespan=lifespan
+        routes=routes,
+        middleware=[Middleware(SecurityHeaders)],
+        lifespan=lifespan,
+        exception_handlers={AuthError: auth_failed, Exception: unexpected},
     )
