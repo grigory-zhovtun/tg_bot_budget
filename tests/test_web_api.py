@@ -14,7 +14,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from app import config
-from app.domain import local_today
+from app.domain import entry_row, local_today
+from app.services.google_sheets import row_values
 from app.web.auth import launch_token
 from app.web.server import create_app
 from tests.test_messages import (
@@ -247,3 +248,72 @@ def test_undo_touches_only_the_users_own_write() -> None:
     assert not hasattr(sheets, "undone")
     mine = client.post("/api/expenses/undo", headers=auth(OWNER)).json()
     assert mine["message"] == "↩️ Удалил из таблицы: строка 4169."
+
+
+class SharedSheet(FakeSheets):
+    """Строки fact с номерами: удаление сдвигает нижние строки вверх, как в таблице."""
+
+    def delete_rows_if_match(self, first: int, last: int, rows: list[Any]) -> bool:
+        start, end = first - 4169, last - 4169 + 1
+        current = self.rows[start:end]  # чтение и удаление — разные запросы к Google
+        time.sleep(0.1)
+        if current != [row_values(row) for row in rows]:
+            return False
+        del self.rows[start:end]
+        self.last_row -= end - start
+        return True
+
+
+def comments(sheets: FakeSheets) -> list[str]:
+    return [row[5] for row in sheets.rows]
+
+
+async def test_double_undo_never_deletes_someone_elses_row() -> None:
+    sheets = SharedSheet()
+    transport = httpx.ASGITransport(app=create_app(make_application(sheets), "s"))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post("/api/expenses", json=expense(comment="мой"), headers=auth())
+        await client.post(
+            "/api/expenses", json=expense(comment="её"), headers=auth(WIFE)
+        )
+        answers = await asyncio.gather(
+            client.post("/api/expenses/undo", headers=auth()),
+            client.post("/api/expenses/undo", headers=auth()),
+        )
+    assert comments(sheets) == ["её"]
+    assert sorted(a.json()["message"].split()[0] for a in answers) == [
+        "Нечего",
+        "↩️",
+    ]
+
+
+async def test_undos_of_two_people_at_once_touch_only_their_rows() -> None:
+    sheets = SharedSheet()
+    transport = httpx.ASGITransport(app=create_app(make_application(sheets), "s"))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post("/api/expenses", json=expense(comment="мой"), headers=auth())
+        await client.post(
+            "/api/expenses", json=expense(comment="её"), headers=auth(WIFE)
+        )
+        foreign = row_values(
+            entry_row(1.0, False, "чужая", SOURCES[0], "🚧 РАЗНОЕ", "неучтенка", TODAY)
+        )
+        sheets.rows.append(foreign)  # строка из выписки, её никто не отменял
+        sheets.last_row += 1
+        await asyncio.gather(
+            client.post("/api/expenses/undo", headers=auth()),
+            client.post("/api/expenses/undo", headers=auth(WIFE)),
+        )
+    assert "мой" not in comments(sheets)
+    assert "чужая" in comments(sheets)
+
+
+def test_day_defaults_to_the_bots_today() -> None:
+    sheets = FakeSheets()
+    body = expense()
+    del body["day"]  # дату не трогали — её ставит бот, а не часы телефона
+    response = client_for(make_application(sheets)).post(
+        "/api/expenses", json=body, headers=auth()
+    )
+    assert response.status_code == 200
+    assert sheets.rows[0][0] == TODAY.strftime("%d.%m.%Y")

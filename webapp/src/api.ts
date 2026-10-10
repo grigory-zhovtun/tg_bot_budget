@@ -33,7 +33,7 @@ export interface ExpenseInput {
   subcategory: string;
   amount: string;
   comment: string;
-  day: string;
+  day?: string; // нет — сегодня по часам бота
 }
 
 export interface ExpenseResult {
@@ -88,6 +88,9 @@ function isErrorBody(body: unknown): body is ErrorBody {
   );
 }
 
+// Таблица Google иногда думает долго, но не бесконечно ждём ответа
+export const REQUEST_TIMEOUT_MS = 25_000;
+
 export async function request<T>(
   path: string,
   init: RequestInit = {},
@@ -100,15 +103,25 @@ export async function request<T>(
     "Content-Type": "application/json",
   };
   if (auth) headers.Authorization = auth;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let response: Response;
   try {
-    response = await fetch(`/api${path}`, { ...init, headers });
+    response = await fetch(`/api${path}`, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
   } catch {
-    throw new ApiError(
-      0,
-      "network",
-      "Нет связи с сервером — проверьте интернет",
-    );
+    throw controller.signal.aborted
+      ? new ApiError(
+          0,
+          "timeout",
+          "Сервер долго не отвечает — попробуйте ещё раз",
+        )
+      : new ApiError(0, "network", "Нет связи с сервером — проверьте интернет");
+  } finally {
+    clearTimeout(timer);
   }
   const body: unknown = await response.json().catch(() => null);
   if (!response.ok) {

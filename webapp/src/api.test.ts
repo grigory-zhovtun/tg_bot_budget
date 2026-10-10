@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, authHeader, request } from "./api";
+import { ApiError, authHeader, REQUEST_TIMEOUT_MS, request } from "./api";
 
 describe("authHeader", () => {
   it("prefers Telegram initData", () => {
@@ -80,5 +80,22 @@ describe("request", () => {
         headers: expect.objectContaining({ Authorization: "Launch 42.1.sig" }),
       }),
     );
+  });
+
+  it("gives up on a server that does not answer", async () => {
+    vi.useFakeTimers();
+    const hanging = vi.fn(
+      (_: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", hanging);
+    const pending = request("/dashboard").catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
+    expect(await pending).toMatchObject({ status: 0, code: "timeout" });
+    vi.useRealTimers();
   });
 });

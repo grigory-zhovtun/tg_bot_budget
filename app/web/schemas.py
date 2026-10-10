@@ -64,7 +64,7 @@ class ExpenseIn(ApiModel):
     subcategory: str = Field(min_length=1, max_length=100)
     amount: Decimal = Field(gt=0, le=Decimal(10) ** 12, decimal_places=2)
     comment: str = Field(default="", max_length=200)
-    day: date
+    day: date | None = None  # нет — сегодня по часам бота, а не телефона
 
 
 class RowsOut(ApiModel):

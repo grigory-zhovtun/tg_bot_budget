@@ -115,7 +115,9 @@ def check_entry(entry: ExpenseIn, bot_data: dict[str, Any], today: date) -> set[
         entry.category, []
     ):
         bad.add("subcategory")
-    if not today - timedelta(days=MAX_DAYS_BACK) <= entry.day <= today:
+    if entry.day is not None and not (
+        today - timedelta(days=MAX_DAYS_BACK) <= entry.day <= today
+    ):
         bad.add("day")
     return bad
 
@@ -170,7 +172,7 @@ def routes(application: Application) -> list[Route]:
                 entry.source,
                 entry.category,
                 entry.subcategory,
-                entry.day,
+                entry.day or today,
             )
             chat = private_chat(application.bot, user.id)
             result = await save_rows(context, chat, [row], [], fingerprint)

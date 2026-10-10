@@ -58,13 +58,15 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
   const [sub, setSub] = useState<Subcategory | null>(null);
   const [amount, setAmount] = useState("");
   const [comment, setComment] = useState("");
-  const [day, setDay] = useState(boot.today);
+  const [day, setDay] = useState<string | null>(null); // null — сегодня по боту
   const [entryId, setEntryId] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<ExpenseResult | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [undoing, setUndoing] = useState(false);
   const inFlight = useRef(false); // второй тап до перерисовки не шлёт второй запрос
+  const undoInFlight = useRef(false);
 
   // справочник могли перечитать: карту, которой больше нет, не держим
   const source = boot.sources.some((s) => s.name === chosenSource)
@@ -95,7 +97,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
         subcategory: sub.name,
         amount: apiAmount(amount),
         comment: comment.trim(),
-        day,
+        ...(day ? { day } : {}),
       })
       .then((result) => {
         haptic("success");
@@ -193,25 +195,34 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
     setSub(next);
     setAmount("");
     setComment("");
-    setDay(boot.today);
+    setDay(null);
     setEntryId(crypto.randomUUID());
     setStep("amount");
   }
 
   function undo() {
-    api.undo().then(
-      (result) => {
-        setNotice(result.message);
-        setDone(null);
-      },
-      (reason: unknown) => {
-        setNotice(
-          reason instanceof ApiError
-            ? reason.message
-            : "Не получилось отменить",
-        );
-      },
-    );
+    if (undoInFlight.current) return; // двойной тап — одна отмена
+    undoInFlight.current = true;
+    setUndoing(true);
+    api
+      .undo()
+      .then(
+        (result) => {
+          setNotice(result.message);
+          setDone(null);
+        },
+        (reason: unknown) => {
+          setNotice(
+            reason instanceof ApiError
+              ? reason.message
+              : "Не получилось отменить",
+          );
+        },
+      )
+      .finally(() => {
+        undoInFlight.current = false;
+        setUndoing(false);
+      });
   }
 
   const lines = done
@@ -237,7 +248,9 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
           ))}
           <button
             type="button"
-            className="self-start text-danger"
+            className="self-start text-danger disabled:opacity-50"
+            disabled={undoing}
+            aria-busy={undoing}
             onClick={undo}
           >
             ↩️ Отменить
@@ -283,14 +296,17 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
             />
           </label>
           <label className="flex items-center justify-between gap-3 text-sm text-hint">
-            <span>Дата: {dayLabel(day, boot.today)}</span>
+            <span>Дата: {dayLabel(day ?? boot.today, boot.today)}</span>
             <input
               type="date"
               className="rounded-xl bg-section px-3 py-2 text-text"
-              value={day}
+              value={day ?? boot.today}
               min={shiftDay(boot.today, -MAX_DAYS_BACK)}
               max={boot.today}
-              onChange={(event) => setDay(event.target.value || boot.today)}
+              onChange={(event) => {
+                const picked = event.target.value;
+                setDay(picked && picked !== boot.today ? picked : null);
+              }}
             />
           </label>
           <Keypad

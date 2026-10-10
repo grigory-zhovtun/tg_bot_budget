@@ -57,8 +57,8 @@ describe("EntryScreen", () => {
       subcategory: "кофе",
       amount: "48000",
       comment: "латте",
-      day: "2026-10-10",
     });
+    expect(sent(api).day).toBeUndefined(); // дату ставит бот
     expect(await screen.findByText(/✅ 48 000 UZS/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "ЕДА" })).toBeTruthy();
   });
@@ -72,7 +72,22 @@ describe("EntryScreen", () => {
     await fillCoffee(user);
     expect(screen.getByText("Дата: Сегодня")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /Записать/ }));
-    expect(sent(api).day).toBe("2026-10-10");
+    // не отправляем день вообще: приложение могло пролежать открытым до утра,
+    // и сегодняшнее число знает только бот
+    expect(sent(api).day).toBeUndefined();
+  });
+
+  it("sends the date the user picked", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    renderEntry(api);
+    await fillCoffee(user);
+    fireEvent.change(screen.getByLabelText(/Дата/), {
+      target: { value: "2026-10-09" },
+    });
+    expect(screen.getByText("Дата: Вчера")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    expect(sent(api).day).toBe("2026-10-09");
   });
 
   it("keeps the input and the entry id when the sheet is down", async () => {
@@ -166,6 +181,28 @@ describe("EntryScreen", () => {
       await screen.findByRole("button", { name: "↩️ Отменить" }),
     );
     expect(api.undo).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByText("↩️ Удалил из таблицы: строка 4169."),
+    ).toBeTruthy();
+  });
+
+  it("undoes once even when «Отменить» is tapped twice", async () => {
+    let finish: (result: { message: string }) => void = () => undefined;
+    const undo = vi.fn<Api["undo"]>(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ undo }));
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    const button = await screen.findByRole("button", { name: "↩️ Отменить" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(undo).toHaveBeenCalledTimes(1);
+    finish({ message: "↩️ Удалил из таблицы: строка 4169." });
     expect(
       await screen.findByText("↩️ Удалил из таблицы: строка 4169."),
     ).toBeTruthy();
