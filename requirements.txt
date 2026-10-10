@@ -12,3 +12,5 @@ xlrd==2.0.2
 pypdf==6.19.0
 matplotlib==3.11.2
 APScheduler==3.11.3
+starlette==1.7.0
+uvicorn==0.54.0

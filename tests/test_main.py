@@ -1,13 +1,16 @@
 """Сборка приложения без сети: доступ, обработчики, ежедневный отчёт."""
 
 import logging
+import subprocess
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from telegram.ext import CommandHandler, TypeHandler
 
 from app import config, main
+from app.web.auth import webhook_secret
 from tests.test_messages import CATEGORIES, SOURCES, SUBCATEGORIES, FakeSheets
 
 
@@ -179,3 +182,89 @@ def test_icons_and_last_card_reach_the_handlers(
     )
     assert app.bot_data["icons"] == {"кофе": "☕"}
     assert app.bot_data["last_source"] == "VISA 9120 UZS"
+
+
+def test_webhook_mode_has_no_updater(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset({42}))
+    web = main.build_application(
+        FakeSheets(), CATEGORIES, SUBCATEGORIES, SOURCES, webhook=True
+    )
+    polling = main.build_application(FakeSheets(), CATEGORIES, SUBCATEGORIES, SOURCES)
+    assert web.updater is None  # обновления приходят на /telegram
+    assert polling.updater is not None
+
+
+@pytest.mark.parametrize(
+    ("url", "local", "expected"),
+    [
+        ("https://budget.onrender.com", False, True),
+        ("https://budget.onrender.com", True, False),
+        (None, False, False),
+    ],
+)
+def test_web_mode_needs_an_external_url(
+    monkeypatch: pytest.MonkeyPatch, url: str | None, local: bool, expected: bool
+) -> None:
+    monkeypatch.setattr(config, "WEBHOOK_URL", url)
+    monkeypatch.setattr(config, "LOCAL_RUN", local)
+    assert main.web_mode() is expected
+
+
+def test_polling_never_takes_over_a_webhook(caplog: pytest.LogCaptureFixture) -> None:
+    app, wait = SimpleNamespace(run_polling=Mock()), Mock()
+    main.start_polling(app, "https://budget.onrender.com/telegram", False, wait)
+    app.run_polling.assert_not_called()  # PTB при старте опроса снял бы вебхук
+    wait.assert_called_once()
+    assert "polling is off" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("url", "force"), [("", False), ("https://budget.onrender.com/telegram", True)]
+)
+def test_polling_starts_without_a_webhook_or_when_forced(url: str, force: bool) -> None:
+    app, wait = SimpleNamespace(run_polling=Mock()), Mock()
+    main.start_polling(app, url, force, wait)
+    app.run_polling.assert_called_once()
+    wait.assert_not_called()
+
+
+def test_serve_runs_one_uvicorn_process_without_access_log(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(
+        main.uvicorn, "run", lambda web, **options: calls.update(web=web, **options)
+    )
+    hooks: dict[str, object] = {}
+
+    def lifespan(app: object, url: str, secret: str, post_init: object) -> None:
+        hooks.update(url=url, secret=secret, post_init=post_init)
+
+    monkeypatch.setattr(main.server, "telegram_lifespan", lifespan)
+    monkeypatch.setattr(config, "WEBHOOK_URL", "https://budget.onrender.com/")
+    monkeypatch.setattr(config, "WEBHOOK_SECRET", None)
+    monkeypatch.setattr(config, "PORT", 10000)
+    monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset({42}))
+    app = main.build_application(
+        FakeSheets(), CATEGORIES, SUBCATEGORIES, SOURCES, webhook=True
+    )
+    main.serve(app)
+    assert (calls["host"], calls["port"]) == ("0.0.0.0", 10000)
+    assert (calls["access_log"], calls["log_config"]) == (False, None)
+    # uvicorn без workers читает WEB_CONCURRENCY и при >1 не стартует с объектом app
+    assert calls["workers"] == 1
+    assert hooks["url"] == "https://budget.onrender.com/telegram"
+    # секрет из токена: у двух экземпляров во время деплоя он один и тот же
+    assert hooks["secret"] == webhook_secret(config.TELEGRAM_TOKEN)
+    assert hooks["post_init"] is main._post_init
+
+
+def test_build_script_skips_without_the_webapp(tmp_path: Path) -> None:
+    script = tmp_path / "scripts" / "build_webapp.sh"
+    script.parent.mkdir()
+    script.write_text(Path("scripts/build_webapp.sh").read_text())
+    result = subprocess.run(
+        ["bash", str(script)], capture_output=True, text=True, check=False
+    )
+    assert result.returncode == 0
+    assert "No webapp" in result.stdout

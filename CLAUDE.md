@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Telegram Finance Bot for personal finance tracking. Records income/expenses to Google Sheets with AI-powered transaction parsing via Google Gemini. Supports manual entry, SMS parsing, image/receipt recognition, and scheduled analytics. Deployed on Render as a background worker (polling), Python 3.12.
+Telegram Finance Bot for personal finance tracking. Records income/expenses to Google Sheets with AI-powered transaction parsing via Google Gemini. Supports manual entry, SMS parsing, image/receipt recognition, and scheduled analytics. Deployed on Render as a web service (Telegram webhook, later the Mini App API and page; uvicorn + Starlette), Python 3.12.
 
 ## Commands
 
@@ -17,7 +17,7 @@ pip install -r requirements-dev.txt
 # Checks (the same run in CI)
 ruff check . && black --check . && pytest -q
 
-# Run (polls Telegram unless WEBHOOK_URL is set)
+# Run (web service when WEBHOOK_URL/RENDER_EXTERNAL_URL is set; otherwise polls — never while a webhook is set, unless FORCE_POLLING=True)
 python -m app.main
 ```
 
@@ -32,6 +32,9 @@ app/
 ├── errors.py            # Safe one-line error texts for the chat, application error handler
 ├── custom_icons.py      # Custom emoji pictures for buttons: pack_map/match by the plain emoji (system!D, group names)
 ├── statements.py        # Kapitalbank PDF statements: parsing, own-transfer pairs, categories, reconcile with fact
+├── web/
+│   ├── server.py        # Starlette: POST /telegram (webhook → PTB update_queue), GET /health, security headers, PTB lifespan
+│   └── auth.py          # Mini App auth: initData (HMAC with the bot token), signed launch links for the keyboard button, webhook secret
 ├── handlers/
 │   ├── common.py        # /start, keyboard helpers, message tracking
 │   ├── admin.py         # /reboot (reload categories from sheets)
@@ -93,7 +96,7 @@ Optional:
 - `IGNORED_CARDS` - last 4 digits of cards the screenshot check skips (e.g. a child's card)
 - `MORNING_TIME` - morning message with the daily limit to the owner, default `08:00`, `off` disables it; `FROZEN_CURRENCY` (default `USD`, `off` — none) - cards in this currency are savings
 - `WEEKLY_DIGEST_TIME` - Sunday digest to the owner (`ANALYTICS_CHAT_ID` or the first allowed id), default `20:00`, `off` disables it
-- `WEBHOOK_URL` (or Render's `RENDER_EXTERNAL_URL`), `WEBHOOK_SECRET`, `PORT`, `LOCAL_RUN=True`
+- `WEBHOOK_URL` (or Render's `RENDER_EXTERNAL_URL`) — web service mode; `WEBHOOK_SECRET` (default: derived from the bot token), `PORT`, `LOCAL_RUN=True` (poll locally), `FORCE_POLLING=True` (poll even while a webhook is set — takes the bot over from the web service)
 
 ## Code Patterns
 
