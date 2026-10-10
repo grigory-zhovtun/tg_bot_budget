@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ApiError,
   type Api,
   type Bootstrap,
+  type Dashboard,
   type ExpenseResult,
   type Group,
   type Subcategory,
@@ -17,6 +18,8 @@ import {
   type Key,
 } from "./amount";
 import Keypad from "./Keypad";
+import { groupColor } from "./palette";
+import { planIndex } from "./plan";
 import SourceChips from "./SourceChips";
 import { GroupTiles, SubTiles } from "./Tiles";
 
@@ -41,11 +44,15 @@ function Header({
   return (
     <div className="flex items-center gap-3">
       {onBack && (
-        <button type="button" className="text-link" onClick={onBack}>
+        <button
+          type="button"
+          className="shrink-0 whitespace-nowrap text-link"
+          onClick={onBack}
+        >
           ← Назад
         </button>
       )}
-      <h2 className="font-semibold">{title}</h2>
+      <h2 className="text-xl font-bold">{title}</h2>
     </div>
   );
 }
@@ -67,6 +74,8 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
   const [undoing, setUndoing] = useState(false);
   const inFlight = useRef(false); // второй тап до перерисовки не шлёт второй запрос
   const undoInFlight = useRef(false);
+  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
+  const planRequest = useRef(0); // поздний ответ старого запроса не затирает свежий
 
   // справочник могли перечитать: карту, которой больше нет, не держим
   const source = boot.sources.some((s) => s.name === chosenSource)
@@ -78,6 +87,26 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
   const value = amountValue(amount);
   const label = `Записать ${withCurrency(value, currency)}`;
   const tg = telegram();
+
+  const plan = useMemo(() => planIndex(dashboard), [dashboard]);
+
+  // Остаток по плану на плитках — подсказка: таблица не ответила, плитки без неё
+  const loadPlan = useCallback(() => {
+    const request = ++planRequest.current;
+    api.dashboard().then(
+      (next) => {
+        if (request === planRequest.current) setDashboard(next);
+      },
+      () => {
+        // старые цифры после записи врали бы — лучше без них
+        if (request === planRequest.current) setDashboard(null);
+      },
+    );
+  }, [api]);
+
+  useEffect(() => {
+    loadPlan();
+  }, [loadPlan]);
 
   const back = useCallback(() => {
     setError(null);
@@ -101,6 +130,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
       })
       .then((result) => {
         haptic("success");
+        loadPlan();
         setDone(result);
         setNotice(null);
         setGroup(null);
@@ -136,6 +166,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
     day,
     entryId,
     group,
+    loadPlan,
     onCatalogChanged,
     source,
     sub,
@@ -208,6 +239,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
       .undo()
       .then(
         (result) => {
+          loadPlan();
           setNotice(result.message);
           setDone(null);
         },
@@ -268,12 +300,20 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
         </p>
       )}
       {step === "group" && (
-        <GroupTiles groups={boot.groups} onPick={chooseGroup} />
+        <GroupTiles groups={boot.groups} plan={plan} onPick={chooseGroup} />
       )}
       {step === "sub" && group && (
         <>
           <Header title={group.name} onBack={tg ? null : back} />
-          <SubTiles group={group} onPick={chooseSub} />
+          <SubTiles
+            group={group}
+            color={groupColor(
+              group.name,
+              boot.groups.findIndex((g) => g.name === group.name),
+            )}
+            plan={plan}
+            onPick={chooseSub}
+          />
         </>
       )}
       {step === "amount" && group && sub && (

@@ -32,6 +32,7 @@ export interface WebApp {
   BackButton: BackButton;
   HapticFeedback: {
     notificationOccurred(type: "error" | "success" | "warning"): void;
+    selectionChanged(): void;
   };
   addToHomeScreen(): void;
   checkHomeScreenStatus(callback: (status: HomeScreenStatus) => void): void;
@@ -52,6 +53,11 @@ export function telegram(): WebApp | null {
 
 export function haptic(type: "error" | "success"): void {
   telegram()?.HapticFeedback.notificationOccurred(type);
+}
+
+/** Лёгкий «тик» при выборе плитки. */
+export function tick(): void {
+  telegram()?.HapticFeedback.selectionChanged();
 }
 
 /** Ярлык на экран — с Bot API 8.0. */
