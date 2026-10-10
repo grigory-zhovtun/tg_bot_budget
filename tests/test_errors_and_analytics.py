@@ -3,7 +3,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from telegram.error import BadRequest, Conflict
+from telegram.error import BadRequest, Conflict, NetworkError, TimedOut
 
 from app.errors import MAX_LENGTH, on_error, user_message
 from app.handlers import analytics
@@ -44,6 +44,31 @@ async def test_conflict_during_deploy_is_only_a_warning(
         None, SimpleNamespace(error=Conflict("terminated by other getUpdates"))
     )
     assert [r.levelname for r in caplog.records] == ["WARNING"]
+
+
+@pytest.mark.parametrize("error", [NetworkError("Bad Gateway"), TimedOut()])
+async def test_telegram_outage_while_polling_is_only_a_warning(
+    caplog: pytest.LogCaptureFixture, error: Exception
+) -> None:
+    # 10.10.2026: три «Bad Gateway» за 3 секунды, PTB сам повторил get_updates
+    await on_error(None, SimpleNamespace(error=error))
+    [record] = caplog.records
+    assert record.levelname == "WARNING" and not record.exc_info
+
+
+@pytest.mark.parametrize(
+    ("update", "error"),
+    [
+        (SimpleNamespace(update_id=1), NetworkError("Bad Gateway")),  # ответ не ушёл
+        (None, BadRequest("Chat not found")),  # ошибка задачи, не сети
+    ],
+)
+async def test_network_errors_that_matter_keep_the_traceback(
+    caplog: pytest.LogCaptureFixture, update: object, error: Exception
+) -> None:
+    await on_error(update, SimpleNamespace(error=error))
+    [record] = caplog.records
+    assert record.levelname == "ERROR" and record.exc_info
 
 
 async def test_other_errors_are_logged_with_traceback(
