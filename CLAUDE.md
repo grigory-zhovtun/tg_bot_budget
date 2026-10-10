@@ -38,7 +38,7 @@ app/
 ├── web/
 │   ├── server.py        # Starlette: POST /telegram (webhook → PTB update_queue), GET /health, security headers, PTB lifespan
 │   ├── auth.py          # Mini App auth: initData (HMAC with the bot token), signed launch links for the keyboard button, webhook secret
-│   ├── api.py           # /api/bootstrap (catalog from bot_data), /api/expenses (entry_row → save_rows, idempotent by entry_id), /api/expenses/undo
+│   ├── api.py           # /api/bootstrap, /api/expenses (entry_row → save_rows, idempotent by entry_id), /api/expenses/undo, /api/dashboard
 │   └── schemas.py       # Pydantic models of the API
 ├── handlers/
 │   ├── common.py        # /start, keyboard helpers, message tracking
@@ -59,6 +59,7 @@ app/
 │   ├── ai_service.py    # GeminiService (google-genai, JSON schema output, merchant hints from fact)
 │   ├── analytics_service.py # AnalyticsService - reports with matplotlib charts
 │   ├── recurring.py     # Monthly payments from fact: recurring_key, amount clusters, day ±4, /subs text and morning lines
+│   ├── dashboard.py     # Mini App «Сводка»: build_dashboard — DayBudget, plan_lines by group, read_daily (O:R under «Дата»), subscription states
 │   └── day_budget.py    # Daily limit from the month tab forecast block, frozen money, morning text
 └── utils/
     └── keyboards.py     # Keyboards: icons from system!D (`with_icon`), prompts naming card/choice (inline buttons are as wide as the message), `action(..., style)` coloured buttons
@@ -71,6 +72,8 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 **Manual Entry**: /start → source → category → subcategory → "amount comment" (`+` prefix = incoming money) → `domain.manual_row` → `fact`
 
 **Mini App entry**: «📱 Приложение» (cards keyboard, URL with a signed launch token) or the home-screen icon (initData) → `GET /api/bootstrap` → tiles and keypad → `POST /api/expenses` → `domain.entry_row` → `messages.save_rows` (the same summary and buttons as a chat entry; `app:<entry_id>` in `seen_inputs`)
+
+**Mini App dashboard**: `GET /api/dashboard` → `AnalyticsService.dashboard()` → `build_dashboard` (the same `day_budget` as `/today`, `plan_lines` by group, `read_daily` — the month tab's daily table, `find_series` with this month's state) → `api.dashboard_out`
 
 **AI Parsing**: text/photo/document → `GeminiService.parse_transaction()` → each item validated by `domain.ParsedTransaction` → `domain.build_row` (source by card digits, currency conversion with rates from `system!H2:I10`, category/subcategory must exist in `system`, otherwise "🚧 РАЗНОЕ / неучтенка") → one `append_transactions` call → one summary message
 
