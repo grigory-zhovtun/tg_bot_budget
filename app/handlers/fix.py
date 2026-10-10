@@ -8,8 +8,15 @@
 import asyncio
 import dataclasses
 import logging
+from collections.abc import Awaitable, Callable
 
-from telegram import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+    Update,
+)
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
@@ -109,28 +116,33 @@ async def _edit(
             raise
 
 
-async def fix_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def start_fix(
+    reply: Callable[..., Awaitable[Message]], context: ContextTypes.DEFAULT_TYPE
+) -> Message:
+    """Начало диалога /fix (команда или кнопка под сводкой); reply шлёт сообщение."""
     last = context.user_data.get(LAST_WRITE)
     if not last:
-        await update.message.reply_text(
+        return await reply(
             "Нечего исправлять: последней записи нет — она забывается после "
             "перезапуска бота, /undo и импорта выписки."
         )
-        return
     rows: list[SheetRow] = last["rows"]
     state = {"write": _snapshot(last)}
     context.user_data[STATE] = state
     if len(rows) == 1:
         state["row"] = 0
-        await update.message.reply_text(
+        return await reply(
             f"✏️ {describe(rows[0])}\nВыберите группу:",
             reply_markup=categories_keyboard(context.bot_data.get("categories", [])),
         )
-        return
     listing = "\n".join(f"{i + 1}) {describe(row)}" for i, row in enumerate(rows))
-    await update.message.reply_text(
+    return await reply(
         f"✏️ Какую операцию исправить?\n{listing}", reply_markup=rows_keyboard(rows)
     )
+
+
+async def fix_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await start_fix(update.message.reply_text, context)
 
 
 async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

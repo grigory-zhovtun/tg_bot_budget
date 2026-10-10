@@ -5,8 +5,12 @@
 """
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.constants import KeyboardButtonStyle
 
 BACK = "⬅️ Назад"
+# Кнопки под сводкой записи (обработчик app/handlers/last_write.py)
+LAST_FIX, LAST_UNDO = "last:fix", "last:undo"
+LAST_UNDO_YES, LAST_UNDO_NO = "last:undo:yes", "last:undo:no"
 
 
 def with_icon(name: str, icons: dict[str, str] | None) -> str:
@@ -51,6 +55,24 @@ def generate_categories_keyboard(categories: list[str]) -> InlineKeyboardMarkup:
         InlineKeyboardButton(name, callback_data=f"cat_{name}") for name in categories
     ]
     return InlineKeyboardMarkup(_rows(buttons, 2))
+
+
+def categories_menu(
+    categories: list[str], with_actions: bool = False
+) -> InlineKeyboardMarkup:
+    """Группы; сразу после записи сверху — «Исправить» и «Отменить» для неё."""
+    rows = [
+        list(row) for row in generate_categories_keyboard(categories).inline_keyboard
+    ]
+    if with_actions:
+        rows.insert(
+            0,
+            [
+                action("✏️ Исправить запись", LAST_FIX, KeyboardButtonStyle.PRIMARY),
+                action("↩️ Отменить запись", LAST_UNDO, KeyboardButtonStyle.DANGER),
+            ],
+        )
+    return InlineKeyboardMarkup(rows)
 
 
 def generate_sources_keyboard(

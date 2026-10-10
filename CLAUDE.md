@@ -39,6 +39,7 @@ app/
 │   ├── transactions.py  # Callback query handler for inline buttons
 │   ├── undo.py          # /undo: delete the last write after checking the rows are unchanged
 │   ├── fix.py           # /fix: new group/subgroup for a row of the last write (B:D, checked like /undo)
+│   ├── last_write.py    # Buttons under a write summary: last:fix (start_fix), last:undo → confirm → undo_last
 │   ├── month.py         # Daily job: month plan tab exists (copy of the last one), owner notified
 │   ├── balances.py      # Bank main-screen screenshots: «Проверка» + «Сверено», «Выровнять» buttons
 │   └── analytics.py     # /advice, /analytics, daily report

@@ -374,14 +374,13 @@ async def _save_rows(
     lines += [f"⚠️ Не записал: {s.comment} — {s.reason}" for s in skipped]
     if not lines:
         lines.append("Не удалось распознать транзакции.")
-    if rows:
-        lines.append("✏️ Не та категория? /fix  ↩️ Удалить запись: /undo")
 
     # Clear specific manual selection state
     context.user_data.pop("category", None)
     context.user_data.pop("subcategory", None)
     await clear_tracked_messages(context, update.effective_chat.id)
-    await show_main_menu(update, context, "\n".join(lines))
+    # после записи под сводкой — «✏️ Исправить запись» и «↩️ Отменить запись»
+    await show_main_menu(update, context, "\n".join(lines), actions=bool(rows))
 
 
 async def document_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):

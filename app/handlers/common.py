@@ -5,6 +5,7 @@ from telegram.ext import ContextTypes
 
 from app import config
 from app.utils.keyboards import (
+    categories_menu,
     category_prompt,
     generate_categories_keyboard,
     generate_sources_keyboard,
@@ -37,7 +38,10 @@ async def clear_tracked_messages(context: ContextTypes.DEFAULT_TYPE, chat_id: in
 
 
 async def show_main_menu(
-    update: Update, context: ContextTypes.DEFAULT_TYPE, success_message: str = None
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    success_message: str = None,
+    actions: bool = False,
 ):
     """Show the main menu (source selection + categories)."""
     sources = context.bot_data.get("sources", [])
@@ -56,8 +60,8 @@ async def show_main_menu(
     if current_source:
         msg2 = await update.effective_message.reply_text(
             category_prompt(current_source),
-            reply_markup=generate_categories_keyboard(
-                context.bot_data.get("categories", [])
+            reply_markup=categories_menu(
+                context.bot_data.get("categories", []), with_actions=actions
             ),
         )
         track_message(context, msg2)

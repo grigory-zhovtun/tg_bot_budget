@@ -289,7 +289,9 @@ async def test_same_sms_twice_is_written_once() -> None:
     update, context, sheets = make_chat(SMS, {}, ai)
     await messages.text_handler(update, context)
     assert len(sheets.rows) == 1
-    assert "/undo" in summary(update) and "/fix" in summary(update)
+    menu = update.effective_message.reply_text.await_args_list[1]
+    first_row = menu.kwargs["reply_markup"].inline_keyboard[0]
+    assert [b.callback_data for b in first_row] == ["last:fix", "last:undo"]
 
     second, _ = again(update, context, SMS)
     await messages.text_handler(second, context)
