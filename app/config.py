@@ -4,7 +4,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from app.auth import parse_user_ids
+from app.auth import first_user_id, parse_user_ids
 
 # Load environment variables
 load_dotenv()
@@ -101,3 +101,6 @@ FROZEN_CURRENCY = None if _FROZEN in ("", "OFF") else _FROZEN
 # Falls back to ANALYTICS_CHAT_ID (the owner's private chat id == user id).
 # Empty → the bot answers nobody.
 ALLOWED_USER_IDS = parse_user_ids(os.getenv("ALLOWED_USER_IDS"), ANALYTICS_CHAT_ID)
+# Владелец — первый ID в ALLOWED_USER_IDS (или ANALYTICS_CHAT_ID): ему утреннее
+# сообщение, сводка недели и вкладка месяца; от его Premium — картинки на кнопках
+OWNER_ID = first_user_id(os.getenv("ALLOWED_USER_IDS"), ANALYTICS_CHAT_ID)

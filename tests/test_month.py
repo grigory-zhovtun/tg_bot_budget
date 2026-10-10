@@ -152,6 +152,7 @@ def job_context(tab: MonthTab | Exception) -> SimpleNamespace:
 def owner(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "ANALYTICS_CHAT_ID", None)
     monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset({77, 42}))
+    monkeypatch.setattr(config, "OWNER_ID", 42)
 
 
 @pytest.mark.usefixtures("owner")
@@ -180,4 +181,14 @@ def test_owner_chat_prefers_the_report_chat(monkeypatch: pytest.MonkeyPatch) -> 
     assert month.owner_chat_id() == -100500
     monkeypatch.setattr(config, "ANALYTICS_CHAT_ID", None)
     monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset())
+    monkeypatch.setattr(config, "OWNER_ID", None)
     assert month.owner_chat_id() is None
+
+
+def test_owner_is_the_first_listed_id_not_the_smallest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "ANALYTICS_CHAT_ID", None)
+    monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset({42, 77}))
+    monkeypatch.setattr(config, "OWNER_ID", 77)
+    assert month.owner_chat_id() == 77

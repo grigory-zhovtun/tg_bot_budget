@@ -60,6 +60,7 @@ GOOGLE_PRIVATE_KEY="YOUR_GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY" # use \n for line b
 
 # Who may use the bot: comma-separated Telegram user ids.
 # Falls back to ANALYTICS_CHAT_ID; if both are empty the bot answers nobody.
+# The first id is the owner: the morning message, the Sunday digest and month-tab notices go to them.
 ALLOWED_USER_IDS="123456789"
 
 # AI parsing of SMS, screenshots and documents (Google Gemini)
@@ -147,6 +148,8 @@ On Render the bot runs as a **web service**: Render sets `RENDER_EXTERNAL_URL`, 
 ### 8. Mini App (`webapp/`)
 
 React + TypeScript + Tailwind, built by Vite into `webapp/dist` and served by the bot at `/app/`. The page calls `/api/*` with Telegram's `initData` or — when it is opened from the keyboard button, where Telegram passes no `initData` — with the signed launch link the bot puts into the button (30 days, renewed with every cards keyboard).
+
+Home screen: set the bot's Main Mini App in @BotFather (Bot Settings → Configure Mini App → the service URL with `/app/`); the app opened from the bot profile or by `t.me/<bot>?startapp=home` gets Telegram's `initData`, and «📌 На экран телефона» on «Сводка» adds the icon (Bot API 8.0+).
 
 ```bash
 cd webapp

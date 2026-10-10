@@ -162,6 +162,7 @@ async def test_morning_brief_goes_to_the_owner(
     monkeypatch.setattr(main.analytics, "send_morning_brief", send)
     monkeypatch.setattr(config, "ANALYTICS_CHAT_ID", None)
     monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset({7}))
+    monkeypatch.setattr(config, "OWNER_ID", 7)
     context = SimpleNamespace(bot=object(), bot_data={"analytics_service": object()})
     await main._morning_brief(context)
     assert sent == [7]

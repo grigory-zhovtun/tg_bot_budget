@@ -30,6 +30,23 @@ def parse_user_ids(*sources: str | None) -> frozenset[int]:
     return frozenset()
 
 
+def first_user_id(*sources: str | None) -> int | None:
+    """Владелец бота — первый ID первого непустого источника («123, 456» → 123).
+
+    Порядок важен: владельцем считается тот, кто записан первым, а не наименьший ID.
+    """
+    for raw in sources:
+        if not raw or not raw.strip():
+            continue
+        for part in raw.replace(",", " ").split():
+            try:
+                return int(part)
+            except ValueError:
+                continue
+        return None
+    return None
+
+
 def make_gatekeeper(allowed: frozenset[int]) -> Gatekeeper:
     """Обработчик для группы -1: пропускает только `allowed`, остальное обрывает.
 

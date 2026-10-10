@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError, type Api, type Bootstrap } from "./api";
 import DashboardScreen from "./dashboard/DashboardScreen";
 import EntryScreen from "./entry/EntryScreen";
+import HomeScreenButton from "./HomeScreenButton";
 
 type Tab = "entry" | "dashboard";
 
@@ -77,6 +78,9 @@ export default function App({ api }: { api: Api }) {
         <EntryScreen api={api} boot={boot} onCatalogChanged={reload} />
       )}
       {tab === "dashboard" && <DashboardScreen api={api} />}
+      {tab === "dashboard" && boot && (
+        <HomeScreenButton botUsername={boot.bot_username} />
+      )}
     </main>
   );
 }
