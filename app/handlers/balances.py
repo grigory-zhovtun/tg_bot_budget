@@ -14,6 +14,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import KeyboardButtonStyle
 from telegram.ext import ContextTypes
 
 from app import config
@@ -28,6 +29,7 @@ from app.domain import (
 from app.errors import user_message
 from app.handlers.common import LAST_WRITE
 from app.services.google_sheets import GoogleSheetsService
+from app.utils.keyboards import action
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +142,7 @@ async def report_screen_balances(
                 pending[bank.source] = (bank.balance, stamp)
                 label = f"Выровнять {bank.source}: {'−' if diff > 0 else '+'}{money(abs(diff), bank.source)}"
                 buttons.append(
-                    [InlineKeyboardButton(label, callback_data=f"align:{bank.source}")]
+                    [action(label, f"align:{bank.source}", KeyboardButtonStyle.PRIMARY)]
                 )
     else:
         lines.append("Не нашёл на скрине остатков карт из таблицы.")

@@ -174,6 +174,8 @@ def build_application(
     categories: list[str],
     subcategories: dict[str, list[str]],
     sources: list[str],
+    icons: dict[str, str] | None = None,
+    last_source: str | None = None,
 ) -> Application:
     """Собрать приложение без сетевых вызовов: зависимости, доступ, обработчики."""
     app = (
@@ -184,6 +186,8 @@ def build_application(
         categories=categories,
         subcategories=subcategories,
         sources=sources,
+        icons=icons or {},
+        last_source=last_source,
         ai_service=GeminiService(gs_service),
         analytics_service=AnalyticsService(gs_service),
     )
@@ -233,8 +237,23 @@ def main() -> None:
         logger.critical("Failed to initialize Google Sheets Service", exc_info=True)
         sys.exit(1)
 
-    app = build_application(gs_service, categories, subcategories, sources)
-    logger.info("Loaded %d sources and %d categories.", len(sources), len(categories))
+    try:
+        icons = gs_service.get_icons()
+        last_source = gs_service.last_source(sources)
+    except Exception:
+        # не критично: кнопки без иконок, карту спросим у пользователя
+        logger.exception("Could not read icons or the last card")
+        icons, last_source = {}, None
+
+    app = build_application(
+        gs_service, categories, subcategories, sources, icons, last_source
+    )
+    logger.info(
+        "Loaded %d sources, %d categories and %d icons.",
+        len(sources),
+        len(categories),
+        len(icons),
+    )
     logger.info("AI Service %s.", "enabled" if config.GEMINI_API_KEY else "disabled")
 
     if config.LOCAL_RUN or not config.WEBHOOK_URL:

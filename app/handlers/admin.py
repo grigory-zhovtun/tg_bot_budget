@@ -29,6 +29,7 @@ async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
         categories, subcategories, sources = await asyncio.to_thread(
             gs_service.get_categories_and_sources
         )
+        icons = await asyncio.to_thread(gs_service.get_icons)
     except Exception as e:
         logger.exception("Reboot failed")
         await update.message.reply_text(f"Ошибка при обновлении: {user_message(e)}")
@@ -37,6 +38,7 @@ async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data["categories"] = categories
     context.bot_data["subcategories"] = subcategories
     context.bot_data["sources"] = sources
+    context.bot_data["icons"] = icons
     logger.info("Loaded %d sources and %d categories.", len(sources), len(categories))
 
     # Verify source consistency for the user

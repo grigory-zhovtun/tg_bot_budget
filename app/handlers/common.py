@@ -4,7 +4,11 @@ from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from app import config
-from app.utils.keyboards import generate_categories_keyboard, generate_sources_keyboard
+from app.utils.keyboards import (
+    category_prompt,
+    generate_categories_keyboard,
+    generate_sources_keyboard,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +55,7 @@ async def show_main_menu(
     # Send categories keyboard if source is selected
     if current_source:
         msg2 = await update.effective_message.reply_text(
-            "Категория:",
+            category_prompt(current_source),
             reply_markup=generate_categories_keyboard(
                 context.bot_data.get("categories", [])
             ),
@@ -76,7 +80,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Источники не найдены. /reboot")
         return
 
-    current_source = context.user_data.get("source")
+    # После перезапуска user_data пуст — берём карту последней записи
+    current_source = context.user_data.get("source") or context.bot_data.get(
+        "last_source"
+    )
+    if current_source:
+        context.user_data["source"] = current_source
 
     # Clear any previous tracked messages on /start
     chat_id = update.effective_chat.id
@@ -91,7 +100,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if current_source:
         msg2 = await update.message.reply_text(
-            "Категория:",
+            category_prompt(current_source),
             reply_markup=generate_categories_keyboard(
                 context.bot_data.get("categories", [])
             ),

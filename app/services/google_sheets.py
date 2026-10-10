@@ -199,6 +199,33 @@ class GoogleSheetsService:
                 sources.append(src)
         return categories, subcategories, sources
 
+    def get_icons(self) -> dict[str, str]:
+        """Иконки подкатегорий для кнопок: system!D рядом с типом статьи."""
+        rows = self._with_retry(
+            "Reading icons",
+            lambda: self._worksheet(config.SYSTEM_SHEET_NAME).get("B2:D"),
+        )
+        icons: dict[str, str] = {}
+        for row in rows:
+            cells = list(row) + [""] * (3 - len(row))
+            name, icon = str(cells[0]).strip(), str(cells[2]).strip()
+            if name and icon:
+                icons[name] = icon
+        return icons
+
+    def last_source(self, sources: list[str]) -> str | None:
+        """Карта последней строки fact: после перезапуска бот не спрашивает её снова."""
+        rows = self._with_retry(
+            "Reading the last card",
+            lambda: self._worksheet(config.FACT_SHEET_NAME).get("H2:H"),
+        )
+        known = set(sources)
+        for row in reversed(rows):
+            value = str(row[0]).strip() if row else ""
+            if value in known:
+                return value
+        return None
+
     def append_transactions(self, rows: Sequence[SheetRow]) -> tuple[int, int]:
         """Дописать строки в fact одним запросом; вернуть номера первой и последней.
 

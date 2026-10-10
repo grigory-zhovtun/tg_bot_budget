@@ -38,8 +38,10 @@ from app.handlers.common import (
 from app.services.google_sheets import GoogleSheetsService
 from app.statements import is_kapitalbank_statement, parse_statement, pdf_text
 from app.utils.keyboards import (
+    category_prompt,
     generate_categories_keyboard,
     generate_sources_keyboard,
+    with_icon,
 )
 
 logger = logging.getLogger(__name__)
@@ -157,7 +159,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             track_message(context, msg1)
             msg2 = await update.effective_chat.send_message(
-                "Категория:",
+                category_prompt(clean_text),
                 reply_markup=generate_categories_keyboard(
                     context.bot_data.get("categories", [])
                 ),
@@ -173,7 +175,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             current_source = context.user_data.get("source")
             if current_source:
                 msg = await update.effective_chat.send_message(
-                    "Категория:",
+                    category_prompt(current_source),
                     reply_markup=generate_categories_keyboard(
                         context.bot_data.get("categories", [])
                     ),
@@ -348,12 +350,14 @@ async def _save_rows(
             logger.exception("Updating card balances failed")
 
     for row in rows:
-        line = f"✅ {format_amount(row)} • {row.category} ({row.subcategory}) • {row.source}"
+        sub = with_icon(row.subcategory, context.bot_data.get("icons"))
+        line = f"✅ {format_amount(row)} • {row.category} ({sub}) • {row.source}"
         if row.balance is not None and row.source in updated:
             line += f" | 💳 {row.balance:,.0f}".replace(",", " ")
         lines.append(line)
     if rows:
         context.user_data["source"] = rows[-1].source
+        context.bot_data["last_source"] = rows[-1].source  # переживёт сброс user_data
 
     if updated:
         try:

@@ -159,3 +159,20 @@ async def test_morning_brief_goes_to_the_owner(
     context = SimpleNamespace(bot=object(), bot_data={"analytics_service": object()})
     await main._morning_brief(context)
     assert sent == [7]
+
+
+def test_icons_and_last_card_reach_the_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for name, value in {"ALLOWED_USER_IDS": frozenset({42})}.items():
+        monkeypatch.setattr(config, name, value)
+    app = main.build_application(
+        FakeSheets(),
+        CATEGORIES,
+        SUBCATEGORIES,
+        SOURCES,
+        icons={"кофе": "☕"},
+        last_source="VISA 9120 UZS",
+    )
+    assert app.bot_data["icons"] == {"кофе": "☕"}
+    assert app.bot_data["last_source"] == "VISA 9120 UZS"

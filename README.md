@@ -127,6 +127,7 @@ Ensure your Google Sheet contains two sheets:
 *   **`system`**: This sheet is used for bot configuration (categories, subcategories, sources, currency rates).
     *   **Column A:** Categories (e.g., "Groceries", "Transport").
     *   **Column B:** Subcategories (e.g., for "Groceries": "Supermarket", "Market"). The corresponding category from Column A must be specified.
+    *   **Column D:** an icon (emoji) for the subcategory in the same row — shown on the buttons and in the summaries («☕ кофе»). Subcategory names in the sheets stay as they are; `/reboot` reloads the icons.
     *   **Column F:** Sources (e.g., "Card UZS", "Cash USD"). The last 3 characters of the source name are used to determine the currency (e.g., "UZS", "USD").
     *   **Columns H:I (rows 2–10):** currency code and its rate to UZS (`GOOGLEFINANCE`). Used to convert an SMS amount in another currency into the card currency.
     *   **Column G** (next to the sources): the day up to which bank statements are loaded. The bot fills it after each import.
@@ -141,8 +142,8 @@ Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this
 
 ## Usage
 
-1.  **Send `/start`** and pick a source (card) on the keyboard.
-2.  **Pick a category and a subcategory** on the inline keyboards.
+1.  **Send `/start`** and pick a source (card) on the keyboard. After a restart the bot takes the card of the last record, so it does not ask again.
+2.  **Pick a category and a subcategory** on the buttons under the message (two per row, subcategories with their icons; the line above names the card and the choice so far). Action buttons are coloured: «✅ Записать» green, «Выровнять» blue.
 3.  **Type the amount and an optional comment**: `48000 latte`, `5 000,50 lunch`. A leading `+` records incoming money: `+20000 refund`.
 4.  **Or just send an SMS, a screenshot, a PDF/Excel/CSV file** — Gemini extracts the transactions; the bot converts currencies, picks the card by its number, checks categories against `system` and writes all rows in one request. Rows it cannot write are listed in the reply.
     *   The same SMS, screenshot or file sent twice is written once: the bot remembers what it wrote during the last week and answers which rows already hold it.

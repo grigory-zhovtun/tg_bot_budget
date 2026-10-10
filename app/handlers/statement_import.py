@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
+from telegram.constants import KeyboardButtonStyle
 from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
@@ -28,6 +29,7 @@ from app.statements import (
     plan_import,
     short,
 )
+from app.utils.keyboards import action
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +126,7 @@ def _buttons(version: int, rows: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton(label, callback_data=f"import:ok:{version}"),
+                action(label, f"import:ok:{version}", KeyboardButtonStyle.SUCCESS),
                 InlineKeyboardButton("❌ Отмена", callback_data=f"import:no:{version}"),
             ]
         ]

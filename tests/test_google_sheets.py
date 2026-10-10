@@ -347,6 +347,29 @@ def test_recategorize_writes_group_subgroup_and_amount_of_an_unchanged_row() -> 
     assert len(service.sheet.values_batch) == 1
 
 
+def test_icons_come_from_column_d_of_the_system_sheet() -> None:
+    ws = RangeWorksheet(
+        {
+            "B2:D": [
+                ["квартплата", "Расходы", "🏠"],
+                ["кофе", "Расходы", " ☕ "],
+                ["кафе", "Расходы"],
+                [],
+            ]
+        }
+    )
+    assert make_service(ws).get_icons() == {"квартплата": "🏠", "кофе": "☕"}
+
+
+def test_last_source_is_the_card_of_the_last_fact_row() -> None:
+    ws = RangeWorksheet(
+        {"H2:H": [["VISA 9120 UZS"], ["HUMO 6845 UZS"], ["Источник"], []]}
+    )
+    service = make_service(ws)
+    assert service.last_source(["VISA 9120 UZS", "HUMO 6845 UZS"]) == "HUMO 6845 UZS"
+    assert service.last_source(["CASH UZS"]) is None
+
+
 def test_balances_get_a_check_stamp_next_to_the_card() -> None:
     from datetime import datetime
 
