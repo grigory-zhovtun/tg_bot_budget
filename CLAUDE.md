@@ -48,7 +48,7 @@ app/
 │   ├── analytics_service.py # AnalyticsService - reports with matplotlib charts
 │   └── day_budget.py    # Daily limit from the month tab forecast block, frozen money, morning text
 └── utils/
-    └── keyboards.py     # Telegram keyboard generators
+    └── keyboards.py     # Keyboards: icons from system!D (`with_icon`), prompts naming card/choice (inline buttons are as wide as the message), `action(..., style)` coloured buttons
 tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 ```
 

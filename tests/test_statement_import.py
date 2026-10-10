@@ -183,6 +183,7 @@ async def test_statement_preview_then_write() -> None:
     assert ai.asked == [["NEW CAFE"]]
     buttons = last_markup(context).inline_keyboard[0]
     assert [b.callback_data for b in buttons] == ["import:ok:1", "import:no:1"]
+    assert [b.style for b in buttons] == ["success", None]  # записать — зелёная
 
     update = press(context, "import:ok:1")
     await statement_import.button(update, context)

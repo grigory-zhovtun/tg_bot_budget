@@ -17,6 +17,7 @@ from app.domain import INCOME_GROUP, SheetRow, format_amount
 from app.errors import user_message
 from app.handlers.common import LAST_WRITE
 from app.services.google_sheets import GoogleSheetsService
+from app.utils.keyboards import with_icon
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +62,11 @@ def categories_keyboard(categories: list[str]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([*_grid(buttons, 3), [CANCEL]])
 
 
-def subcategories_keyboard(subcategories: list[str]) -> InlineKeyboardMarkup:
+def subcategories_keyboard(
+    subcategories: list[str], icons: dict[str, str] | None = None
+) -> InlineKeyboardMarkup:
     buttons = [
-        InlineKeyboardButton(name, callback_data=f"fix:s:{index}")
+        InlineKeyboardButton(with_icon(name, icons), callback_data=f"fix:s:{index}")
         for index, name in enumerate(subcategories)
     ]
     back = InlineKeyboardButton("⬅️ Назад", callback_data="fix:b")
@@ -182,7 +185,9 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await _edit(
             query,
             f"✏️ {describe(row)}\n{category} — выберите подгруппу:",
-            subcategories_keyboard(subcategories.get(category, [])),
+            subcategories_keyboard(
+                subcategories.get(category, []), context.bot_data.get("icons")
+            ),
         )
         return
     if action != "s" or "category" not in state:

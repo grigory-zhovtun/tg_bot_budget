@@ -137,6 +137,7 @@ async def test_screen_balances_are_written_and_compared() -> None:
         ("Выровнять UZCARD 5837 UZS: +324", "align:UZCARD 5837 UZS"),
         ("Выровнять VISA 9120 UZS: −532 263", "align:VISA 9120 UZS"),
     ]
+    assert {b.style for b in buttons} == {"primary"}
     assert set(context.user_data[balances.PENDING]) == {
         "UZCARD 5837 UZS",
         "VISA 9120 UZS",

@@ -1,81 +1,78 @@
+"""Клавиатуры бота: карты внизу экрана, группы и подгруппы — под сообщением.
+
+Кнопки под сообщением шириной с само сообщение, поэтому подписи над ними
+называют карту и выбор: так кнопки шире, а пользователь видит, где он.
+"""
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+
+BACK = "⬅️ Назад"
+
+
+def with_icon(name: str, icons: dict[str, str] | None) -> str:
+    """«☕ кофе»: иконка подкатегории из system!D, если она есть."""
+    icon = (icons or {}).get(name)
+    return f"{icon} {name}" if icon else name
+
+
+def action(
+    text: str, callback_data: str, style: str | None = None
+) -> InlineKeyboardButton:
+    """Кнопка-действие; style — цвет: primary синий, success зелёный, danger красный."""
+    return InlineKeyboardButton(text, callback_data=callback_data, style=style)
+
+
+def _rows(
+    buttons: list[InlineKeyboardButton], per_row: int
+) -> list[list[InlineKeyboardButton]]:
+    return [buttons[i : i + per_row] for i in range(0, len(buttons), per_row)]
+
+
+def category_prompt(source: str) -> str:
+    return f"💳 {source} — выберите категорию"
+
+
+def subcategory_prompt(source: str, category: str) -> str:
+    return f"💳 {source} · {category} — выберите подкатегорию"
+
+
+def amount_prompt(
+    source: str, category: str, subcategory: str, icons: dict[str, str] | None
+) -> str:
+    return (
+        f"💳 {source} · {category} · {with_icon(subcategory, icons)}\n"
+        "Введите сумму и комментарий, например «48000 латте»"
+    )
 
 
 def generate_categories_keyboard(categories: list[str]) -> InlineKeyboardMarkup:
-    """Generates an inline keyboard for category selection."""
-    keyboard = []
-    row_buttons = []
-    for idx, category in enumerate(categories, 1):
-        row_buttons.append(
-            InlineKeyboardButton(text=category, callback_data=f"cat_{category}")
-        )
-        if idx % 3 == 0 or idx == len(categories):
-            keyboard.append(row_buttons)
-            row_buttons = []
-
-    # Ensure any remaining buttons are added
-    if row_buttons:
-        keyboard.append(row_buttons)
-
-    # Action buttons (e.g. SMS replaced by AI-prompts implicitly, but keeping generic structure)
-    # The user wanted AI everywhere, so maybe "SMS/Text" is just the default mode?
-    # Keeping the original button structure for now to maintain familiarity, but "SMS" might be redundant if text input works.
-    # However, the original code had a specific "SMS" button to switch mode.
-    # With AI, we might not need a specific mode, but for now let's keep the UI consistent or simplify.
-    # The requirement was "AI can determine...".
-    # I will keep the "SMS" button for now but it might trigger the AI hint or mode.
-    # Wait, the plan says AI-first. So maybe we don't need an explicit "SMS" button if ANY text is treated as a transaction?
-    # But for manual entry flow (Source -> Cat -> Subcat), the user is in a state machine.
-    # If they want to paste an SMS, they might need to exit that state?
-    # Let's keep the "manual" flow as is, and "SMS" button just tells them "Paste it now".
-
-    # Original:
-    # action_buttons_row = [InlineKeyboardButton(text="СМС", callback_data="sms")]
-    # keyboard.append(action_buttons_row)
-
-    return InlineKeyboardMarkup(keyboard)
+    """Группы по две в ряд: так кнопки шире, а названия не обрезаются."""
+    buttons = [
+        InlineKeyboardButton(name, callback_data=f"cat_{name}") for name in categories
+    ]
+    return InlineKeyboardMarkup(_rows(buttons, 2))
 
 
 def generate_sources_keyboard(
     sources: list[str], current_source: str | None = None
 ) -> ReplyKeyboardMarkup:
-    """Generates a reply keyboard for source selection."""
-    buttons = []
+    """Карты внизу экрана, выбранная — с галочкой."""
     if not sources:
-        buttons = [["Нет доступных источников"]]
-    else:
-        for i in range(0, len(sources), 3):
-            row = []
-            for source in sources[i : i + 3]:
-                if source == current_source:
-                    row.append(f"✅ {source}")
-                else:
-                    row.append(source)
-            buttons.append(row)
-
-    return ReplyKeyboardMarkup(buttons, resize_keyboard=True)
+        return ReplyKeyboardMarkup([["Нет доступных источников"]], resize_keyboard=True)
+    labels = [f"✅ {s}" if s == current_source else s for s in sources]
+    rows = [labels[i : i + 3] for i in range(0, len(labels), 3)]
+    return ReplyKeyboardMarkup(rows, resize_keyboard=True)
 
 
 def generate_subcategories_keyboard(
-    subcategories: dict[str, list[str]], selected_category: str
+    subcategories: dict[str, list[str]],
+    selected_category: str,
+    icons: dict[str, str] | None = None,
 ) -> InlineKeyboardMarkup:
-    """Generates an inline keyboard for subcategory selection."""
-    keyboard = []
-    row_buttons = []
-    subs = subcategories.get(selected_category, [])
-
-    for idx, sub_name in enumerate(subs, 1):
-        row_buttons.append(
-            InlineKeyboardButton(text=sub_name, callback_data=f"sub_{sub_name}")
-        )
-        if idx % 2 == 0 or idx == len(subs):
-            keyboard.append(row_buttons)
-            row_buttons = []
-
-    if row_buttons:
-        keyboard.append(row_buttons)
-
-    keyboard.append(
-        [InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_categories")]
-    )
-    return InlineKeyboardMarkup(keyboard)
+    """Подгруппы с иконками по две в ряд; в callback — имя без иконки."""
+    buttons = [
+        InlineKeyboardButton(with_icon(name, icons), callback_data=f"sub_{name}")
+        for name in subcategories.get(selected_category, [])
+    ]
+    back = [InlineKeyboardButton(BACK, callback_data="back_to_categories")]
+    return InlineKeyboardMarkup([*_rows(buttons, 2), back])

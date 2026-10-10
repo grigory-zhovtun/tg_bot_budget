@@ -377,10 +377,20 @@ async def test_source_button_confirms_the_card_and_shows_categories() -> None:
 
     first, second = update.effective_chat.send_message.await_args_list
     assert first.args[0] == "💳 VISA 9120 UZS"
-    assert second.args[0] == "Категория:"
+    assert second.args[0] == "💳 VISA 9120 UZS — выберите категорию"
     assert context.user_data["source"] == "VISA 9120 UZS"
     keyboard = first.kwargs["reply_markup"].keyboard
     assert any(button.text == "✅ VISA 9120 UZS" for row in keyboard for button in row)
+
+
+async def test_summary_shows_the_subcategory_icon() -> None:
+    update, context, _ = make_chat("48000 латте", manual_state())
+    context.bot_data["icons"] = {"кофе": "☕"}
+    await messages.text_handler(update, context)
+    assert "🍔 ЕДА (☕ кофе) • VISA 9120 UZS" in summary(update)
+    assert (
+        context.bot_data["last_source"] == "VISA 9120 UZS"
+    )  # карта на случай перезапуска
 
 
 async def test_back_without_a_card_asks_to_choose_one() -> None:
