@@ -16,6 +16,7 @@ from telegram.ext import ContextTypes
 
 from app import config
 from app.domain import (
+    INCOME_GROUP,
     Catalog,
     ParsedTransaction,
     SheetRow,
@@ -36,6 +37,7 @@ from app.handlers.common import (
     show_main_menu,
     track_message,
 )
+from app.services.analytics_service import TRANSFERS_GROUP
 from app.services.google_sheets import GoogleSheetsService
 from app.statements import is_kapitalbank_statement, parse_statement, pdf_text
 from app.utils.keyboards import (
@@ -314,6 +316,31 @@ def _balance_check(source: str, bank: float, table: float) -> str:
     )
 
 
+async def _plan_feedback(
+    context: ContextTypes.DEFAULT_TYPE, rows: Sequence[SheetRow]
+) -> list[str]:
+    """Статус статей месяца и остаток на сегодня; ошибка не мешает записи."""
+    analytics = context.bot_data.get("analytics_service")
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    spent = [
+        row.subcategory
+        for row in rows
+        if row.category not in (INCOME_GROUP, TRANSFERS_GROUP)
+        and (row.day.year, row.day.month) == (today.year, today.month)
+    ]
+    if analytics is None or not spent:
+        return []
+    try:
+        return await asyncio.to_thread(
+            analytics.write_feedback,
+            list(dict.fromkeys(spent)),
+            context.bot_data.get("icons"),
+        )
+    except Exception:
+        logger.exception("Plan feedback failed")
+        return []
+
+
 async def _save_rows(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -376,6 +403,7 @@ async def _save_rows(
             if source in table
         ]
 
+    lines += await _plan_feedback(context, rows)
     lines += [f"⚠️ Не записал: {s.comment} — {s.reason}" for s in skipped]
     if not lines:
         lines.append("Не удалось распознать транзакции.")
