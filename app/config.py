@@ -78,6 +78,12 @@ IGNORED_CARDS = frozenset(
 )
 # Воскресная сводка владельцу: «HH:MM» по ANALYTICS_TIMEZONE, «off» — выключить
 WEEKLY_DIGEST_TIME = os.getenv("WEEKLY_DIGEST_TIME", "20:00")
+# Утреннее сообщение с лимитом на день: «HH:MM» по ANALYTICS_TIMEZONE, «off» — выключить
+MORNING_TIME = os.getenv("MORNING_TIME", "08:00")
+# Заморозка — карты в этой валюте (отложенные деньги) без платежей в ней из жёлтого
+# списка вкладки месяца; пусто или «off» — не показывать
+_FROZEN = os.getenv("FROZEN_CURRENCY", "USD").strip().upper()
+FROZEN_CURRENCY = None if _FROZEN in ("", "OFF") else _FROZEN
 
 # Access control: Telegram user IDs allowed to use the bot ("123, 456").
 # Falls back to ANALYTICS_CHAT_ID (the owner's private chat id == user id).

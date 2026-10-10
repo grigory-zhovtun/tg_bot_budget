@@ -74,6 +74,8 @@ GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 # ANALYTICS_TIME="07:00"
 # ANALYTICS_TIMEZONE="Asia/Tashkent"   # also used for "today" in new rows
 # WEEKLY_DIGEST_TIME="20:00"           # Sunday digest to the owner; "off" disables it
+# MORNING_TIME="08:00"                 # morning message with the daily limit; "off" disables it
+# FROZEN_CURRENCY="USD"                # cards in this currency are savings ("off" — none)
 # IGNORED_CARDS="1234"                 # cards (last 4 digits) never matched from screenshots
 
 # Optional webhook mode (otherwise the bot polls Telegram)
@@ -156,6 +158,12 @@ Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this
 
 On Sundays at `WEEKLY_DIGEST_TIME` (default `20:00`, `off` disables it) the owner gets the week's spending against the previous week, the three biggest subcategories, the `/plan` report and a reminder to send bank screenshots (cards not checked for more than a week are named).
 
+### Morning message and the daily limit
+
+Every morning at `MORNING_TIME` (default `08:00`, `off` disables it) the owner gets how much can be spent today, and `/today` shows the same at any moment with what is spent and left today. The limit uses the forecast block of the month tab (columns `O:S`): money on all cards at the end of yesterday, plus incomes and big payments from the yellow list that are still ahead, minus the balance needed at the end of the month, divided by the days left including today. The needed balance is the plan (balance on the 1st + the list − the daily budget × days) or more, if the savings goal of the month (yellow row «🎯 Отложить за месяц») is above the plan's savings. Overspending lowers the limit for the rest of the month.
+
+Frozen money is the balance of the cards in `FROZEN_CURRENCY` (the dollar card) minus payments in that currency from the list that are still ahead (rent until it is paid). The limit never spends it: everything on the cards on the 1st is part of the balance needed at the end of the month, and transfers between own cards do not change it. The message shows how much is frozen and how it changed since the 1st. Payments from the list are not counted as spending of their day. The tab cell «Лимит на сегодня» uses the same formula.
+
 ### Monthly plan tabs
 
 Every day at 00:05 (`ANALYTICS_TIMEZONE`) and right after start the bot checks the tab of the current month («Nov 26»). If it is missing, the bot copies the latest month tab (the plan stays the same), sets the month dates in `M1:M2`, hides past months and tells the owner (`ANALYTICS_CHAT_ID`, otherwise the first id from `ALLOWED_USER_IDS`). Fact values in the tab are formulas over `fact` and the dates in `M1:M2`, so nothing else changes.
@@ -163,6 +171,7 @@ Every day at 00:05 (`ANALYTICS_TIMEZONE`) and right after start the bot checks t
 ### Commands
 
 *   **`/analytics`** — report for the last 3 days with charts.
+*   **`/today`** — the daily limit: how much can be spent today, spent so far and left, yesterday against its limit, frozen money, lines over plan and the next incomes/payments.
 *   **`/plan`** — month plan vs fact without AI: spending pace against the calendar, what is left per day, lines over plan, close to the plan (80%+) and outside the plan. Lines of one subcategory in different currencies are added up in UZS.
 *   **`/advice`** — AI analysis of spending vs. the current month plan.
 *   **`/undo`** — delete the rows of the last write, if nobody changed them in the sheet since.

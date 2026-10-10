@@ -137,6 +137,30 @@ async def plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(text)
 
 
+async def send_morning_brief(bot: Bot, chat_id: int, analytics_service: Any) -> None:
+    """Утреннее сообщение с лимитом на день (JobQueue). Ошибки только в лог."""
+    try:
+        text = await asyncio.to_thread(analytics_service.morning_brief)
+        await bot.send_message(chat_id, text)
+        logger.info("Morning brief sent")
+    except Exception:
+        logger.exception("Failed to send the morning brief")
+
+
+async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/today: лимит на сегодня, сколько уже потрачено и сколько осталось."""
+    analytics_service = context.bot_data.get("analytics_service")
+    try:
+        text = await asyncio.to_thread(analytics_service.morning_brief, now=True)
+    except Exception as e:
+        logger.exception("Today brief failed")
+        await update.message.reply_text(
+            f"Не удалось посчитать лимит: {user_message(e)}"
+        )
+        return
+    await update.message.reply_text(text)
+
+
 async def send_weekly_digest(bot: Bot, chat_id: int, analytics_service: Any) -> None:
     """Воскресная сводка (JobQueue). Ошибки только в лог."""
     try:

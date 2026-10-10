@@ -41,6 +41,7 @@ def test_gate_runs_before_all_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
         "undo",
         "fix",
         "plan",
+        "today",
     }
 
 
@@ -125,3 +126,36 @@ def test_weekly_digest_runs_on_sunday_evening(monkeypatch: pytest.MonkeyPatch) -
 def test_weekly_digest_can_be_switched_off(monkeypatch: pytest.MonkeyPatch) -> None:
     app = build(monkeypatch, WEEKLY_DIGEST_TIME="off")
     assert "weekly_digest" not in {job.name for job in app.job_queue.jobs()}
+
+
+def test_morning_brief_runs_every_morning(monkeypatch: pytest.MonkeyPatch) -> None:
+    app = build(monkeypatch, MORNING_TIME="08:00")
+    job = {job.name: job for job in app.job_queue.jobs()}["morning_brief"]
+    fields = {field.name: str(field) for field in job.trigger.fields}
+    assert len(fields["day_of_week"].split(",")) == 7  # каждый день
+    assert (fields["hour"], fields["minute"]) == ("8", "0")
+    assert job.trigger.timezone.key == "Asia/Tashkent"
+
+
+@pytest.mark.parametrize("value", ["off", "8am"])
+def test_morning_brief_can_be_switched_off(
+    monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    app = build(monkeypatch, MORNING_TIME=value)
+    assert "morning_brief" not in {job.name for job in app.job_queue.jobs()}
+
+
+async def test_morning_brief_goes_to_the_owner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sent: list[int] = []
+
+    async def send(bot: object, chat_id: int, service: object) -> None:
+        sent.append(chat_id)
+
+    monkeypatch.setattr(main.analytics, "send_morning_brief", send)
+    monkeypatch.setattr(config, "ANALYTICS_CHAT_ID", None)
+    monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset({7}))
+    context = SimpleNamespace(bot=object(), bot_data={"analytics_service": object()})
+    await main._morning_brief(context)
+    assert sent == [7]

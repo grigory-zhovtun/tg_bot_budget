@@ -13,6 +13,7 @@ from datetime import date, timedelta
 from typing import Any
 
 import pandas as pd
+from gspread.exceptions import WorksheetNotFound
 from matplotlib.figure import Figure
 
 from app import config
@@ -437,6 +438,32 @@ class AnalyticsService:
             logger.info("No plan sheet %s", sheet)
             return f"Вкладки «{sheet}» с планом нет — бот создаёт её 1-го числа."
         return format_plan_report(rows, today)
+
+    def morning_brief(self, today: date | None = None, now: bool = False) -> str:
+        """Лимит на сегодня по вкладке месяца: утреннее сообщение и /today."""
+        # day_budget сам берёт отсюда plan_lines и expenses
+        from app.services.day_budget import day_budget, format_day_budget
+
+        today = today or local_today(config.ANALYTICS_TIMEZONE)
+        sheet = month_title(today)
+        try:
+            rows = self.gs_service.get_values(sheet)
+        except WorksheetNotFound:
+            # сбой сети — не «вкладки нет»: ошибка уйдёт в лог или ответ /today
+            logger.info("No plan sheet %s", sheet)
+            return f"Вкладки «{sheet}» с планом нет — бот создаёт её 1-го числа."
+        rates = self.gs_service.get_rates()
+        frame = transactions_frame(
+            self.gs_service.get_values(config.FACT_SHEET_NAME), rates
+        )
+        budget = day_budget(frame, rows, today, rates, config.FROZEN_CURRENCY)
+        if budget is None:
+            return (
+                f"Во вкладке «{sheet}» нет списка поступлений и платежей (блок "
+                "прогноза справа) — лимит на день не посчитать.\n\n"
+                + format_plan_report(rows, today)
+            )
+        return format_day_budget(budget, now=now)
 
     def weekly_digest(self, today: date | None = None) -> str:
         """Воскресная сводка: траты недели против прошлой и план-факт месяца."""
