@@ -41,6 +41,7 @@ app/
 │   ├── undo.py          # /undo: delete the last write after checking the rows are unchanged
 │   ├── fix.py           # /fix: new group/subgroup for a row of the last write (B:D, checked like /undo)
 │   ├── icons.py         # /icons: custom emoji message → whole pack (get_custom_emoji_stickers/get_sticker_set) → system!J; load_custom_icons on start
+│   ├── live.py          # Reactions on the user's SMS (👀/👍/🤔) and «Думаю…» via send_message_draft (fallback 🔍)
 │   ├── last_write.py    # Buttons under a write summary: last:fix (start_fix), last:undo → confirm → undo_last
 │   ├── month.py         # Daily job: month plan tab exists (copy of the last one), owner notified
 │   ├── balances.py      # Bank main-screen screenshots: «Проверка» + «Сверено», «Выровнять» buttons

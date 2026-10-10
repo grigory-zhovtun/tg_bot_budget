@@ -540,3 +540,23 @@ async def test_screenshot_is_classified_in_the_same_call() -> None:
     prompt, image = call["contents"]
     assert "Image type" in prompt and "hidden with asterisks" in prompt
     assert image.inline_data.mime_type == "image/jpeg"
+
+
+async def test_advice_stream_accumulates_text_with_the_same_prompt() -> None:
+    service, models, _ = make_service("unused")
+    asked: dict[str, Any] = {}
+
+    async def generate_content_stream(**kwargs: Any):
+        asked.update(kwargs)
+
+        async def chunks():
+            for text in ("📊 Ана", "лиз", None):
+                yield SimpleNamespace(text=text)
+
+        return chunks()
+
+    models.generate_content_stream = generate_content_stream
+    texts = [text async for text in service.stream_analysis("Траты: 100")]
+    assert texts == ["📊 Ана", "📊 Анализ", "📊 Анализ"]
+    assert asked["model"] == "gemini-flash-latest"
+    assert "Траты: 100" in asked["contents"][0]

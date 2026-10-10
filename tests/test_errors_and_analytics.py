@@ -167,10 +167,11 @@ async def test_advice_sends_computed_numbers_to_ai() -> None:
             assert numbers == "Траты месяца: 100 сум"
             return "📊 Анализ: всё в плане"
 
-    status = SimpleNamespace(delete=AsyncMock(), edit_text=AsyncMock())
-    message = SimpleNamespace(reply_text=AsyncMock(return_value=status))
+    message = SimpleNamespace(message_id=5, reply_text=AsyncMock())
     context = SimpleNamespace(
-        bot_data={"ai_service": AI(), "analytics_service": FakeAnalytics()}
+        bot_data={"ai_service": AI(), "analytics_service": FakeAnalytics()},
+        bot=SimpleNamespace(send_message_draft=AsyncMock()),
     )
-    await analytics.advice_command(SimpleNamespace(message=message), context)
+    update = SimpleNamespace(message=message, effective_chat=SimpleNamespace(id=1))
+    await analytics.advice_command(update, context)  # без потока — обычный ответ
     assert message.reply_text.await_args_list[-1].args == ("📊 Анализ: всё в плане",)
