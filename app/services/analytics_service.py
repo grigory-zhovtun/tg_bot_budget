@@ -451,8 +451,9 @@ class AnalyticsService:
         return text, budget is not None and celebrate(budget)
 
     def _brief(self, today: date | None, now: bool) -> tuple[str, Any]:
-        # day_budget сам берёт отсюда plan_lines и expenses
+        # day_budget и recurring сами берут отсюда plan_lines и expenses
         from app.services.day_budget import day_budget, format_day_budget
+        from app.services.recurring import find_series, morning_lines
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
         sheet = month_title(today)
@@ -473,7 +474,9 @@ class AnalyticsService:
                 "прогноза справа) — лимит на день не посчитать.\n\n"
                 + format_plan_report(rows, today)
             ), None
-        return format_day_budget(budget, now=now), budget
+        lines = [format_day_budget(budget, now=now)]
+        lines += morning_lines(find_series(frame, today), today)
+        return "\n".join(lines), budget
 
     def write_feedback(
         self,
@@ -500,6 +503,28 @@ class AnalyticsService:
         if budget is not None:
             lines.append(today_line(budget))
         return lines
+
+    def subs_report(self, today: date | None = None) -> str:
+        """/subs: регулярные списания по истории fact и план подписок месяца."""
+        from app.services.recurring import SUBSCRIPTION, find_series, format_subs
+
+        today = today or local_today(config.ANALYTICS_TIMEZONE)
+        rates = self.gs_service.get_rates()
+        frame = transactions_frame(
+            self.gs_service.get_values(config.FACT_SHEET_NAME), rates
+        )
+        found = find_series(frame, today)
+        if not found:
+            return (
+                "Регулярных списаний пока не нашёл — нужно хотя бы два месяца истории."
+            )
+        plan = None
+        try:
+            spend, _ = plan_lines(self.gs_service.get_values(month_title(today)))
+            plan = next((x.plan for x in spend if x.subcategory == SUBSCRIPTION), None)
+        except WorksheetNotFound:
+            logger.info("No plan sheet for the subscriptions plan")
+        return format_subs(found, today, plan)
 
     def weekly_digest(self, today: date | None = None) -> str:
         """Воскресная сводка: траты недели против прошлой и план-факт месяца."""

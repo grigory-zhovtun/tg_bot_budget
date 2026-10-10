@@ -47,6 +47,7 @@ COMMANDS = [
     ("analytics", "Аналитика за 3 дня 📊"),
     ("plan", "План-факт месяца 📋"),
     ("today", "Лимит на сегодня 💸"),
+    ("subs", "Подписки и регулярные платежи 🔁"),
     ("advice", "Финансовый совет 🧠"),
     ("fix", "Исправить категорию последней записи ✏️"),
     ("undo", "Отменить последнюю запись ↩️"),
@@ -239,6 +240,7 @@ def build_application(
     app.add_handler(CommandHandler("analytics", analytics.analytics_command))
     app.add_handler(CommandHandler("plan", analytics.plan_command))
     app.add_handler(CommandHandler("today", analytics.today_command))
+    app.add_handler(CommandHandler("subs", analytics.subs_command))
     app.add_handler(CommandHandler("icons", icon_packs.icons_command))
     # Кнопки импорта, выравнивания, /fix и под сводкой — раньше общего обработчика
     app.add_handler(CallbackQueryHandler(balances.align_button, pattern=r"^align:"))

@@ -200,6 +200,18 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await update.message.reply_text(text)
 
 
+async def subs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/subs: подписки и другие платежи раз в месяц."""
+    analytics_service = context.bot_data.get("analytics_service")
+    try:
+        text = await asyncio.to_thread(analytics_service.subs_report)
+    except Exception as e:
+        logger.exception("Subscriptions report failed")
+        await update.message.reply_text(f"Не удалось собрать список: {user_message(e)}")
+        return
+    await update.message.reply_text(text)
+
+
 async def send_weekly_digest(bot: Bot, chat_id: int, analytics_service: Any) -> None:
     """Воскресная сводка (JobQueue). Ошибки только в лог."""
     try:
