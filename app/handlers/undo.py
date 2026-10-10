@@ -13,13 +13,11 @@ from app.services.google_sheets import GoogleSheetsService
 logger = logging.getLogger(__name__)
 
 
-async def undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def undo_last(context: ContextTypes.DEFAULT_TYPE) -> str:
+    """Удалить строки последней записи, если в таблице их не меняли; текст ответа."""
     last = context.user_data.get(LAST_WRITE)
     if not last:
-        await update.message.reply_text(
-            "Нечего отменять: после запуска бота записей не было."
-        )
-        return
+        return "Нечего отменять: после запуска бота записей не было."
     first, end = last["first"], last["last"]
     span = f"строка {first}" if first == end else f"строки {first}–{end}"
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
@@ -29,17 +27,17 @@ async def undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     except Exception as error:
         logger.exception("Undo failed")
-        await update.message.reply_text(f"Не удалось отменить: {user_message(error)}")
-        return
+        return f"Не удалось отменить: {user_message(error)}"
 
     context.user_data.pop(LAST_WRITE, None)
     if not deleted:
-        await update.message.reply_text(
-            f"В таблице {span} уже изменились — удалите их вручную, если нужно."
-        )
-        return
+        return f"В таблице {span} уже изменились — удалите их вручную, если нужно."
     if fingerprint := last.get("fingerprint"):
         # то же SMS после отмены можно прислать снова
         context.user_data.get(SEEN_INPUTS, {}).pop(fingerprint, None)
     logger.info("Undo: deleted %s", span)
-    await update.message.reply_text(f"↩️ Удалил из таблицы: {span}.")
+    return f"↩️ Удалил из таблицы: {span}."
+
+
+async def undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(await undo_last(context))
