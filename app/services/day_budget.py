@@ -29,6 +29,9 @@ GOAL_LABEL = "Отложить за месяц"
 PAYMENT_MATCH = 0.01  # трата дня совпала с платежом из списка с точностью до 1 %
 WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота",
             "воскресенье")  # fmt: skip
+MONTHS_PREPOSITIONAL = ("январе", "феврале", "марте", "апреле", "мае", "июне", "июле",
+                        "августе", "сентябре", "октябре", "ноябре", "декабре")  # fmt: skip
+NEAR_PLAN = 0.8  # с этой доли плана статья жёлтая
 MONTHS_GENITIVE = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля",
                    "августа", "сентября", "октября", "ноября", "декабря")  # fmt: skip
 
@@ -319,3 +322,43 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
             )
         )
     return "\n".join(lines)
+
+
+def plan_status(
+    line: PlanLine | None, subcategory: str, icons: dict[str, str] | None, today: date
+) -> str:
+    """Строка о статье после записи: 🟢 в плане, 🟡 от 80 %, 🔴 сверх, ⚪ вне плана."""
+    icon = (icons or {}).get(subcategory)
+    name = f"{icon} {subcategory}" if icon else subcategory
+    if line is None:
+        return f"⚪ {name}: нет в плане месяца"
+    if line.plan <= 0:
+        month = MONTHS_PREPOSITIONAL[today.month - 1]
+        return f"⚪ {name}: вне плана, в {month} уже {short(line.fact)}"
+    if line.fact > line.plan:
+        return (
+            f"🔴 {name}: {_pair(line.fact, line.plan)} — "
+            f"сверх плана на {short(line.fact - line.plan)}"
+        )
+    share = f"{line.fact / line.plan:.0%}"
+    if line.fact >= NEAR_PLAN * line.plan:
+        return (
+            f"🟡 {name}: {_pair(line.fact, line.plan)} ({share}) — "
+            f"осталось {short(line.plan - line.fact)}"
+        )
+    return f"🟢 {name}: {_pair(line.fact, line.plan)} ({share})"
+
+
+def today_line(budget: DayBudget) -> str:
+    """Сколько ещё можно сегодня — после каждой записи."""
+    if budget.limit <= 0:
+        return (
+            "💸 Лимита на сегодня нет: до плана на конец месяца не хватает "
+            f"{short(-budget.limit * budget.days_left)}"
+        )
+    left = budget.limit - budget.spent_today
+    if left < 0:
+        return (
+            f"💸 Сегодня сверх лимита на {money(-left)} (лимит {money(budget.limit)})"
+        )
+    return f"💸 На сегодня осталось {money(left)} из {money(budget.limit)}"

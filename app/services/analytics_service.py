@@ -465,6 +465,32 @@ class AnalyticsService:
             )
         return format_day_budget(budget, now=now)
 
+    def write_feedback(
+        self,
+        subcategories: list[str],
+        icons: dict[str, str] | None = None,
+        today: date | None = None,
+    ) -> list[str]:
+        """После записи: статус каждой статьи месяца и сколько осталось на сегодня."""
+        from app.services.day_budget import day_budget, plan_status, today_line
+
+        today = today or local_today(config.ANALYTICS_TIMEZONE)
+        try:
+            rows = self.gs_service.get_values(month_title(today))
+        except WorksheetNotFound:
+            return []
+        spend, _ = plan_lines(rows)
+        by_name = {line.subcategory: line for line in spend}
+        lines = [plan_status(by_name.get(s), s, icons, today) for s in subcategories]
+        rates = self.gs_service.get_rates()
+        frame = transactions_frame(
+            self.gs_service.get_values(config.FACT_SHEET_NAME), rates
+        )
+        budget = day_budget(frame, rows, today, rates, config.FROZEN_CURRENCY)
+        if budget is not None:
+            lines.append(today_line(budget))
+        return lines
+
     def weekly_digest(self, today: date | None = None) -> str:
         """Воскресная сводка: траты недели против прошлой и план-факт месяца."""
         today = today or local_today(config.ANALYTICS_TIMEZONE)
