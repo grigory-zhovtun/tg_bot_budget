@@ -1,6 +1,6 @@
 import logging
 
-from telegram import Message, Update
+from telegram import Chat, Message, Update
 from telegram.ext import ContextTypes
 
 from app import config
@@ -47,12 +47,16 @@ async def clear_tracked_messages(context: ContextTypes.DEFAULT_TYPE, chat_id: in
 
 
 async def show_main_menu(
-    update: Update,
+    chat: Chat,
     context: ContextTypes.DEFAULT_TYPE,
-    success_message: str = None,
+    success_message: str | None = None,
     actions: bool = False,
-):
-    """Show the main menu (source selection + categories)."""
+) -> None:
+    """Сводка (или выбранная карта) с клавиатурой карт, под ней — группы.
+
+    chat — куда отправить: чат сообщения пользователя или, для Mini App, его личный
+    чат с ботом.
+    """
     sources = context.bot_data.get("sources", [])
     current_source = context.user_data.get("source")
 
@@ -60,14 +64,13 @@ async def show_main_menu(
     text = success_message or (
         f"💳 {current_source}" if current_source else CHOOSE_SOURCE
     )
-    msg1 = await update.effective_message.reply_text(
+    msg1 = await chat.send_message(
         text, reply_markup=generate_sources_keyboard(sources, current_source)
     )
     track_message(context, msg1)
 
-    # Send categories keyboard if source is selected
     if current_source:
-        msg2 = await update.effective_message.reply_text(
+        msg2 = await chat.send_message(
             category_prompt(current_source),
             reply_markup=categories_menu(
                 context.bot_data.get("categories", []),
