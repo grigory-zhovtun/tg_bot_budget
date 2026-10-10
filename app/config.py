@@ -50,6 +50,8 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL") or os.getenv("RENDER_EXTERNAL_URL")
 WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET")
 PORT = int(os.getenv("PORT", "8443"))
 LOCAL_RUN = os.getenv("LOCAL_RUN", "False").lower() == "true"
+# Опрос снимает вебхук: при стоящем вебхуке опрашивать только с FORCE_POLLING=true
+FORCE_POLLING = os.getenv("FORCE_POLLING", "False").lower() == "true"
 
 # AI
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")

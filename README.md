@@ -79,11 +79,12 @@ GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 # CELEBRATE_EFFECT_ID="5046509860389126442"  # 🎉 on the morning message after a day within the limit ("off" — none)
 # IGNORED_CARDS="1234"                 # cards (last 4 digits) never matched from screenshots
 
-# Optional webhook mode (otherwise the bot polls Telegram)
+# Web service mode (Render sets RENDER_EXTERNAL_URL); otherwise the bot polls Telegram
 # WEBHOOK_URL="https://your-domain.com"   # RENDER_EXTERNAL_URL is used if empty
-# WEBHOOK_SECRET="random-string"           # Telegram signs webhook requests with it
+# WEBHOOK_SECRET="random-string"           # default: derived from TELEGRAM_TOKEN
 # PORT="8443"
 # LOCAL_RUN="True"                         # force polling
+# FORCE_POLLING="True"                     # poll even while a webhook is set (takes the bot over)
 ```
 
 **Important note on `GOOGLE_PRIVATE_KEY`:**
@@ -140,7 +141,7 @@ Ensure your Google Sheet contains two sheets:
 python -m app.main
 ```
 
-Without `WEBHOOK_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — this is how it runs as a Render background worker. With `WEBHOOK_URL` it listens on `PORT` at `/telegram`.
+On Render the bot runs as a **web service**: Render sets `RENDER_EXTERNAL_URL`, and the bot serves `POST /telegram` (the Telegram webhook, checked with the secret header) and `GET /health` on `PORT`. The Build Command is `pip install -r requirements.txt && bash scripts/build_webapp.sh`, the Start Command `python -m app.main`. Without `WEBHOOK_URL`/`RENDER_EXTERNAL_URL` (or with `LOCAL_RUN=True`) the bot polls Telegram — but only while no webhook is set: polling would delete the production webhook, so a local run with the production token waits until `FORCE_POLLING=True`.
 
 ## Usage
 

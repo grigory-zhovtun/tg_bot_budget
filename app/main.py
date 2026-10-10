@@ -2,12 +2,14 @@
 
 import asyncio
 import logging
-import secrets
 import sys
+import threading
+from collections.abc import Callable
 from datetime import time as dtime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from telegram import Update
+import uvicorn
+from telegram import Bot, Update
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -39,6 +41,8 @@ from app.handlers import icons as icon_packs
 from app.services.ai_service import GeminiService
 from app.services.analytics_service import AnalyticsService
 from app.services.google_sheets import GoogleSheetsService
+from app.web import server
+from app.web.auth import webhook_secret
 
 logger = logging.getLogger(__name__)
 
@@ -206,11 +210,13 @@ def build_application(
     sources: list[str],
     icons: dict[str, str] | None = None,
     last_source: str | None = None,
+    webhook: bool = False,
 ) -> Application:
     """Собрать приложение без сетевых вызовов: зависимости, доступ, обработчики."""
-    app = (
-        ApplicationBuilder().token(config.TELEGRAM_TOKEN).post_init(_post_init).build()
-    )
+    builder = ApplicationBuilder().token(config.TELEGRAM_TOKEN).post_init(_post_init)
+    if webhook:
+        builder = builder.updater(None)  # обновления приходят на /telegram сервиса
+    app = builder.build()
     app.bot_data.update(
         gs_service=gs_service,
         categories=categories,
@@ -262,6 +268,49 @@ def build_application(
     return app
 
 
+def web_mode() -> bool:
+    """Веб-сервис Render (есть внешний адрес) — вебхук; локально — опрос."""
+    return bool(config.WEBHOOK_URL) and not config.LOCAL_RUN
+
+
+async def _current_webhook(token: str) -> str:
+    async with Bot(token) as bot:
+        return (await bot.get_webhook_info()).url
+
+
+def start_polling(
+    app: Application, webhook_url: str, force: bool, wait: Callable[[], object]
+) -> None:
+    """Опрос, если вебхука нет или задан FORCE_POLLING; иначе ждать, не трогая вебхук.
+
+    PTB при старте опроса снимает вебхук — рабочий веб-сервис перестал бы получать
+    сообщения. Процесс не завершается: Render перезапускал бы его по кругу.
+    """
+    if webhook_url and not force:
+        logger.error(
+            "A webhook is set: the web service serves the bot, polling is off "
+            "(FORCE_POLLING=true takes the bot over)"
+        )
+        wait()
+        return
+    logger.info("Starting polling...")
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+def serve(app: Application) -> None:
+    """Веб-сервис: вебхук Telegram, /health и Mini App на одном порту."""
+    secret = config.WEBHOOK_SECRET or webhook_secret(config.TELEGRAM_TOKEN)
+    url = f"{config.WEBHOOK_URL.rstrip('/')}/{WEBHOOK_PATH}"
+    web = server.create_app(
+        app, secret, server.telegram_lifespan(app, url, secret, _post_init)
+    )
+    logger.info("Starting the web service on port %s...", config.PORT)
+    # access-лог выключен: в строке запроса была бы ссылка запуска Mini App
+    uvicorn.run(
+        web, host="0.0.0.0", port=config.PORT, access_log=False, log_config=None
+    )
+
+
 def main() -> None:
     setup_logging()
     try:
@@ -279,8 +328,9 @@ def main() -> None:
         logger.exception("Could not read icons or the last card")
         icons, last_source = {}, None
 
+    web = web_mode()
     app = build_application(
-        gs_service, categories, subcategories, sources, icons, last_source
+        gs_service, categories, subcategories, sources, icons, last_source, webhook=web
     )
     logger.info(
         "Loaded %d sources, %d categories and %d icons.",
@@ -290,21 +340,11 @@ def main() -> None:
     )
     logger.info("AI Service %s.", "enabled" if config.GEMINI_API_KEY else "disabled")
 
-    if config.LOCAL_RUN or not config.WEBHOOK_URL:
-        logger.info("Starting polling...")
-        app.run_polling(allowed_updates=Update.ALL_TYPES)
+    if web:
+        serve(app)
         return
-
-    # Webhook: путь не содержит токен, Telegram подписывает запросы секретом
-    logger.info("Starting webhook on port %s...", config.PORT)
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=config.PORT,
-        url_path=WEBHOOK_PATH,
-        webhook_url=f"{config.WEBHOOK_URL.rstrip('/')}/{WEBHOOK_PATH}",
-        secret_token=config.WEBHOOK_SECRET or secrets.token_urlsafe(32),
-        allowed_updates=Update.ALL_TYPES,
-    )
+    current = asyncio.run(_current_webhook(config.TELEGRAM_TOKEN))
+    start_polling(app, current, config.FORCE_POLLING, threading.Event().wait)
 
 
 if __name__ == "__main__":
