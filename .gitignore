@@ -35,3 +35,7 @@ parameters.txt
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+
+# Mini App
+webapp/node_modules/
+webapp/dist/
