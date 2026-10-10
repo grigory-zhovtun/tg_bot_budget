@@ -3,7 +3,7 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from app.handlers.common import track_message
+from app.handlers.common import premium_icons, track_message
 from app.utils.keyboards import (
     amount_prompt,
     category_prompt,
@@ -24,6 +24,7 @@ async def transaction_button_handler(
     await query.answer()
     data = query.data
     icons = context.bot_data.get("icons", {})
+    custom = premium_icons(context)
     subcategories = context.bot_data.get("subcategories", {})
 
     # После перезапуска user_data пуст — берём карту последней записи
@@ -47,7 +48,7 @@ async def transaction_button_handler(
         await query.edit_message_text(
             text=subcategory_prompt(source, category),
             reply_markup=generate_subcategories_keyboard(
-                subcategories, category, icons
+                subcategories, category, icons, custom
             ),
         )
 
@@ -57,7 +58,7 @@ async def transaction_button_handler(
         await query.edit_message_text(
             text=category_prompt(source) if source else "Категория:",
             reply_markup=generate_categories_keyboard(
-                context.bot_data.get("categories", [])
+                context.bot_data.get("categories", []), custom
             ),
         )
 
@@ -68,6 +69,6 @@ async def transaction_button_handler(
         await query.edit_message_text(
             text=amount_prompt(source or "?", category, subcategory, icons),
             reply_markup=generate_subcategories_keyboard(
-                subcategories, category, icons
+                subcategories, category, icons, custom
             ),
         )

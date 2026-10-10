@@ -30,6 +30,7 @@ app/
 ├── auth.py              # Allowlist gate (TypeHandler in group -1)
 ├── domain.py            # Sheet rules: sign of the amount, currency conversion, category/source/date validation
 ├── errors.py            # Safe one-line error texts for the chat, application error handler
+├── custom_icons.py      # Custom emoji pictures for buttons: pack_map/match by the plain emoji (system!D, group names)
 ├── statements.py        # Kapitalbank PDF statements: parsing, own-transfer pairs, categories, reconcile with fact
 ├── handlers/
 │   ├── common.py        # /start, keyboard helpers, message tracking
@@ -39,6 +40,7 @@ app/
 │   ├── transactions.py  # Callback query handler for inline buttons
 │   ├── undo.py          # /undo: delete the last write after checking the rows are unchanged
 │   ├── fix.py           # /fix: new group/subgroup for a row of the last write (B:D, checked like /undo)
+│   ├── icons.py         # /icons: custom emoji message → whole pack (get_custom_emoji_stickers/get_sticker_set) → system!J; load_custom_icons on start
 │   ├── last_write.py    # Buttons under a write summary: last:fix (start_fix), last:undo → confirm → undo_last
 │   ├── month.py         # Daily job: month plan tab exists (copy of the last one), owner notified
 │   ├── balances.py      # Bank main-screen screenshots: «Проверка» + «Сверено», «Выровнять» buttons

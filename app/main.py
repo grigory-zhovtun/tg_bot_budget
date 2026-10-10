@@ -1,5 +1,6 @@
 """Точка входа: сборка Telegram-приложения, обработчики, ежедневный отчёт."""
 
+import asyncio
 import logging
 import secrets
 import sys
@@ -34,6 +35,7 @@ from app.handlers import (
     transactions,
     undo,
 )
+from app.handlers import icons as icon_packs
 from app.services.ai_service import GeminiService
 from app.services.analytics_service import AnalyticsService
 from app.services.google_sheets import GoogleSheetsService
@@ -49,6 +51,7 @@ COMMANDS = [
     ("fix", "Исправить категорию последней записи ✏️"),
     ("undo", "Отменить последнюю запись ↩️"),
     ("reboot", "Обновить настройки 🔄"),
+    ("icons", "Картинки на кнопках 🖼"),
 ]
 WEBHOOK_PATH = "telegram"
 SUNDAY = 0  # PTB 20+: дни недели 0–6 = воскресенье–суббота
@@ -70,10 +73,35 @@ async def _post_init(application: Application) -> None:
     # Проверка Gemini — в фоне: при перегрузке модели она идёт минуту и больше,
     # а бот всё это время не отвечал бы
     application.job_queue.run_once(_self_check, 1, name="gemini_self_check")
+    application.job_queue.run_once(_load_emoji_packs, 2, name="emoji_packs")
 
 
 async def _self_check(context: ContextTypes.DEFAULT_TYPE) -> None:
     await context.bot_data["ai_service"].self_check()
+
+
+async def _load_emoji_packs(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Картинки на кнопках из наборов, подключённых через /icons (system!J)."""
+    try:
+        packs = await asyncio.to_thread(context.bot_data["gs_service"].get_emoji_packs)
+        if packs:
+            found, titles = await icon_packs.load_custom_icons(
+                context.bot, context.bot_data, packs
+            )
+            logger.info(
+                "Emoji packs %s: %s",
+                titles,
+                icon_packs.coverage(found, context.bot_data),
+            )
+    except Exception:
+        logger.exception("Could not load emoji packs, buttons keep plain emoji")
+
+
+async def _track_premium(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Premium владельца: без него картинки на кнопках Telegram не покажет."""
+    user = getattr(update, "effective_user", None)
+    if user is not None and user.id == month.owner_chat_id():
+        context.bot_data["premium"] = bool(user.is_premium)
 
 
 async def _daily_analytics(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -200,6 +228,7 @@ def build_application(
         logger.warning(
             "ALLOWED_USER_IDS and ANALYTICS_CHAT_ID are empty: the bot answers nobody"
         )
+    app.add_handler(TypeHandler(Update, _track_premium), -2)
     app.add_handler(TypeHandler(Update, make_gatekeeper(config.ALLOWED_USER_IDS)), -1)
 
     app.add_handler(CommandHandler("start", common.start))
@@ -210,6 +239,7 @@ def build_application(
     app.add_handler(CommandHandler("analytics", analytics.analytics_command))
     app.add_handler(CommandHandler("plan", analytics.plan_command))
     app.add_handler(CommandHandler("today", analytics.today_command))
+    app.add_handler(CommandHandler("icons", icon_packs.icons_command))
     # Кнопки импорта, выравнивания, /fix и под сводкой — раньше общего обработчика
     app.add_handler(CallbackQueryHandler(balances.align_button, pattern=r"^align:"))
     app.add_handler(CallbackQueryHandler(fix.fix_button, pattern=r"^fix:"))

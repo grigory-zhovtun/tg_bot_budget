@@ -12,7 +12,7 @@ from telegram.ext import ContextTypes
 
 from app.domain import SheetRow, format_amount
 from app.handlers import fix
-from app.handlers.common import LAST_WRITE, track_message
+from app.handlers.common import LAST_WRITE, premium_icons, track_message
 from app.handlers.undo import undo_last
 from app.utils.keyboards import (
     LAST_FIX,
@@ -44,6 +44,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     categories = context.bot_data.get("categories", [])
     source = context.user_data.get("source") or context.bot_data.get("last_source")
     prompt = category_prompt(source) if source else "Категория:"
+    custom = premium_icons(context)
 
     if query.data == LAST_FIX:
         # диалог — новым сообщением, меню категорий под сводкой остаётся
@@ -54,7 +55,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not last:
         await query.edit_message_text(
             f"Последней записи уже нет.\n{prompt}",
-            reply_markup=categories_menu(categories),
+            reply_markup=categories_menu(categories, custom=custom),
         )
         return
     if query.data == LAST_UNDO:
@@ -72,10 +73,11 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         )
     elif query.data == LAST_UNDO_NO:
         await query.edit_message_text(
-            prompt, reply_markup=categories_menu(categories, with_actions=True)
+            prompt, reply_markup=categories_menu(categories, True, custom)
         )
     elif query.data == LAST_UNDO_YES:
         result = await undo_last(context)
         await query.edit_message_text(
-            f"{result}\n{prompt}", reply_markup=categories_menu(categories)
+            f"{result}\n{prompt}",
+            reply_markup=categories_menu(categories, custom=custom),
         )

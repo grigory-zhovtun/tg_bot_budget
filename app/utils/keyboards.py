@@ -7,6 +7,8 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 from telegram.constants import KeyboardButtonStyle
 
+from app.custom_icons import CustomIcons, leading_emoji
+
 BACK = "⬅️ Назад"
 # Кнопки под сводкой записи (обработчик app/handlers/last_write.py)
 LAST_FIX, LAST_UNDO = "last:fix", "last:undo"
@@ -49,20 +51,51 @@ def amount_prompt(
     )
 
 
-def generate_categories_keyboard(categories: list[str]) -> InlineKeyboardMarkup:
+def group_button(
+    name: str, callback_data: str, custom: CustomIcons | None = None
+) -> InlineKeyboardButton:
+    """Группа; с картинкой из набора — без эмодзи в тексте, картинка вместо него."""
+    custom_id = custom.groups.get(name) if custom else None
+    if custom_id:
+        text = leading_emoji(name)[1]
+        return InlineKeyboardButton(
+            text, callback_data=callback_data, icon_custom_emoji_id=custom_id
+        )
+    return InlineKeyboardButton(name, callback_data=callback_data)
+
+
+def subcategory_button(
+    name: str,
+    callback_data: str,
+    icons: dict[str, str] | None,
+    custom: CustomIcons | None = None,
+) -> InlineKeyboardButton:
+    """Подкатегория с картинкой из набора или с обычной иконкой из system!D."""
+    custom_id = custom.subcategories.get(name) if custom else None
+    if custom_id:
+        return InlineKeyboardButton(
+            name, callback_data=callback_data, icon_custom_emoji_id=custom_id
+        )
+    return InlineKeyboardButton(with_icon(name, icons), callback_data=callback_data)
+
+
+def generate_categories_keyboard(
+    categories: list[str], custom: CustomIcons | None = None
+) -> InlineKeyboardMarkup:
     """Группы по две в ряд: так кнопки шире, а названия не обрезаются."""
-    buttons = [
-        InlineKeyboardButton(name, callback_data=f"cat_{name}") for name in categories
-    ]
+    buttons = [group_button(name, f"cat_{name}", custom) for name in categories]
     return InlineKeyboardMarkup(_rows(buttons, 2))
 
 
 def categories_menu(
-    categories: list[str], with_actions: bool = False
+    categories: list[str],
+    with_actions: bool = False,
+    custom: CustomIcons | None = None,
 ) -> InlineKeyboardMarkup:
     """Группы; сразу после записи сверху — «Исправить» и «Отменить» для неё."""
     rows = [
-        list(row) for row in generate_categories_keyboard(categories).inline_keyboard
+        list(row)
+        for row in generate_categories_keyboard(categories, custom).inline_keyboard
     ]
     if with_actions:
         rows.insert(
@@ -90,10 +123,11 @@ def generate_subcategories_keyboard(
     subcategories: dict[str, list[str]],
     selected_category: str,
     icons: dict[str, str] | None = None,
+    custom: CustomIcons | None = None,
 ) -> InlineKeyboardMarkup:
     """Подгруппы с иконками по две в ряд; в callback — имя без иконки."""
     buttons = [
-        InlineKeyboardButton(with_icon(name, icons), callback_data=f"sub_{name}")
+        subcategory_button(name, f"sub_{name}", icons, custom)
         for name in subcategories.get(selected_category, [])
     ]
     back = [InlineKeyboardButton(BACK, callback_data="back_to_categories")]

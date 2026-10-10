@@ -130,6 +130,7 @@ Ensure your Google Sheet contains two sheets:
     *   **Column D:** an icon (emoji) for the subcategory in the same row — shown on the buttons and in the summaries («☕ кофе»). Subcategory names in the sheets stay as they are; `/reboot` reloads the icons.
     *   **Column F:** Sources (e.g., "Card UZS", "Cash USD"). The last 3 characters of the source name are used to determine the currency (e.g., "UZS", "USD").
     *   **Columns H:I (rows 2–10):** currency code and its rate to UZS (`GOOGLEFINANCE`). Used to convert an SMS amount in another currency into the card currency.
+    *   **Column J:** emoji packs for pictures on the buttons («наборы эмодзи», filled by `/icons`).
     *   **Column G** (next to the sources): the day up to which bank statements are loaded. The bot fills it after each import.
 
 ### 7. Running the bot:
@@ -178,6 +179,7 @@ Every day at 00:05 (`ANALYTICS_TIMEZONE`) and right after start the bot checks t
 *   **`/advice`** — AI analysis of spending vs. the current month plan.
 *   **`/undo`** — delete the rows of the last write, if nobody changed them in the sheet since.
 *   **`/fix`** — change the group and subgroup of the last write when the AI picked the wrong one (SMS, receipt or screenshot): the bot asks which operation (if there were several), then the group and the subgroup from `system`. The row is changed only if nobody edited it in the sheet; the money keeps its direction (an incoming row moved to or from «💰 ДОХОДЫ» flips the sign in `D`), and the merchant goes to the new category from the next message on.
+*   **`/icons`** — pictures on the buttons (custom emoji, Bot API 9.4): after `/icons` send any custom emoji of a pack you like (several packs in one message are fine). The bot connects the whole pack and matches pictures by the plain emoji of `system!D` and of the group names, then reports how many subcategories and groups got a picture. Packs are kept in `system!J`; `/icons off` brings plain emoji back. Telegram shows such buttons only while the bot owner has Telegram Premium — the bot sees it in the owner's updates and falls back to plain emoji otherwise.
 *   **`/reboot`** — reload categories, subcategories and sources from the `system` sheet.
 
 ## Development

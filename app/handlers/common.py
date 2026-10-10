@@ -4,6 +4,7 @@ from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from app import config
+from app.custom_icons import EMPTY, CustomIcons
 from app.utils.keyboards import (
     categories_menu,
     category_prompt,
@@ -17,6 +18,14 @@ logger = logging.getLogger(__name__)
 LAST_WRITE = "last_write"
 SEEN_INPUTS = "seen_inputs"
 CHOOSE_SOURCE = "Выберите карту:"
+
+
+def premium_icons(context: ContextTypes.DEFAULT_TYPE) -> CustomIcons:
+    """Картинки для кнопок — только пока у владельца бота Telegram Premium."""
+    found = context.bot_data.get("custom_icons")
+    if found is None or not context.bot_data.get("premium"):
+        return EMPTY
+    return found
 
 
 def track_message(context: ContextTypes.DEFAULT_TYPE, message: Message):
@@ -61,7 +70,9 @@ async def show_main_menu(
         msg2 = await update.effective_message.reply_text(
             category_prompt(current_source),
             reply_markup=categories_menu(
-                context.bot_data.get("categories", []), with_actions=actions
+                context.bot_data.get("categories", []),
+                with_actions=actions,
+                custom=premium_icons(context),
             ),
         )
         track_message(context, msg2)
@@ -106,7 +117,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg2 = await update.message.reply_text(
             category_prompt(current_source),
             reply_markup=generate_categories_keyboard(
-                context.bot_data.get("categories", [])
+                context.bot_data.get("categories", []), premium_icons(context)
             ),
         )
         track_message(context, msg2)

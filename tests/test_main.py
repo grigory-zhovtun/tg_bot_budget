@@ -42,6 +42,7 @@ def test_gate_runs_before_all_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
         "fix",
         "plan",
         "today",
+        "icons",
     }
 
 
@@ -92,8 +93,9 @@ async def test_gemini_self_check_does_not_delay_the_start() -> None:
 
     application.bot.set_my_commands.assert_awaited_once_with(main.COMMANDS)
     ai.self_check.assert_not_awaited()
-    [(callback, when, name)] = scheduled
+    (callback, when, name), packs = scheduled
     assert (when, name) == (1, "gemini_self_check")
+    assert packs[1:] == (2, "emoji_packs")  # картинки на кнопках — тоже в фоне
     await callback(SimpleNamespace(bot_data=application.bot_data))
     ai.self_check.assert_awaited_once()
 
