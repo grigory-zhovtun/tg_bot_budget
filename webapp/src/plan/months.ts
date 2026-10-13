@@ -43,6 +43,21 @@ const SHORT = [
   "дек",
 ];
 
+const PREPOSITIONAL = [
+  "январе",
+  "феврале",
+  "марте",
+  "апреле",
+  "мае",
+  "июне",
+  "июле",
+  "августе",
+  "сентябре",
+  "октябре",
+  "ноябре",
+  "декабре",
+];
+
 /** «2026-09» → 8. */
 function index(month: string): number {
   return Number(month.slice(5, 7)) - 1;
@@ -88,4 +103,18 @@ export function plural(
 
 export function days(count: number): string {
   return `${count} ${plural(count, "день", "дня", "дней")}`;
+}
+
+/** «в ноябре». */
+export function monthIn(month: string): string {
+  return `в ${PREPOSITIONAL[index(month)] ?? month}`;
+}
+
+/** «2026-12» → «2027-01». */
+export function nextMonth(month: string): string {
+  const year = Number(month.slice(0, 4));
+  const number = Number(month.slice(5, 7));
+  return number === 12
+    ? `${year + 1}-01`
+    : `${year}-${String(number + 1).padStart(2, "0")}`;
 }

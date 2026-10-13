@@ -322,6 +322,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+  createNextPlan: () => request<MonthPlan>("/plan/next", { method: "POST" }),
 };
 
 export type Api = typeof api;

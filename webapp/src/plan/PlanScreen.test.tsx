@@ -27,19 +27,21 @@ function withCoffee(plan: number): MonthPlan {
 
 function Harness({
   api,
-  initial = emptyDraft("2026-10"),
+  month = "2026-10",
+  initial,
   restored = false,
 }: {
   api: Api;
+  month?: string;
   initial?: Draft;
   restored?: boolean;
 }) {
-  const [draft, setDraft] = useState(initial);
+  const [draft, setDraft] = useState(initial ?? emptyDraft(month));
   const [shown, setShown] = useState(restored);
   return (
     <PlanScreen
       api={api}
-      month="2026-10"
+      month={month}
       draft={draft}
       restored={shown}
       onDraft={setDraft}
@@ -241,6 +243,41 @@ describe("PlanScreen", () => {
     render(<Harness api={fakeApi({ plan })} />);
     await user.click(await screen.findByRole("button", { name: "Повторить" }));
     expect(await screen.findByText("Свободно")).toBeTruthy();
+  });
+
+  it("offers to create the next month's plan", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(<Harness api={api} month="2026-11" />);
+    expect(await screen.findByText("Плана на ноябрь ещё нет")).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "Создать план на ноябрь" }),
+    );
+    expect(api.createNextPlan).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Свободно")).toBeTruthy();
+  });
+
+  it("keeps the offer when the plan cannot be created", async () => {
+    const createNextPlan = vi
+      .fn<Api["createNextPlan"]>()
+      .mockRejectedValue(
+        new ApiError(
+          503,
+          "sheets_unavailable",
+          "Таблица не ответила — попробуйте ещё раз",
+        ),
+      );
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi({ createNextPlan })} month="2026-11" />);
+    await user.click(
+      await screen.findByRole("button", { name: "Создать план на ноябрь" }),
+    );
+    expect(
+      await screen.findByText("Таблица не ответила — попробуйте ещё раз"),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Создать план на ноябрь" }),
+    ).toBeTruthy();
   });
 
   it("uses the Telegram button and hides it on leaving", async () => {

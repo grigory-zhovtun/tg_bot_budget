@@ -3,9 +3,11 @@ import {
   capital,
   days,
   monthDative,
+  monthIn,
   monthName,
   monthRange,
   monthShort,
+  nextMonth,
   plural,
 } from "./months";
 
@@ -24,5 +26,10 @@ describe("month names", () => {
     ).toEqual(["a", "b", "c", "c", "a", "b", "c"]);
     expect(days(10)).toBe("10 дней");
     expect(days(1)).toBe("1 день");
+  });
+  it("knows the next month and says «в ноябре»", () => {
+    expect(nextMonth("2026-10")).toBe("2026-11");
+    expect(nextMonth("2026-12")).toBe("2027-01");
+    expect(monthIn("2026-11")).toBe("в ноябре");
   });
 });

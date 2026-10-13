@@ -190,3 +190,22 @@ export const planFixture: MonthPlan = {
   goal: { amount: 2_000_000, currency: "UZS" },
   saved: null,
 };
+
+export const nextPlanFixture: MonthPlan = {
+  ...planFixture,
+  month: "2026-11",
+  title: "Nov 26",
+};
+
+export const notCreatedFixture: MonthPlan = {
+  month: "2026-11",
+  title: "Nov 26",
+  status: "not_created",
+  today: "2026-10-10",
+  rates: {},
+  history: null,
+  rows: [],
+  events: null,
+  goal: null,
+  saved: null,
+};
