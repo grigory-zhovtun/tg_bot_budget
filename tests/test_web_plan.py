@@ -369,6 +369,7 @@ def test_a_conflict_writes_nothing_and_returns_the_fresh_plan() -> None:
         (change(rows=[], new_rows=[{**CAFE, "currency": "EUR"}]), "new_rows"),
         (change(rows=[], new_rows=[{**CAFE, "plan": "-1"}]), "new_rows"),
         (change(rows=[], new_rows=[CAFE] * 11), "new_rows"),
+        (change(rows=[], new_rows=[CAFE, {**CAFE, "plan": "1"}]), "new_rows"),
         (change(rows=[]), "changes"),
         (change(month="1999-01"), "month"),
     ],

@@ -6,6 +6,8 @@
 вкладка считает факт, по ней же находим строку, а не по номеру.
 """
 
+import logging
+import re
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
@@ -31,6 +33,8 @@ from app.services.day_budget import (
     short,
 )
 from app.services.google_sheets import GoogleSheetsService
+
+logger = logging.getLogger(__name__)
 
 KINDS = {"Расходы": "spend", "Доходы": "income"}
 MAX_EVENTS = 20  # строк списка; дальше — уже не список, а сломанная вкладка
@@ -675,11 +679,14 @@ def insert_requests(
     return requests
 
 
+TOTALS = re.compile(r"=SUM\(H\$?2:H")
+
+
 def totals_row(column: list[list[Any]], first: int) -> int | None:
-    """Итоговая строка: первая «=SUM(H2:…» в столбце H, прочитанном со строки first."""
+    """Итоговая строка: первая «=SUM(H2:…» (или H$2) в столбце H со строки first."""
     for offset, cells in enumerate(column):
         text = _text(cells[0] if cells else "").replace(" ", "").upper()
-        if text.startswith("=SUM(H2:H"):
+        if TOTALS.match(text):
             return first + offset
     return None
 
@@ -733,6 +740,8 @@ def save_plan(
         last = max(a.row for a in plan.articles)
         column = gs.get_formulas(title, f"H{last + 1}:H{last + 5}")
         total = totals_row(column, last + 1)
+        if total is None:
+            logger.warning("No totals row under the articles of %s; left as is", title)
         requests = insert_requests(gs.sheet_id(title), plan, changes.added, total)
         gs.apply_requests(requests)
         current = read_plan(gs.get_values(title))

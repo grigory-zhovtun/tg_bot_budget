@@ -431,7 +431,9 @@ class GoogleSheetsService:
         )
 
     def sheet_id(self, worksheet_name: str) -> int:
-        return self._worksheet(worksheet_name).id
+        return self._with_retry(
+            "Reading sheet id", lambda: self._worksheet(worksheet_name).id
+        )
 
     def get_formulas(self, worksheet_name: str, cells: str) -> list[list[Any]]:
         """Ячейки диапазона: формулы текстом («=SUM(H2:H40)»), значения как есть."""

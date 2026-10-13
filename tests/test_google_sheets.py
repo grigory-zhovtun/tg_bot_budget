@@ -459,3 +459,20 @@ def test_without_the_block_or_the_sheet_the_profile_is_empty() -> None:
             raise ConnectionError("Google is down")
 
     assert make_service(Down()).get_advisor_profile() == ""
+
+
+def test_the_sheet_id_survives_one_failure() -> None:
+    class Flaky(FakeSpreadsheet):
+        failed = False
+
+        def worksheet(self, name: str) -> FakeWorksheet:
+            if not self.failed:
+                self.failed = True
+                raise ConnectionError("token expired")
+            return self.ws
+
+    ws = FakeWorksheet(sheet_id=31)
+    service = make_service(ws)
+    service.sheet = Flaky(ws)
+    assert service.sheet_id("Oct 26") == 31
+    assert service.reconnects == 1
