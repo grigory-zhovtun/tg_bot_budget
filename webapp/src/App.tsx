@@ -10,7 +10,8 @@ import {
   storeDraft,
   type Draft,
 } from "./plan/draft";
-import PlanScreen from "./plan/PlanScreen";
+import { nextMonth } from "./plan/months";
+import PlanTab from "./plan/PlanTab";
 
 type Tab = "entry" | "dashboard" | "plan";
 
@@ -31,9 +32,9 @@ export default function App({ api }: { api: Api }) {
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
   const [tab, setTab] = useState<Tab>("entry");
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [restored, setRestored] = useState(false);
-  const draftLoaded = useRef(false);
+  const [drafts, setDrafts] = useState<Record<string, Draft> | null>(null);
+  const [restored, setRestored] = useState<string[]>([]);
+  const draftsLoaded = useRef(false);
   const reload = useCallback(() => setVersion((current) => current + 1), []);
 
   useEffect(() => {
@@ -43,13 +44,19 @@ export default function App({ api }: { api: Api }) {
         if (!alive) return;
         setBoot(data);
         setError(null);
-        if (!draftLoaded.current) {
-          // черновик плана — один на сессию: перечитанный справочник его не сбрасывает
-          draftLoaded.current = true;
-          const month = data.today.slice(0, 7);
-          const stored = loadDraft(data.user.id, month);
-          setDraft(stored ?? emptyDraft(month));
-          setRestored(stored !== null);
+        if (!draftsLoaded.current) {
+          // черновики плана — на сессию: перечитанный справочник их не сбрасывает
+          draftsLoaded.current = true;
+          const current = data.today.slice(0, 7);
+          const loaded: Record<string, Draft> = {};
+          const found: string[] = [];
+          for (const month of [current, nextMonth(current)]) {
+            const stored = loadDraft(data.user.id, month);
+            loaded[month] = stored ?? emptyDraft(month);
+            if (stored) found.push(month);
+          }
+          setDrafts(loaded);
+          setRestored(found);
         }
       },
       (reason: unknown) => {
@@ -64,13 +71,21 @@ export default function App({ api }: { api: Api }) {
   const userId = boot?.user.id;
   const updateDraft = useCallback(
     (next: Draft) => {
-      setDraft(next);
+      setDrafts((current) => ({ ...(current ?? {}), [next.month]: next }));
       if (userId !== undefined) storeDraft(userId, next);
     },
     [userId],
   );
-  const restoredSeen = useCallback(() => setRestored(false), []);
-  const unsaved = draft !== null && changeCount(draft) > 0;
+  const restoredSeen = useCallback(
+    (month: string) =>
+      setRestored((current) => current.filter((item) => item !== month)),
+    [],
+  );
+  const unsaved =
+    drafts !== null &&
+    Object.values(drafts).some((draft) => changeCount(draft) > 0);
+  const currentMonth = boot ? boot.today.slice(0, 7) : "";
+  const months = currentMonth ? [currentMonth, nextMonth(currentMonth)] : [];
   const needsBoot = tab === "entry" || tab === "plan";
 
   return (
@@ -118,11 +133,11 @@ export default function App({ api }: { api: Api }) {
       {tab === "dashboard" && boot && (
         <HomeScreenButton botUsername={boot.bot_username} />
       )}
-      {tab === "plan" && boot && draft && (
-        <PlanScreen
+      {tab === "plan" && boot && drafts && (
+        <PlanTab
           api={api}
-          month={draft.month}
-          draft={draft}
+          months={months}
+          drafts={drafts}
           restored={restored}
           onDraft={updateDraft}
           onRestoredSeen={restoredSeen}

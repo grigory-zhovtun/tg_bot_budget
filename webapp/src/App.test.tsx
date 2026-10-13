@@ -79,4 +79,15 @@ describe("App", () => {
       await screen.findByRole("button", { name: "Сохранить 1 изменение" }),
     ).toBeTruthy();
   });
+
+  it("marks unsaved edits of the next month too", async () => {
+    const coffee = planFixture.rows[0];
+    if (!coffee) throw new Error("fixture");
+    const draft = editRow(emptyDraft("2026-11"), coffee, "1800000");
+    localStorage.setItem("plan-draft:1:2026-11", JSON.stringify(draft));
+    render(<App api={fakeApi()} />);
+    expect(
+      await screen.findByLabelText("есть несохранённые правки"),
+    ).toBeTruthy();
+  });
 });
