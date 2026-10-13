@@ -102,6 +102,8 @@ PLAN_LOCK = "plan_lock"  # bot_data: одно сохранение плана з
 CONFLICT = "Пока вы правили, план поменяли — проверьте подсвеченные строки"
 NO_SPACE = "Во вкладке нет места для новых статей"
 ADVISOR_DOWN = "Советник сейчас недоступен"
+# Обе модели с повторами — до двух минут; приложение ждёт советника 100 с
+ADVICE_SECONDS = 60
 
 
 def error_response(
@@ -672,7 +674,9 @@ def routes(application: Application) -> list[Route]:
         if gathered.context is None:
             return validation_error(set(gathered.invalid))
         try:
-            points = await ai.plan_advice(advice_numbers(gathered.context))
+            points = await asyncio.wait_for(
+                ai.plan_advice(advice_numbers(gathered.context)), ADVICE_SECONDS
+            )
         except Exception:
             logger.exception("Plan advice failed for user_id=%s", user.id)
             return error_response(503, "advisor_unavailable", ADVISOR_DOWN)

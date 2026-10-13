@@ -15,6 +15,7 @@ from app.services.analytics_service import MONTHS_RU
 from app.services.google_sheets import MonthTab
 from app.services.plan import shift_month
 from app.services.plan_advice import AdvicePoint
+from app.web import api as web_api
 from app.web.server import create_app
 from tests.test_day_budget import FACT_HEADER, fact_row
 from tests.test_month_plan import TAB, PlanSheets, article, month_tab
@@ -561,6 +562,23 @@ def test_without_the_advisor_the_answer_is_503() -> None:
     application.bot_data["ai_service"] = advisor(ConnectionError("quota"))
     response = ask(application, advice())
     assert (response.status_code, response.json()["error"]) == (503, down)
+
+
+def test_a_slow_advisor_is_cut_at_its_time_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def slow(text: str) -> list[AdvicePoint]:
+        await asyncio.sleep(1)
+        return [AdvicePoint("Поздно: приложение уже не ждёт.")]
+
+    monkeypatch.setattr(web_api, "ADVICE_SECONDS", 0.05)
+    application = plan_app()
+    application.bot_data["ai_service"] = SimpleNamespace(enabled=True, plan_advice=slow)
+    response = ask(application, advice())
+    assert (response.status_code, response.json()["error"]["code"]) == (
+        503,
+        "advisor_unavailable",
+    )
 
 
 def test_a_draft_the_tab_does_not_know_is_refused() -> None:

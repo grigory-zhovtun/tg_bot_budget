@@ -274,10 +274,13 @@ function isErrorBody(body: unknown): body is ErrorBody {
 
 // Таблица Google иногда думает долго, но не бесконечно ждём ответа
 export const REQUEST_TIMEOUT_MS = 25_000;
+// Советник: сервер ждёт модель до 60 с, ещё время — на чтение таблицы
+export const ADVICE_TIMEOUT_MS = 100_000;
 
 export async function request<T>(
   path: string,
   init: RequestInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<T> {
   const auth = authHeader(
     window.Telegram?.WebApp?.initData ?? "",
@@ -288,7 +291,7 @@ export async function request<T>(
   };
   if (auth) headers.Authorization = auth;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
   try {
     response = await fetch(`/api${path}`, {
@@ -359,10 +362,11 @@ export const api = {
     }),
   createNextPlan: () => request<MonthPlan>("/plan/next", { method: "POST" }),
   planAdvice: (input: PlanAdviceRequest) =>
-    request<{ points: AdvicePoint[] }>("/plan/advice", {
-      method: "POST",
-      body: JSON.stringify(input),
-    }),
+    request<{ points: AdvicePoint[] }>(
+      "/plan/advice",
+      { method: "POST", body: JSON.stringify(input) },
+      ADVICE_TIMEOUT_MS,
+    ),
 };
 
 export type Api = typeof api;
