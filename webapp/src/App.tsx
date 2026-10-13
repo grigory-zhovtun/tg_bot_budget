@@ -1,14 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, type Api, type Bootstrap } from "./api";
 import DashboardScreen from "./dashboard/DashboardScreen";
 import EntryScreen from "./entry/EntryScreen";
 import HomeScreenButton from "./HomeScreenButton";
+import {
+  changeCount,
+  emptyDraft,
+  loadDraft,
+  storeDraft,
+  type Draft,
+} from "./plan/draft";
+import PlanScreen from "./plan/PlanScreen";
 
-type Tab = "entry" | "dashboard";
+type Tab = "entry" | "dashboard" | "plan";
 
 const TABS: { name: Tab; title: string }[] = [
   { name: "entry", title: "Ввод" },
   { name: "dashboard", title: "Сводка" },
+  { name: "plan", title: "План" },
 ];
 
 function errorText(reason: unknown): string {
@@ -22,6 +31,9 @@ export default function App({ api }: { api: Api }) {
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
   const [tab, setTab] = useState<Tab>("entry");
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [restored, setRestored] = useState(false);
+  const draftLoaded = useRef(false);
   const reload = useCallback(() => setVersion((current) => current + 1), []);
 
   useEffect(() => {
@@ -31,6 +43,14 @@ export default function App({ api }: { api: Api }) {
         if (!alive) return;
         setBoot(data);
         setError(null);
+        if (!draftLoaded.current) {
+          // черновик плана — один на сессию: перечитанный справочник его не сбрасывает
+          draftLoaded.current = true;
+          const month = data.today.slice(0, 7);
+          const stored = loadDraft(data.user.id, month);
+          setDraft(stored ?? emptyDraft(month));
+          setRestored(stored !== null);
+        }
       },
       (reason: unknown) => {
         if (alive) setError(errorText(reason));
@@ -41,10 +61,22 @@ export default function App({ api }: { api: Api }) {
     };
   }, [api, version]);
 
+  const userId = boot?.user.id;
+  const updateDraft = useCallback(
+    (next: Draft) => {
+      setDraft(next);
+      if (userId !== undefined) storeDraft(userId, next);
+    },
+    [userId],
+  );
+  const restoredSeen = useCallback(() => setRestored(false), []);
+  const unsaved = draft !== null && changeCount(draft) > 0;
+  const needsBoot = tab === "entry" || tab === "plan";
+
   return (
     <main className="mx-auto flex max-w-md flex-col gap-4 p-4">
       <nav
-        className="grid grid-cols-2 gap-1 rounded-xl bg-section p-1"
+        className="grid grid-cols-3 gap-1 rounded-xl bg-section p-1"
         role="tablist"
         aria-label="Разделы"
       >
@@ -60,13 +92,18 @@ export default function App({ api }: { api: Api }) {
             onClick={() => setTab(name)}
           >
             {title}
+            {name === "plan" && unsaved && (
+              <span
+                role="img"
+                aria-label="есть несохранённые правки"
+                className="ml-1 inline-block size-1.5 rounded-full bg-link align-middle"
+              />
+            )}
           </button>
         ))}
       </nav>
-      {tab === "entry" && !boot && !error && (
-        <p className="text-hint">Загрузка…</p>
-      )}
-      {tab === "entry" && !boot && error && (
+      {needsBoot && !boot && !error && <p className="text-hint">Загрузка…</p>}
+      {needsBoot && !boot && error && (
         <div className="flex flex-col items-start gap-2" role="alert">
           <p>{error}</p>
           <button type="button" className="text-link" onClick={reload}>
@@ -80,6 +117,16 @@ export default function App({ api }: { api: Api }) {
       {tab === "dashboard" && <DashboardScreen api={api} />}
       {tab === "dashboard" && boot && (
         <HomeScreenButton botUsername={boot.bot_username} />
+      )}
+      {tab === "plan" && boot && draft && (
+        <PlanScreen
+          api={api}
+          month={draft.month}
+          draft={draft}
+          restored={restored}
+          onDraft={updateDraft}
+          onRestoredSeen={restoredSeen}
+        />
       )}
     </main>
   );
