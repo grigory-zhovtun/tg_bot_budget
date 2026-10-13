@@ -268,7 +268,8 @@ export default function PlanScreen({
   }, [api, draft, onDraft]);
 
   const create = useCallback(() => {
-    if (creating) return;
+    if (inFlight.current) return; // второй тап до перерисовки — без второго запроса
+    inFlight.current = true;
     setCreating(true);
     setNotice(null);
     api
@@ -277,6 +278,10 @@ export default function PlanScreen({
         (fresh) => {
           haptic("success");
           setPlan(fresh);
+          // черновик с прошлого раза ложится на созданный план, как при открытии
+          const next = rebase(draftRef.current, fresh);
+          setConflicts(next.conflicts);
+          onDraftRef.current(next.draft);
         },
         (reason: unknown) => {
           haptic("error");
@@ -287,8 +292,11 @@ export default function PlanScreen({
           );
         },
       )
-      .finally(() => setCreating(false));
-  }, [api, creating]);
+      .finally(() => {
+        inFlight.current = false;
+        setCreating(false);
+      });
+  }, [api]);
 
   // Системная кнопка Telegram: «Сохранить N изменений», пока не открыто окно правки
   useEffect(() => {
@@ -347,7 +355,7 @@ export default function PlanScreen({
           {`Плана на ${monthName(month)} ещё нет`}
         </h3>
         <p className="text-sm text-hint">
-          {`Создам вкладку «${plan.title}» копией текущего месяца: статьи, суммы, поступления по дням и цель. Потом поправишь то, что ${monthIn(month)} будет по-другому. До 1-го числа вкладка спрятана в таблице, а бот и лимит считают по текущему месяцу.`}
+          {`Создам вкладку «${plan.title}» копией текущего месяца: статьи, суммы, поступления по дням и цель. Потом поправите то, что ${monthIn(month)} будет по-другому. До 1-го числа вкладка спрятана в таблице, а бот и лимит считают по текущему месяцу.`}
         </p>
         {notice && (
           <p className="text-sm text-danger" role="alert">

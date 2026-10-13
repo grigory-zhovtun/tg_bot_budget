@@ -49,9 +49,21 @@ describe("PlanTab", () => {
     );
     expect(await screen.findByText("Свободно")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Сохранить/ })).toBeNull();
-    await user.click(screen.getByRole("radio", { name: "Октябрь" }));
+    await user.click(screen.getByRole("radio", { name: /^Октябрь/ }));
     expect(
       await screen.findByRole("button", { name: "Сохранить 1 изменение" }),
     ).toBeTruthy();
+  });
+
+  it("tells which month has unsaved edits", async () => {
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi()} />);
+    await user.click(await screen.findByRole("button", { name: "кофе" }));
+    await user.click(screen.getByRole("button", { name: "= среднему" }));
+    await user.click(screen.getByRole("button", { name: "Готово" }));
+    expect(
+      screen.getByRole("radio", { name: "Октябрь, есть несохранённые правки" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "Ноябрь" })).toBeTruthy();
   });
 });

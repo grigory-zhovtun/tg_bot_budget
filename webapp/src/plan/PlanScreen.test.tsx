@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Api, type MonthPlan, type PlanArticle } from "../api";
-import { planFixture } from "../mocks/fixtures";
+import { nextPlanFixture, planFixture } from "../mocks/fixtures";
 import { fakeApi } from "../test/fakeApi";
 import { editRow, emptyDraft, type Draft } from "./draft";
 import PlanScreen from "./PlanScreen";
@@ -388,6 +388,43 @@ describe("PlanScreen", () => {
     expect(
       await screen.findByText(
         "Во вкладке нет места для новых статей. Правки не потеряны — сохраните ещё раз",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("creates the next month once on a double tap and lays the old draft over it", async () => {
+    const createNextPlan = vi
+      .fn<Api["createNextPlan"]>()
+      .mockResolvedValue(nextPlanFixture);
+    const stale = editRow(
+      emptyDraft("2026-11"),
+      { ...row("кофе|UZS"), plan: 1 },
+      "1800000",
+    );
+    render(
+      <Harness
+        api={fakeApi({ createNextPlan })}
+        month="2026-11"
+        initial={stale}
+      />,
+    );
+    const button = await screen.findByRole("button", {
+      name: "Создать план на ноябрь",
+    });
+    act(() => {
+      button.click();
+      button.click(); // до перерисовки
+    });
+    expect(createNextPlan).toHaveBeenCalledTimes(1);
+    const coffee = await screen.findByRole("button", { name: "кофе" });
+    expect(coffee.getAttribute("data-conflict")).toBe("true");
+  });
+
+  it("speaks to the user formally on the next month card", async () => {
+    render(<Harness api={fakeApi()} month="2026-11" />);
+    expect(
+      await screen.findByText(
+        /Потом поправите то, что в ноябре будет по-другому/,
       ),
     ).toBeTruthy();
   });
