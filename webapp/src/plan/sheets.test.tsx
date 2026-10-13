@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { PlanArticle, PlanEvent } from "../api";
 import { planFixture } from "../mocks/fixtures";
+import AddArticleSheet from "./AddArticleSheet";
 import ArticleSheet from "./ArticleSheet";
 import EventSheet from "./EventSheet";
 import GoalSheet from "./GoalSheet";
@@ -109,5 +110,84 @@ describe("GoalSheet", () => {
     await user.click(screen.getByRole("button", { name: "000" }));
     await user.click(screen.getByRole("button", { name: "Готово" }));
     expect(onDone).toHaveBeenCalledWith("1000000000", "UZS");
+  });
+});
+
+describe("AddArticleSheet", () => {
+  const food = planFixture.addable.filter((item) => item.group === "🍔 ЕДА");
+
+  it("picks a subcategory and a currency and fills the sum from the hints", async () => {
+    const user = userEvent.setup();
+    const onDone = vi.fn();
+    render(
+      <AddArticleSheet
+        group="🍔 ЕДА"
+        items={food}
+        history={planFixture.history}
+        initial={null}
+        onDone={onDone}
+        onRemove={null}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Новая статья · 🍔 ЕДА" }),
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole("radio", { name: "🍷 ресторан" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    await user.click(screen.getByRole("button", { name: "= сентябрю" }));
+    await user.click(screen.getByRole("button", { name: "Добавить" }));
+    expect(onDone).toHaveBeenCalledWith(food[0], "900000");
+
+    await user.click(screen.getByRole("radio", { name: "☕ кофе" }));
+    expect(screen.queryByRole("radiogroup", { name: "Валюта" })).toBeNull(); // только USD
+    expect(screen.getByRole("status", { name: "Сумма" }).textContent).toContain(
+      "USD",
+    );
+  });
+
+  it("switches the currency of a subcategory", async () => {
+    const user = userEvent.setup();
+    const onDone = vi.fn();
+    render(
+      <AddArticleSheet
+        group="🍔 ЕДА"
+        items={food}
+        history={planFixture.history}
+        initial={null}
+        onDone={onDone}
+        onRemove={null}
+        onClose={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("radio", { name: "USD" }));
+    await user.click(screen.getByRole("button", { name: "5" }));
+    await user.click(screen.getByRole("button", { name: "Добавить" }));
+    expect(onDone).toHaveBeenCalledWith(food[1], "5");
+  });
+
+  it("edits or removes an article added before", async () => {
+    const user = userEvent.setup();
+    const onRemove = vi.fn();
+    render(
+      <AddArticleSheet
+        group="🍔 ЕДА"
+        items={food}
+        history={planFixture.history}
+        initial={{ key: "ресторан|USD", text: "50" }}
+        onDone={vi.fn()}
+        onRemove={onRemove}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("radio", { name: "USD" }).getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(screen.getByRole("button", { name: "Готово" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Убрать статью" }));
+    expect(onRemove).toHaveBeenCalled();
   });
 });

@@ -9,8 +9,11 @@ import {
 import { groupColor, tint } from "../entry/palette";
 import { itemAmount, money, short, withCurrency } from "../format";
 import { haptic, telegram } from "../telegram";
+import { amountValue } from "../entry/amount";
+import AddArticleSheet from "./AddArticleSheet";
 import ArticleSheet from "./ArticleSheet";
 import {
+  addRow,
   amountText,
   changeCount,
   editEvent,
@@ -19,10 +22,12 @@ import {
   emptyDraft,
   planTotals,
   rebase,
+  removeRow,
   rowPlan,
   shownEvents,
   shownGoal,
   toSave,
+  type AddedRow,
   type Draft,
 } from "./draft";
 import EventSheet from "./EventSheet";
@@ -33,6 +38,7 @@ type Editing =
   | { kind: "article"; key: string }
   | { kind: "event"; slot: number }
   | { kind: "goal" }
+  | { kind: "add"; group: string; key: string | null } // key — правка добавленной
   | null;
 
 interface Props {
@@ -56,10 +62,16 @@ function currencies(plan: MonthPlan): string[] {
   return ["UZS", ...others.sort()];
 }
 
-function groupsOf(rows: PlanArticle[]): [string, PlanArticle[]][] {
+function groupsOf(
+  rows: PlanArticle[],
+  extra: string[],
+): [string, PlanArticle[]][] {
   const groups = new Map<string, PlanArticle[]>();
   for (const row of rows) {
     groups.set(row.group, [...(groups.get(row.group) ?? []), row]);
+  }
+  for (const group of extra) {
+    if (!groups.has(group)) groups.set(group, []);
   }
   return [...groups.entries()];
 }
@@ -125,6 +137,29 @@ function ArticleLine({
             {money(article.plan, fraction)}
           </span>
         )}
+      </span>
+    </button>
+  );
+}
+
+function AddedLine({ row, onPick }: { row: AddedRow; onPick: () => void }) {
+  const foreign = row.currency !== "UZS";
+  return (
+    <button
+      type="button"
+      aria-label={`${row.subcategory}${foreign ? ` ${row.currency}` : ""}, новая`}
+      className="flex w-full items-center justify-between gap-3 border-t border-black/5 py-2 text-left"
+      onClick={onPick}
+    >
+      <span className="flex flex-col">
+        <span className="font-medium">
+          {row.icon} {row.subcategory}
+          {foreign ? ` · ${row.currency}` : ""}
+        </span>
+        <span className="text-xs text-link">новая статья</span>
+      </span>
+      <span className="font-semibold text-link">
+        {money(amountValue(row.text), foreign ? 2 : 0)}
       </span>
     </button>
   );
@@ -208,10 +243,13 @@ export default function PlanScreen({
         (reason: unknown) => {
           haptic("error");
           const conflict = planConflict(reason);
+          const fields =
+            reason instanceof ApiError ? Object.values(reason.fields) : [];
           const message =
-            reason instanceof ApiError
+            fields[0] ??
+            (reason instanceof ApiError
               ? reason.message
-              : "Не получилось сохранить";
+              : "Не получилось сохранить");
           if (conflict) {
             const next = rebase(draftRef.current, conflict.plan);
             setPlan(conflict.plan);
@@ -343,7 +381,17 @@ export default function PlanScreen({
     history
       ? `ср. ${short(row.average)} · ${monthShort(history.last)} ${short(row.last)}`
       : "";
-  const spend = groupsOf(plan.rows.filter((row) => row.kind === "spend"));
+  const extra = [
+    ...new Set(
+      plan.addable
+        .filter((item) => item.kind === "spend")
+        .map((item) => item.group),
+    ),
+  ];
+  const spend = groupsOf(
+    plan.rows.filter((row) => row.kind === "spend"),
+    extra,
+  );
   const income = plan.rows.filter((row) => row.kind === "income");
   const filled = events
     .filter((item) => item.name !== null)
@@ -361,6 +409,32 @@ export default function PlanScreen({
       ? events.find((item) => item.slot === editing.slot)
       : undefined;
   const close = () => setEditing(null);
+  const added = Object.entries(draft.added);
+  const addedIn = (group: string) =>
+    added.filter(([, row]) => row.group === group);
+  const offers = (group: string) =>
+    plan.addable.filter((item) => item.group === group);
+  const incomeOffers = plan.addable.filter((item) => item.kind === "income");
+  const incomeAdded = added.filter(([, row]) => row.kind === "income");
+  const adding = editing?.kind === "add" ? editing : null;
+  const uzsOf = (row: AddedRow) =>
+    amountValue(row.text) * (plan.rates[row.currency] ?? 0);
+  const addedLine = ([key, row]: [string, AddedRow]) => (
+    <AddedLine
+      key={key}
+      row={row}
+      onPick={() => setEditing({ kind: "add", group: row.group, key })}
+    />
+  );
+  const addButton = (group: string) => (
+    <button
+      type="button"
+      className="py-2 text-left text-link"
+      onClick={() => setEditing({ kind: "add", group, key: null })}
+    >
+      ＋ статья
+    </button>
+  );
 
   const line = (row: PlanArticle) => (
     <ArticleLine
@@ -473,11 +547,12 @@ export default function PlanScreen({
       )}
       {spend.map(([group, rows], index) => {
         const color = groupColor(group, index);
-        const sum = rows.reduce(
-          (total, row) =>
-            total + rowPlan(draft, row) * (plan.rates[row.currency] ?? 0),
-          0,
-        );
+        const sum =
+          rows.reduce(
+            (total, row) =>
+              total + rowPlan(draft, row) * (plan.rates[row.currency] ?? 0),
+            0,
+          ) + addedIn(group).reduce((total, [, row]) => total + uzsOf(row), 0);
         return (
           <section
             key={group}
@@ -493,16 +568,22 @@ export default function PlanScreen({
               <span className="text-sm text-hint">{short(sum)}</span>
             </div>
             {rows.map(line)}
+            {addedIn(group).map(addedLine)}
+            {offers(group).length > 0 && addButton(group)}
           </section>
         );
       })}
-      {income.length > 0 && (
+      {(income.length > 0 ||
+        incomeAdded.length > 0 ||
+        incomeOffers.length > 0) && (
         <section
           className="flex flex-col rounded-3xl bg-section px-3 pt-2 pb-1"
           aria-label="Доходы по статьям"
         >
           <h3 className="pb-1 font-semibold">Доходы по статьям</h3>
           {income.map(line)}
+          {incomeAdded.map(addedLine)}
+          {incomeOffers.length > 0 && addButton(incomeOffers[0]?.group ?? "")}
           {differs && (
             <p className="py-2 text-xs text-hint">
               {`По статьям ${short(totals.incomeRows)}, в поступлениях ${short(totals.incomes)}`}
@@ -532,6 +613,32 @@ export default function PlanScreen({
         >
           {label}
         </button>
+      )}
+      {adding && (
+        <AddArticleSheet
+          group={adding.group}
+          items={offers(adding.group)}
+          history={plan.history}
+          initial={
+            adding.key
+              ? { key: adding.key, text: draft.added[adding.key]?.text ?? "" }
+              : null
+          }
+          onDone={(item, text) => {
+            const base = adding.key ? removeRow(draft, adding.key) : draft;
+            onDraft(addRow(base, item, text));
+            close();
+          }}
+          onRemove={
+            adding.key
+              ? () => {
+                  onDraft(removeRow(draft, adding.key ?? ""));
+                  close();
+                }
+              : null
+          }
+          onClose={close}
+        />
       )}
       {article && (
         <ArticleSheet
