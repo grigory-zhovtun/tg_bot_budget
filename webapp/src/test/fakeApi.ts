@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import type { Api } from "../api";
 import {
+  adviceFixture,
   bootstrapFixture,
   dashboardFixture,
   nextPlanFixture,
@@ -31,6 +32,7 @@ export function fakeApi(overrides: Partial<Api> = {}): Api {
     createNextPlan: vi
       .fn<Api["createNextPlan"]>()
       .mockResolvedValue(nextPlanFixture),
+    planAdvice: vi.fn<Api["planAdvice"]>().mockResolvedValue(adviceFixture),
     ...overrides,
   };
 }

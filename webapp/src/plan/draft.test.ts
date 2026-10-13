@@ -14,6 +14,7 @@ import {
   rebase,
   removeRow,
   storeDraft,
+  toAdvice,
   toSave,
 } from "./draft";
 
@@ -269,5 +270,39 @@ describe("drafts from before new articles", () => {
     const draft = loadDraft(7, "2026-10");
     expect(draft?.added).toEqual({});
     expect(draft ? changeCount(draft) : 0).toBe(1);
+  });
+});
+
+describe("toAdvice", () => {
+  it("sends the draft values without what they were", () => {
+    let draft = editRow(emptyDraft("2026-10"), row("кофе|UZS"), "1800000");
+    draft = editGoal(draft, goal(), "3000000", "UZS");
+    draft = addRow(draft, offer("ресторан", "UZS"), "500000");
+    draft = editEvent(draft, slot(3), {
+      name: "Премия",
+      day: 25,
+      income: true,
+      text: "1000000",
+      currency: "UZS",
+    });
+    expect(toAdvice(draft)).toEqual({
+      month: "2026-10",
+      rows: [{ key: "кофе|UZS", plan: "1800000" }],
+      new_rows: [
+        {
+          group: "🍔 ЕДА",
+          subcategory: "ресторан",
+          currency: "UZS",
+          plan: "500000",
+        },
+      ],
+      events: [
+        {
+          slot: 3,
+          value: { name: "Премия", day: 25, amount: "1000000", currency: "UZS" },
+        },
+      ],
+      goal: { amount: "3000000", currency: "UZS" },
+    });
   });
 });

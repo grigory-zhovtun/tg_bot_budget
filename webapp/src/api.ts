@@ -212,6 +212,21 @@ export interface PlanConflict {
   conflicts: string[];
 }
 
+/** Пункт совета; apply — новая сумма статьи для «Применить». */
+export interface AdvicePoint {
+  text: string;
+  apply: { key: string; plan: number } | null;
+}
+
+/** Черновик для советника: значения, как на экране, без того, что было. */
+export interface PlanAdviceRequest {
+  month: string;
+  rows: { key: string; plan: string }[];
+  new_rows: PlanSave["new_rows"];
+  events: { slot: number; value: EventValue | null }[];
+  goal: { amount: string; currency: string } | null;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -343,6 +358,11 @@ export const api = {
       body: JSON.stringify(input),
     }),
   createNextPlan: () => request<MonthPlan>("/plan/next", { method: "POST" }),
+  planAdvice: (input: PlanAdviceRequest) =>
+    request<{ points: AdvicePoint[] }>("/plan/advice", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 };
 
 export type Api = typeof api;

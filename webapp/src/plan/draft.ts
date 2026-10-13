@@ -6,6 +6,7 @@ import type {
   PlanAddable,
   PlanArticle,
   PlanEvent,
+  PlanAdviceRequest,
   PlanGoal,
   PlanSave,
 } from "../api";
@@ -277,6 +278,18 @@ export function toSave(draft: Draft): PlanSave {
       currency: row.currency,
       plan: apiAmount(row.text || "0"),
     })),
+  };
+}
+
+/** Черновик для советника: то же, что сохраняем, но без базы. */
+export function toAdvice(draft: Draft): PlanAdviceRequest {
+  const save = toSave(draft);
+  return {
+    month: save.month,
+    rows: save.rows.map(({ key, plan }) => ({ key, plan })),
+    new_rows: save.new_rows,
+    events: save.events.map(({ slot, value }) => ({ slot, value })),
+    goal: save.goal ? save.goal.value : null,
   };
 }
 
