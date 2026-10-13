@@ -158,7 +158,7 @@ class DashboardOut(ApiModel):
     planned_balance: float | None = None
     frozen: FrozenOut | None = None
     groups: list[GroupPlanOut] = []
-    daily: list[DayPointOut] = []
+    daily: list[DayPointOut] = []  # для открытых до обновления версий приложения
     spending: list[DaySpendOut] = []
     upcoming: list[ForecastItemOut] = []
     subscriptions: list[SubscriptionOut] = []
