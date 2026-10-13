@@ -2,7 +2,9 @@
 
 import asyncio
 import logging
+from datetime import date
 
+from telegram import Bot
 from telegram.ext import ContextTypes
 
 from app import config
@@ -22,28 +24,48 @@ def owner_chat_id() -> int | None:
     return config.OWNER_ID
 
 
-def describe(tab: MonthTab) -> str | None:
+def describe(tab: MonthTab, today: date) -> str | None:
     """Текст для владельца или None, если ничего не поменялось."""
+    hidden = f"Скрыл прошлые месяцы: {', '.join(tab.hidden)}."
     if tab.created:
         lines = [
             f"📅 Новый месяц: создал вкладку «{tab.title}», "
             f"план скопирован с «{tab.source}»."
         ]
         if tab.hidden:
-            lines.append(f"Скрыл прошлые месяцы: {', '.join(tab.hidden)}.")
+            lines.append(hidden)
         lines.append("Поправьте план во вкладке, если в этом месяце он другой.")
         return "\n".join(lines)
     if tab.revealed:
         lines = [
-            f"📅 Новый месяц: вкладка «{tab.title}» с планом, составленным "
-            "заранее, стала текущей."
+            (
+                (
+                    f"📅 Новый месяц: вкладка «{tab.title}» с планом, составленным "
+                    "заранее, стала текущей."
+                )
+                if today.day == 1
+                else f"📅 Вкладка «{tab.title}» была скрыта — показал её: это текущий месяц."
+            )
         ]
         if tab.hidden:
-            lines.append(f"Скрыл прошлые месяцы: {', '.join(tab.hidden)}.")
+            lines.append(hidden)
         return "\n".join(lines)
+    if tab.hidden:
+        return f"📅 Новый месяц: вкладка «{tab.title}» уже открыта.\n{hidden}"
     if tab.dates_fixed:
         return f"📅 Поправил даты месяца во вкладке «{tab.title}» (ячейки M1:M2)."
     return None
+
+
+async def tell_owner(bot: Bot, text: str) -> None:
+    """Сообщение владельцу о вкладке месяца; сбой отправки — только в лог."""
+    chat_id = owner_chat_id()
+    if chat_id is None:
+        return
+    try:
+        await bot.send_message(chat_id, text)
+    except Exception:
+        logger.exception("Could not tell the owner about the month tab")
 
 
 async def month_tab_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -55,14 +77,8 @@ async def month_tab_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception:
         logger.exception("Month tab check failed")
         return
-    text = describe(tab)
+    text = describe(tab, today)
     if text is None:
         return
     logger.info("Month tab %s: created=%s", tab.title, tab.created)
-    chat_id = owner_chat_id()
-    if chat_id is None:
-        return
-    try:
-        await context.bot.send_message(chat_id, text)
-    except Exception:
-        logger.exception("Could not tell the owner about the month tab")
+    await tell_owner(context.bot, text)

@@ -43,10 +43,13 @@ export default function PlanTab({
             >
               {capital(monthName(item))}
               {unsaved && (
-                <span
-                  aria-hidden="true"
-                  className="ml-1 inline-block size-1.5 rounded-full bg-current align-middle"
-                />
+                <>
+                  <span className="sr-only">, есть несохранённые правки</span>
+                  <span
+                    aria-hidden="true"
+                    className="ml-1 inline-block size-1.5 rounded-full bg-current align-middle"
+                  />
+                </>
               )}
             </button>
           );

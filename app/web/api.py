@@ -22,16 +22,21 @@ from app import config
 from app.custom_icons import leading_emoji
 from app.domain import currency_of, entry_row, local_today, month_title
 from app.handlers.messages import save_rows, seen_input
+from app.handlers.month import describe, tell_owner
 from app.handlers.undo import undo_last
 from app.services.dashboard import Dashboard
 from app.services.plan import (
     ArticleChange,
+    Catalog,
     EventChange,
     EventValue,
     GoalChange,
     LoadedPlan,
+    NewArticle,
     PlanChanges,
+    addable,
     change_note,
+    kind_of,
     load_plan,
     save_plan,
     shift_month,
@@ -51,6 +56,7 @@ from app.web.schemas import (
     GroupOut,
     GroupPlanOut,
     MessageOut,
+    PlanAddableOut,
     PlanArticleOut,
     PlanConflictOut,
     PlanEventOut,
@@ -82,11 +88,13 @@ FIELD_MESSAGES = {
     "rows": "Статьи не подходят — обновите план",
     "events": "Строка списка не подходит — проверьте название, день, сумму и валюту",
     "goal": "Цель не подходит — проверьте сумму и валюту",
+    "new_rows": "Новую статью не добавить — обновите план",
     "changes": "Нет изменений — нечего сохранять",
 }
 SHEETS_DOWN = "Таблица не ответила — попробуйте ещё раз"
 PLAN_LOCK = "plan_lock"  # bot_data: одно сохранение плана за раз — проверка и запись
 CONFLICT = "Пока вы правили, план поменяли — проверьте подсвеченные строки"
+NO_SPACE = "Во вкладке нет места для новых статей"
 
 
 def error_response(
@@ -266,7 +274,11 @@ def plan_month(text: str | None, today: date) -> date | None:
 
 
 def plan_out(
-    first: date, today: date, loaded: LoadedPlan | None, icons: dict[str, str]
+    first: date,
+    today: date,
+    loaded: LoadedPlan | None,
+    icons: dict[str, str],
+    catalog: Catalog,
 ) -> PlanOut:
     """План месяца для экрана; без вкладки — только статус."""
     month, title = f"{first:%Y-%m}", month_title(first)
@@ -322,6 +334,19 @@ def plan_out(
         rows=rows,
         events=events,
         goal=goal,
+        addable=[
+            PlanAddableOut(
+                kind=kind_of(item.group),
+                group=item.group,
+                subcategory=item.subcategory,
+                icon=icons.get(item.subcategory, ""),
+                currency=item.currency,
+                average=item.average,
+                last=item.last,
+                current=item.current,
+            )
+            for item in addable(plan, catalog, loaded.rates.to_uzs.keys(), history)
+        ],
     )
 
 
@@ -353,6 +378,10 @@ def plan_changes(body: PlanSaveIn) -> PlanChanges:
             for c in body.events
         ),
         goal=goal,
+        added=tuple(
+            NewArticle(n.group, n.subcategory, n.currency, float(n.plan))
+            for n in body.new_rows
+        ),
     )
 
 
@@ -478,7 +507,8 @@ def routes(application: Application) -> list[Route]:
             logger.exception("Plan failed for user_id=%s", user.id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
         icons: dict[str, str] = application.bot_data.get("icons", {})
-        body = plan_out(first, today, loaded, icons)
+        catalog: Catalog = application.bot_data.get("subcategories", {})
+        body = plan_out(first, today, loaded, icons, catalog)
         return JSONResponse(body.model_dump(mode="json"))
 
     async def save_month_plan(request: Request) -> JSONResponse:
@@ -498,10 +528,13 @@ def routes(application: Application) -> list[Route]:
             return validation_error({"changes"})
         title = month_title(first)
         gs = application.bot_data["gs_service"]
+        catalog: Catalog = application.bot_data.get("subcategories", {})
         lock: asyncio.Lock = application.bot_data.setdefault(PLAN_LOCK, asyncio.Lock())
         try:
             async with lock:
-                outcome = await asyncio.to_thread(save_plan, gs, title, changes)
+                outcome = await asyncio.to_thread(
+                    save_plan, gs, title, changes, catalog
+                )
                 loaded = None
                 if not outcome.invalid:
                     loaded = await asyncio.to_thread(load_plan, gs, title, today)
@@ -511,9 +544,13 @@ def routes(application: Application) -> list[Route]:
             logger.exception("Plan save failed for user_id=%s", user.id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
         if outcome.invalid:
+            if "space" in outcome.invalid:
+                return error_response(
+                    422, "validation", NO_SPACE, {"new_rows": NO_SPACE}
+                )
             return validation_error(set(outcome.invalid))
         icons: dict[str, str] = application.bot_data.get("icons", {})
-        fresh = plan_out(first, today, loaded, icons)
+        fresh = plan_out(first, today, loaded, icons, catalog)
         if outcome.conflicts:
             conflict = PlanConflictOut(
                 error=ErrorOut(code="plan_changed", message=CONFLICT),
@@ -538,6 +575,7 @@ def routes(application: Application) -> list[Route]:
         lock: asyncio.Lock = application.bot_data.setdefault(PLAN_LOCK, asyncio.Lock())
         try:
             async with lock:
+                current = await asyncio.to_thread(gs.ensure_month_tab, today)
                 tab = await asyncio.to_thread(gs.ensure_next_month_tab, today)
                 loaded = await asyncio.to_thread(
                     load_plan, gs, month_title(first), today
@@ -545,10 +583,14 @@ def routes(application: Application) -> list[Route]:
         except Exception:
             logger.exception("Next month plan failed for user_id=%s", user.id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if text := describe(current, today):
+            # вкладку текущего месяца сделала кнопка раньше ночной задачи
+            await tell_owner(application.bot, text)
         if tab.created:
             logger.info("Plan tab %s created by user_id=%s", tab.title, user.id)
         icons: dict[str, str] = application.bot_data.get("icons", {})
-        body = plan_out(first, today, loaded, icons)
+        catalog: Catalog = application.bot_data.get("subcategories", {})
+        body = plan_out(first, today, loaded, icons, catalog)
         return JSONResponse(body.model_dump(mode="json"))
 
     return [

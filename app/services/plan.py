@@ -6,7 +6,7 @@
 вкладка считает факт, по ней же находим строку, а не по номеру.
 """
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
@@ -15,8 +15,14 @@ import pandas as pd
 from gspread.exceptions import WorksheetNotFound
 
 from app import config
-from app.domain import Rates
-from app.services.analytics_service import MONTHS_RU, money, transactions_frame
+from app.domain import INCOME_GROUP, Rates
+from app.services.analytics_service import (
+    MONTHS_RU,
+    OPENING_BALANCE,
+    TRANSFERS_GROUP,
+    money,
+    transactions_frame,
+)
 from app.services.day_budget import (
     COLUMN_O,
     GOAL_LABEL,
@@ -28,6 +34,31 @@ from app.services.google_sheets import GoogleSheetsService
 
 KINDS = {"Расходы": "spend", "Доходы": "income"}
 MAX_EVENTS = 20  # строк списка; дальше — уже не список, а сломанная вкладка
+KIND_TEXT = {kind: text for text, kind in KINDS.items()}  # A новой строки
+MAX_NEW_ROWS = 10  # новых статей за одно сохранение
+LAST_ROW = 60  # P9 вкладки считает план по $H$2:$H$60 — статьи ниже он не видит
+
+Catalog = Mapping[str, Sequence[str]]  # группа → подкатегории листа system
+
+
+def kind_of(group: str) -> str:
+    """Тип статьи по группе: «💰 ДОХОДЫ» — доходы, остальные — расходы."""
+    return "income" if group == INCOME_GROUP else "spend"
+
+
+def catalog_pairs(catalog: Catalog) -> list[tuple[str, str]]:
+    """(группа, подкатегория) справочника, из которых делаются статьи плана.
+
+    Переводы между своими картами и «нач остаток» — не статьи бюджета.
+    """
+    return [
+        (group, sub)
+        for group, subs in catalog.items()
+        if group != TRANSFERS_GROUP
+        for sub in subs
+        if sub != OPENING_BALANCE
+    ]
+
 
 EventCells = tuple[str | None, int | None, float | None, str | None]
 
@@ -211,6 +242,32 @@ def article_history(frame: pd.DataFrame, today: date) -> History:
     return History(months, months[-1], current, today.day, sums)
 
 
+@dataclass(frozen=True)
+class Addable:
+    """Пара справочника, которой нет во вкладке, — для «＋ статья»."""
+
+    group: str
+    subcategory: str
+    currency: str
+    average: float
+    last: float
+    current: float
+
+
+def addable(
+    plan: MonthPlan, catalog: Catalog, currencies: Collection[str], history: History
+) -> tuple[Addable, ...]:
+    """Чего нет во вкладке: каждая подкатегория справочника в каждой валюте курсов."""
+    present = {a.key for a in plan.articles}
+    codes = sorted(currencies, key=lambda code: (code != "UZS", code))
+    return tuple(
+        Addable(group, sub, code, *history.of(article_key(sub, code)))
+        for group, sub in catalog_pairs(catalog)
+        for code in codes
+        if article_key(sub, code) not in present
+    )
+
+
 TOLERANCE = 0.005  # суммы сравниваем до копейки
 
 
@@ -245,13 +302,33 @@ class GoalChange:
 
 
 @dataclass(frozen=True)
+class NewArticle:
+    """Новая статья: строки с парой (подкатегория, валюта) во вкладке ещё нет."""
+
+    group: str
+    subcategory: str
+    currency: str
+    plan: float
+
+    @property
+    def key(self) -> str:
+        return article_key(self.subcategory, self.currency)
+
+
+@dataclass(frozen=True)
 class PlanChanges:
     articles: tuple[ArticleChange, ...] = ()
     events: tuple[EventChange, ...] = ()
     goal: GoalChange | None = None
+    added: tuple[NewArticle, ...] = ()
 
     def count(self) -> int:
-        return len(self.articles) + len(self.events) + int(self.goal is not None)
+        return (
+            len(self.articles)
+            + len(self.events)
+            + int(self.goal is not None)
+            + len(self.added)
+        )
 
 
 def _same(left: float | None, right: float | None) -> bool:
@@ -261,9 +338,16 @@ def _same(left: float | None, right: float | None) -> bool:
 
 
 def unknown(
-    plan: MonthPlan, changes: PlanChanges, currencies: Collection[str]
+    plan: MonthPlan,
+    changes: PlanChanges,
+    currencies: Collection[str],
+    catalog: Catalog | None = None,
 ) -> set[str]:
-    """Поля, которые во вкладке не найти или нельзя править (ответ 422)."""
+    """Поля, которые во вкладке не найти или нельзя править (ответ 422).
+
+    «new_rows» — новая статья не из справочника, в незнакомой валюте, дважды
+    или во вкладке без статей; «space» — новым статьям нет места выше LAST_ROW.
+    """
     bad: set[str] = set()
     editable = {a.key for a in plan.articles if a.editable}
     keys = [change.key for change in changes.articles]
@@ -281,6 +365,22 @@ def unknown(
         plan.goal is None or changes.goal.value[1] not in currencies
     ):
         bad.add("goal")
+    if changes.added:
+        pairs = set(catalog_pairs(catalog or {}))
+        added = [new.key for new in changes.added]
+        if (
+            not plan.articles
+            or len(added) > MAX_NEW_ROWS
+            or len(set(added)) != len(added)
+            or any(
+                (new.group, new.subcategory) not in pairs
+                or new.currency not in currencies
+                for new in changes.added
+            )
+        ):
+            bad.add("new_rows")
+        elif max(a.row for a in plan.articles) + len(added) > LAST_ROW:
+            bad.add("space")
     return bad
 
 
@@ -303,6 +403,9 @@ def conflicts(plan: MonthPlan, changes: PlanChanges) -> list[str]:
         amount, currency = changes.goal.base
         if currency != plan.goal.currency or not _same(plan.goal.amount, amount):
             found.append("goal")
+    for new in changes.added:
+        if new.key in articles:  # пару добавил второй или прошлая попытка
+            found.append(new.key)
     return found
 
 
@@ -350,7 +453,20 @@ def applied(plan: MonthPlan, changes: PlanChanges) -> MonthPlan:
     """План после правок — для «Свободно» в уведомлении."""
     plans = {change.key: change.plan for change in changes.articles}
     values = {change.slot: change.value for change in changes.events}
-    articles = tuple(replace(a, plan=plans.get(a.key, a.plan)) for a in plan.articles)
+    articles = tuple(
+        replace(a, plan=plans.get(a.key, a.plan)) for a in plan.articles
+    ) + tuple(
+        Article(
+            new.key,
+            kind_of(new.group),
+            new.group,
+            new.subcategory,
+            new.currency,
+            new.plan,
+            0,
+        )
+        for new in changes.added
+    )
     events: tuple[Event, ...] | None = None
     if plan.events is not None:
         events = tuple(
@@ -416,6 +532,13 @@ def _event_text(cells: EventCells) -> str:
     return f"{day} · {name} {sign}{_amount(abs(amount), currency)}"
 
 
+def _label(subcategory: str, currency: str, icons: dict[str, str]) -> str:
+    """«☕ кофе», «квартплата USD»."""
+    parts = (icons.get(subcategory, ""), subcategory)
+    label = " ".join(part for part in parts if part)
+    return label if currency == "UZS" else f"{label} {currency}"
+
+
 def change_note(
     plan: MonthPlan,
     changes: PlanChanges,
@@ -429,11 +552,11 @@ def change_note(
     lines: list[str] = []
     for change in changes.articles:
         article = articles[change.key]
-        parts = (icons.get(article.subcategory, ""), article.subcategory)
-        label = " ".join(part for part in parts if part)
-        if article.currency != "UZS":
-            label += f" {article.currency}"
+        label = _label(article.subcategory, article.currency, icons)
         lines.append(f"{label}: {_plain(change.base)} → {_plain(change.plan)}")
+    for new in changes.added:
+        label = _label(new.subcategory, new.currency, icons)
+        lines.append(f"＋ {label}: {_plain(new.plan)}")
     for change in changes.events:
         value = change.value
         after = (
@@ -459,6 +582,106 @@ def change_note(
     before = totals(plan, rates).free
     after_free = totals(applied(plan, changes), rates).free
     return "\n".join([head, *shown, f"Свободно: {short(before)} → {short(after_free)}"])
+
+
+INSERT_COLUMNS = 12  # A–L: строка статьи; в M только M1:M2 — даты месяца
+
+
+def _grid(
+    sheet_id: int, row: int, first: int = 0, last: int = INSERT_COLUMNS
+) -> dict[str, int]:
+    """Строка row (с 1), колонки first..last-1 (с 0) — диапазон batch_update."""
+    return {
+        "sheetId": sheet_id,
+        "startRowIndex": row - 1,
+        "endRowIndex": row,
+        "startColumnIndex": first,
+        "endColumnIndex": last,
+    }
+
+
+def _cells(
+    sheet_id: int, row: int, first: int, *values: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        "updateCells": {
+            "range": _grid(sheet_id, row, first, first + len(values)),
+            "rows": [{"values": [{"userEnteredValue": value} for value in values]}],
+            "fields": "userEnteredValue",
+        }
+    }
+
+
+def insert_requests(
+    sheet_id: int,
+    plan: MonthPlan,
+    added: Sequence[NewArticle],
+    total_row: int | None,
+) -> list[dict[str, Any]]:
+    """Запросы batch_update: новые статьи строками A–L, каждая — за своей группой.
+
+    Вставляется только A–L со сдвигом вниз: справа в тех же строках блок
+    прогноза и таблица дней, а в M — даты месяца. Формулы и формат — копией
+    строки выше (ссылки на свою строку сдвигаются сами). Итоговая строка
+    переписывается на все статьи: вставку сразу под последней статьёй
+    диапазон SUM сам не захватывает. Запросы выполняются по порядку, поэтому
+    номера строк считаются с учётом предыдущих вставок.
+    """
+    rows = [(a.group, a.kind, a.row) for a in plan.articles]
+    requests: list[dict[str, Any]] = []
+    for new in added:
+        kind = kind_of(new.group)
+        after = max(
+            [row for group, _, row in rows if group == new.group]
+            or [row for _, other, row in rows if other == kind]
+            or [row for _, _, row in rows]
+        )
+        at = after + 1
+        rows = [(g, k, r + 1 if r >= at else r) for g, k, r in rows]
+        rows.append((new.group, kind, at))
+        if total_row is not None and total_row >= at:
+            total_row += 1
+        requests += [
+            {"insertRange": {"range": _grid(sheet_id, at), "shiftDimension": "ROWS"}},
+            {
+                "copyPaste": {
+                    "source": _grid(sheet_id, after),
+                    "destination": _grid(sheet_id, at),
+                    "pasteType": "PASTE_NORMAL",
+                }
+            },
+            _cells(
+                sheet_id,
+                at,
+                0,
+                {"stringValue": KIND_TEXT[kind]},
+                {"stringValue": new.group},
+                {"stringValue": new.subcategory},
+                {"numberValue": 0.0 - new.plan},
+            ),
+            _cells(sheet_id, at, 6, {"stringValue": new.currency}),
+        ]
+    if total_row is not None:
+        last = max(row for _, _, row in rows)
+        requests.append(
+            _cells(
+                sheet_id,
+                total_row,
+                7,
+                {"formulaValue": f"=SUM(H2:H{last})"},
+                {"formulaValue": f"=SUM(I2:I{last})"},
+            )
+        )
+    return requests
+
+
+def totals_row(column: list[list[Any]], first: int) -> int | None:
+    """Итоговая строка: первая «=SUM(H2:…» в столбце H, прочитанном со строки first."""
+    for offset, cells in enumerate(column):
+        text = _text(cells[0] if cells else "").replace(" ", "").upper()
+        if text.startswith("=SUM(H2:H"):
+            return first + offset
+    return None
 
 
 @dataclass(frozen=True)
@@ -487,16 +710,32 @@ class SaveOutcome:
     conflicts: tuple[str, ...] = ()
 
 
-def save_plan(gs: GoogleSheetsService, title: str, changes: PlanChanges) -> SaveOutcome:
+def save_plan(
+    gs: GoogleSheetsService,
+    title: str,
+    changes: PlanChanges,
+    catalog: Catalog | None = None,
+) -> SaveOutcome:
     """Проверить правки по свежей вкладке и записать; при ошибке ничего не пишет.
 
+    Новые статьи вставляются первыми, одним batch_update; потом вкладка
+    перечитывается, и суммы пишутся по новым номерам строк.
     WorksheetNotFound — вкладки месяца нет.
     """
     plan = read_plan(gs.get_values(title))
     rates = gs.get_rates()
-    if bad := unknown(plan, changes, rates.to_uzs.keys()):
+    if bad := unknown(plan, changes, rates.to_uzs.keys(), catalog):
         return SaveOutcome(plan, rates, invalid=frozenset(bad))
     if found := conflicts(plan, changes):
         return SaveOutcome(plan, rates, conflicts=tuple(found))
-    gs.write_cells(cell_updates(title, plan, changes))
+    current = plan
+    if changes.added:
+        last = max(a.row for a in plan.articles)
+        column = gs.get_formulas(title, f"H{last + 1}:H{last + 5}")
+        total = totals_row(column, last + 1)
+        requests = insert_requests(gs.sheet_id(title), plan, changes.added, total)
+        gs.apply_requests(requests)
+        current = read_plan(gs.get_values(title))
+    if data := cell_updates(title, current, changes):
+        gs.write_cells(data)
     return SaveOutcome(plan, rates)

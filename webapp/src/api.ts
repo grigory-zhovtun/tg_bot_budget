@@ -154,6 +154,18 @@ export interface PlanHistory {
   current_days: number;
 }
 
+/** Пара справочника, которой нет во вкладке, — для «＋ статья». */
+export interface PlanAddable {
+  kind: "spend" | "income";
+  group: string;
+  subcategory: string;
+  icon: string;
+  currency: string;
+  average: number;
+  last: number;
+  current: number;
+}
+
 export interface MonthPlan {
   month: string;
   title: string;
@@ -164,6 +176,7 @@ export interface MonthPlan {
   rows: PlanArticle[];
   events: PlanEvent[] | null;
   goal: PlanGoal | null;
+  addable: PlanAddable[];
   saved: number | null;
 }
 
@@ -186,6 +199,12 @@ export interface PlanSave {
     base: PlanGoal;
     value: { amount: string; currency: string };
   } | null;
+  new_rows: {
+    group: string;
+    subcategory: string;
+    currency: string;
+    plan: string;
+  }[];
 }
 
 export interface PlanConflict {

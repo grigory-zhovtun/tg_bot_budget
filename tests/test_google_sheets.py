@@ -4,6 +4,7 @@ from datetime import date
 from typing import Any
 
 import pytest
+from gspread.utils import ValueRenderOption
 
 from app.domain import SheetRow
 from app.services import google_sheets
@@ -400,3 +401,34 @@ def test_balance_checks_are_read_as_datetimes() -> None:
         2026, 10, 9, 11, 41
     )
     assert checks["UZCARD 5837 UZS"] is None
+
+
+def test_formulas_are_read_as_formulas_and_the_sheet_id_is_known() -> None:
+    class Recording(FakeWorksheet):
+        asked: tuple[str, dict[str, Any]] | None = None
+
+        def get(self, range_name: str, **options: Any) -> list[list[str]]:
+            self.asked = (range_name, options)
+            return [["=SUM(H2:H40)"]]
+
+    ws = Recording(sheet_id=31)
+    service = make_service(ws)
+    assert service.get_formulas("Oct 26", "H41:H45") == [["=SUM(H2:H40)"]]
+    assert ws.asked == ("H41:H45", {"value_render_option": ValueRenderOption.formula})
+    assert service.sheet_id("Oct 26") == 31
+
+
+def test_structure_requests_go_once_without_a_retry() -> None:
+    ws = FakeWorksheet()
+    service = make_service(ws)
+    service.apply_requests([{"insertRange": {}}])
+    assert service.sheet.batch == [{"requests": [{"insertRange": {}}]}]
+
+    class Lost(FakeSpreadsheet):
+        def batch_update(self, body: dict[str, Any]) -> None:
+            raise ConnectionError("the reply was lost")
+
+    service.sheet = Lost(ws)
+    with pytest.raises(ConnectionError):
+        service.apply_requests([{"insertRange": {}}])
+    assert service.reconnects == 0  # повтор вставил бы строки дважды

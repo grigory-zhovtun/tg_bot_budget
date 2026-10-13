@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
-import type { PlanArticle, PlanEvent, PlanGoal } from "../api";
+import type { PlanAddable, PlanArticle, PlanEvent, PlanGoal } from "../api";
 import { planFixture } from "../mocks/fixtures";
 import {
+  addRow,
   amountText,
   changeCount,
   editEvent,
@@ -11,6 +12,7 @@ import {
   loadDraft,
   planTotals,
   rebase,
+  removeRow,
   storeDraft,
   toSave,
 } from "./draft";
@@ -159,5 +161,113 @@ describe("plan draft", () => {
     expect(amountText(12.5, true)).toBe("12,5");
     expect(amountText(500, true)).toBe("500");
     expect(amountText(0, false)).toBe("");
+  });
+});
+
+function offer(subcategory: string, currency: string): PlanAddable {
+  const found = planFixture.addable.find(
+    (item) => item.subcategory === subcategory && item.currency === currency,
+  );
+  if (!found) throw new Error(subcategory);
+  return found;
+}
+
+/** План, где пару уже добавили во вкладку с суммой plan. */
+function withRestaurant(plan: number) {
+  return {
+    ...planFixture,
+    rows: [
+      ...planFixture.rows,
+      {
+        key: "ресторан|UZS",
+        kind: "spend" as const,
+        group: "🍔 ЕДА",
+        subcategory: "ресторан",
+        icon: "🍷",
+        currency: "UZS",
+        plan,
+        average: 600_000,
+        last: 900_000,
+        current: 0,
+        editable: true,
+      },
+    ],
+    addable: planFixture.addable.slice(1),
+  };
+}
+
+describe("new articles", () => {
+  const start = emptyDraft("2026-10");
+
+  it("count as changes, join the totals and go into the request", () => {
+    const draft = addRow(start, offer("ресторан", "UZS"), "500000");
+    expect(changeCount(draft)).toBe(1);
+    expect(planTotals(planFixture, draft).spend).toBe(
+      planTotals(planFixture, start).spend + 500_000,
+    );
+    expect(toSave(draft).new_rows).toEqual([
+      {
+        group: "🍔 ЕДА",
+        subcategory: "ресторан",
+        currency: "UZS",
+        plan: "500000",
+      },
+    ]);
+    expect(changeCount(removeRow(draft, "ресторан|UZS"))).toBe(0);
+  });
+
+  it("in a currency count at its rate, incomes apart from spending", () => {
+    const draft = addRow(
+      addRow(start, offer("ресторан", "USD"), "50"),
+      offer("премия", "UZS"),
+      "1000000",
+    );
+    const totals = planTotals(planFixture, draft);
+    expect(totals.spend).toBe(planTotals(planFixture, start).spend + 600_000);
+    expect(totals.incomeRows).toBe(
+      planTotals(planFixture, start).incomeRows + 1_000_000,
+    );
+  });
+
+  it("become an edit with a conflict when the pair was added meanwhile", () => {
+    const draft = addRow(start, offer("ресторан", "UZS"), "500000");
+    const next = rebase(draft, withRestaurant(300_000));
+    expect(next.conflicts).toEqual(["ресторан|UZS"]);
+    expect(next.draft.added).toEqual({});
+    expect(next.draft.rows["ресторан|UZS"]).toEqual({
+      base: 300_000,
+      text: "500000",
+    });
+  });
+
+  it("leave the draft once the tab has them with the same sum", () => {
+    const draft = addRow(start, offer("ресторан", "UZS"), "500000");
+    const next = rebase(draft, withRestaurant(500_000));
+    expect(next.conflicts).toEqual([]);
+    expect(changeCount(next.draft)).toBe(0);
+  });
+
+  it("stay in the draft while the pair is still missing", () => {
+    const draft = addRow(start, offer("такси", "UZS"), "400000");
+    expect(rebase(draft, planFixture).draft.added).toEqual(draft.added);
+  });
+});
+
+describe("drafts from before new articles", () => {
+  afterEach(() => localStorage.clear());
+
+  it("still load", () => {
+    localStorage.setItem(
+      "plan-draft:7:2026-10",
+      JSON.stringify({
+        month: "2026-10",
+        rows: { "кофе|UZS": { base: 1_500_000, text: "1800000" } },
+        events: {},
+        goal: null,
+      }),
+    );
+    const draft = loadDraft(7, "2026-10");
+    expect(draft?.added).toEqual({});
+    expect(draft ? changeCount(draft) : 0).toBe(1);
   });
 });

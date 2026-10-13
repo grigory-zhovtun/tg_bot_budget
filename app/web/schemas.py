@@ -199,6 +199,19 @@ class PlanGoalOut(ApiModel):
     currency: str
 
 
+class PlanAddableOut(ApiModel):
+    """Пара справочника, которой нет во вкладке, — для «＋ статья»."""
+
+    kind: Literal["spend", "income"]
+    group: str
+    subcategory: str
+    icon: str
+    currency: str
+    average: float
+    last: float
+    current: float
+
+
 class PlanOut(ApiModel):
     """План месяца для экрана «План»; без вкладки — только статус."""
 
@@ -211,6 +224,7 @@ class PlanOut(ApiModel):
     rows: list[PlanArticleOut] = []
     events: list[PlanEventOut] | None = None  # None — во вкладке нет блока прогноза
     goal: PlanGoalOut | None = None
+    addable: list[PlanAddableOut] = []
     saved: int | None = None  # после сохранения — сколько правок записано
 
 
@@ -271,11 +285,23 @@ class GoalChangeIn(ApiModel):
     value: GoalIn
 
 
+class NewArticleIn(ApiModel):
+    """Новая статья: пара (подкатегория, валюта), которой нет во вкладке."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    group: str = Field(min_length=1, max_length=60)
+    subcategory: str = Field(min_length=1, max_length=60)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+    plan: Decimal = Field(ge=0, le=MAX_SUM, decimal_places=2)
+
+
 class PlanSaveIn(ApiModel):
     month: str = Field(pattern=r"^\d{4}-\d{2}$")
     rows: list[ArticleChangeIn] = Field(default=[], max_length=300)
     events: list[EventChangeIn] = Field(default=[], max_length=30)
     goal: GoalChangeIn | None = None
+    new_rows: list[NewArticleIn] = Field(default=[], max_length=10)  # MAX_NEW_ROWS
 
 
 class PlanConflictOut(ApiModel):

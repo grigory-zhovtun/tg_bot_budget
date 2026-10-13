@@ -1,9 +1,9 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Api, type MonthPlan, type PlanArticle } from "../api";
-import { planFixture } from "../mocks/fixtures";
+import { nextPlanFixture, planFixture } from "../mocks/fixtures";
 import { fakeApi } from "../test/fakeApi";
 import { editRow, emptyDraft, type Draft } from "./draft";
 import PlanScreen from "./PlanScreen";
@@ -102,6 +102,7 @@ describe("PlanScreen", () => {
       rows: [{ key: "кофе|UZS", base: 1_500_000, plan: "1800000" }],
       events: [],
       goal: null,
+      new_rows: [],
     });
     expect(await screen.findByText(/План сохранён/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Сохранить/ })).toBeNull();
@@ -303,5 +304,128 @@ describe("PlanScreen", () => {
     expect(main.hide).toHaveBeenCalled(); // окно правки открыто — кнопки нет
     unmount();
     expect(main.hide).toHaveBeenCalledTimes(1);
+  });
+
+  it("adds an article to a group and saves it with the rest", async () => {
+    const savePlan = vi
+      .fn<Api["savePlan"]>()
+      .mockResolvedValue({ ...planFixture, saved: 1 });
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi({ savePlan })} />);
+    const food = await screen.findByRole("region", { name: "🍔 ЕДА" });
+    await user.click(within(food).getByRole("button", { name: "＋ статья" }));
+    for (const key of ["5", "0", "0", "0", "0", "0"]) {
+      await user.click(screen.getByRole("button", { name: key }));
+    }
+    await user.click(screen.getByRole("button", { name: "Добавить" }));
+    expect(
+      within(food).getByRole("button", { name: "ресторан, новая" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Расходы по плану").nextElementSibling?.textContent,
+    ).toBe("11,00 млн");
+    await user.click(
+      screen.getByRole("button", { name: "Сохранить 1 изменение" }),
+    );
+    expect(savePlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        new_rows: [
+          {
+            group: "🍔 ЕДА",
+            subcategory: "ресторан",
+            currency: "UZS",
+            plan: "500000",
+          },
+        ],
+      }),
+    );
+  });
+
+  it("shows a group the tab has no rows of yet", async () => {
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi()} />);
+    const taxi = await screen.findByRole("region", { name: "🚌 ТРАНСПОРТ" });
+    await user.click(within(taxi).getByRole("button", { name: "＋ статья" }));
+    await user.click(screen.getByRole("button", { name: "= среднему" }));
+    await user.click(screen.getByRole("button", { name: "Добавить" }));
+    expect(
+      within(taxi).getByRole("button", { name: "такси, новая" }),
+    ).toBeTruthy();
+  });
+
+  it("adds an income article and removes a new article before saving", async () => {
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi()} />);
+    const incomes = await screen.findByRole("region", {
+      name: "Доходы по статьям",
+    });
+    await user.click(
+      within(incomes).getByRole("button", { name: "＋ статья" }),
+    );
+    await user.click(screen.getByRole("button", { name: "1" }));
+    await user.click(screen.getByRole("button", { name: "Добавить" }));
+    await user.click(
+      within(incomes).getByRole("button", { name: "премия, новая" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Убрать статью" }));
+    expect(
+      within(incomes).queryByRole("button", { name: "премия, новая" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /Сохранить/ })).toBeNull();
+  });
+
+  it("names the field a save was refused for", async () => {
+    const savePlan = vi.fn<Api["savePlan"]>().mockRejectedValue(
+      new ApiError(422, "validation", "Проверьте введённые данные", {
+        new_rows: "Во вкладке нет места для новых статей",
+      }),
+    );
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi({ savePlan })} initial={EDITED} />);
+    await user.click(
+      await screen.findByRole("button", { name: "Сохранить 1 изменение" }),
+    );
+    expect(
+      await screen.findByText(
+        "Во вкладке нет места для новых статей. Правки не потеряны — сохраните ещё раз",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("creates the next month once on a double tap and lays the old draft over it", async () => {
+    const createNextPlan = vi
+      .fn<Api["createNextPlan"]>()
+      .mockResolvedValue(nextPlanFixture);
+    const stale = editRow(
+      emptyDraft("2026-11"),
+      { ...row("кофе|UZS"), plan: 1 },
+      "1800000",
+    );
+    render(
+      <Harness
+        api={fakeApi({ createNextPlan })}
+        month="2026-11"
+        initial={stale}
+      />,
+    );
+    const button = await screen.findByRole("button", {
+      name: "Создать план на ноябрь",
+    });
+    act(() => {
+      button.click();
+      button.click(); // до перерисовки
+    });
+    expect(createNextPlan).toHaveBeenCalledTimes(1);
+    const coffee = await screen.findByRole("button", { name: "кофе" });
+    expect(coffee.getAttribute("data-conflict")).toBe("true");
+  });
+
+  it("speaks to the user formally on the next month card", async () => {
+    render(<Harness api={fakeApi()} month="2026-11" />);
+    expect(
+      await screen.findByText(
+        /Потом поправите то, что в ноябре будет по-другому/,
+      ),
+    ).toBeTruthy();
   });
 });
