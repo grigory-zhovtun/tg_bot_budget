@@ -102,6 +102,7 @@ describe("PlanScreen", () => {
       rows: [{ key: "кофе|UZS", base: 1_500_000, plan: "1800000" }],
       events: [],
       goal: null,
+      new_rows: [],
     });
     expect(await screen.findByText(/План сохранён/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Сохранить/ })).toBeNull();

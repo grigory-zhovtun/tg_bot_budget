@@ -3,6 +3,7 @@
 import type {
   EventValue,
   MonthPlan,
+  PlanAddable,
   PlanArticle,
   PlanEvent,
   PlanGoal,
@@ -39,11 +40,22 @@ export interface GoalEdit {
   currency: string;
 }
 
+/** Новая статья: пары во вкладке ещё нет; text — сумма как на клавиатуре. */
+export interface AddedRow {
+  kind: "spend" | "income";
+  group: string;
+  subcategory: string;
+  icon: string;
+  currency: string;
+  text: string;
+}
+
 export interface Draft {
   month: string;
   rows: Record<string, RowEdit>;
   events: Record<string, EventEdit>; // ключ — номер строки списка
   goal: GoalEdit | null;
+  added: Record<string, AddedRow>; // ключ — «подкатегория|ВАЛЮТА»
 }
 
 export interface PlanTotals {
@@ -55,14 +67,15 @@ export interface PlanTotals {
 }
 
 export function emptyDraft(month: string): Draft {
-  return { month, rows: {}, events: {}, goal: null };
+  return { month, rows: {}, events: {}, goal: null, added: {} };
 }
 
 export function changeCount(draft: Draft): number {
   return (
     Object.keys(draft.rows).length +
     Object.keys(draft.events).length +
-    (draft.goal ? 1 : 0)
+    (draft.goal ? 1 : 0) +
+    Object.keys(draft.added).length
   );
 }
 
@@ -139,6 +152,27 @@ export function editGoal(
   return { ...draft, goal: same ? null : { base, text, currency } };
 }
 
+export function pairKey(subcategory: string, currency: string): string {
+  return `${subcategory}|${currency}`;
+}
+
+export function addRow(draft: Draft, item: PlanAddable, text: string): Draft {
+  const row: AddedRow = {
+    kind: item.kind,
+    group: item.group,
+    subcategory: item.subcategory,
+    icon: item.icon,
+    currency: item.currency,
+    text,
+  };
+  const key = pairKey(item.subcategory, item.currency);
+  return { ...draft, added: { ...draft.added, [key]: row } };
+}
+
+export function removeRow(draft: Draft, key: string): Draft {
+  return { ...draft, added: without(draft.added, key) };
+}
+
 export function rowPlan(draft: Draft, article: PlanArticle): number {
   const edit = draft.rows[article.key];
   return edit ? amountValue(edit.text) : article.plan;
@@ -182,6 +216,11 @@ export function planTotals(plan: MonthPlan, draft: Draft): PlanTotals {
   let incomeRows = 0;
   for (const row of plan.rows) {
     const value = uzs(rowPlan(draft, row), row.currency);
+    if (row.kind === "spend") spend += value;
+    else incomeRows += value;
+  }
+  for (const row of Object.values(draft.added)) {
+    const value = uzs(amountValue(row.text), row.currency);
     if (row.kind === "spend") spend += value;
     else incomeRows += value;
   }
@@ -232,6 +271,12 @@ export function toSave(draft: Draft): PlanSave {
           },
         }
       : null,
+    new_rows: Object.values(draft.added).map((row) => ({
+      group: row.group,
+      subcategory: row.subcategory,
+      currency: row.currency,
+      plan: apiAmount(row.text || "0"),
+    })),
   };
 }
 
@@ -267,6 +312,19 @@ export function rebase(
     }
     next = editGoal(next, fresh.goal, draft.goal.text, draft.goal.currency);
   }
+  for (const [key, row] of Object.entries(draft.added)) {
+    const article = fresh.rows.find((item) => item.key === key);
+    if (article) {
+      // пару успели добавить во вкладку: дальше это правка существующей статьи
+      if (!close(article.plan, amountValue(row.text))) conflicts.push(key);
+      if (article.editable) next = editRow(next, article, row.text);
+      continue;
+    }
+    const offered = fresh.addable.some(
+      (item) => pairKey(item.subcategory, item.currency) === key,
+    );
+    if (offered) next = { ...next, added: { ...next.added, [key]: row } };
+  }
   return { draft: next, conflicts };
 }
 
@@ -284,7 +342,9 @@ function storageKey(userId: number, month: string): string {
   return `${STORAGE}:${userId}:${month}`;
 }
 
-function isDraft(value: unknown, month: string): value is Draft {
+type StoredDraft = Omit<Draft, "added"> & { added?: Record<string, AddedRow> };
+
+function isStoredDraft(value: unknown, month: string): value is StoredDraft {
   return (
     typeof value === "object" &&
     value !== null &&
@@ -296,7 +356,9 @@ function isDraft(value: unknown, month: string): value is Draft {
     "events" in value &&
     typeof value.events === "object" &&
     value.events !== null &&
-    "goal" in value
+    "goal" in value &&
+    (!("added" in value) ||
+      (typeof value.added === "object" && value.added !== null))
   );
 }
 
@@ -305,7 +367,9 @@ export function loadDraft(userId: number, month: string): Draft | null {
     const text = localStorage.getItem(storageKey(userId, month));
     if (!text) return null;
     const value: unknown = JSON.parse(text);
-    return isDraft(value, month) && changeCount(value) > 0 ? value : null;
+    if (!isStoredDraft(value, month)) return null;
+    const draft: Draft = { ...value, added: value.added ?? {} };
+    return changeCount(draft) > 0 ? draft : null;
   } catch {
     return null;
   }
