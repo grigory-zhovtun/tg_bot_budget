@@ -112,6 +112,40 @@ def test_overspending_lowers_the_limit_for_the_rest_of_the_month() -> None:
     assert (second.balance, second.planned_balance) == (16_600_000, 16_900_000)
 
 
+def test_every_day_of_the_month_keeps_its_spending_and_limit() -> None:
+    third = budget(
+        date(2026, 10, 3),
+        fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000),
+        fact_row(date(2026, 10, 2), "🍔 ЕДА", "кафе", 50_000),
+        fact_row(date(2026, 10, 3), "🍔 ЕДА", "кафе", 30_000),
+    )
+    assert [(day.day, day.spent) for day in third.history] == [
+        (date(2026, 10, 1), 400_000),
+        (date(2026, 10, 2), 50_000),
+        (date(2026, 10, 3), 30_000),
+    ]
+    # перерасход 1-го снизил лимит: 100 000 → 90 000 → (16,55 + 4,2 − 18,1) млн / 29
+    assert [day.limit for day in third.history] == pytest.approx(
+        [100_000, 90_000, 2_650_000 / 29]
+    )
+    # те же числа, что в утреннем сообщении: вчера против лимита и лимит на сегодня
+    yesterday, today = third.history[-2:]
+    assert (yesterday.spent, yesterday.limit) == (
+        third.yesterday_spent,
+        third.yesterday_limit,
+    )
+    assert (today.spent, today.limit) == (third.spent_today, third.limit)
+
+
+def test_on_the_first_the_history_is_only_today() -> None:
+    [today] = budget(date(2026, 10, 1)).history
+    assert (today.day, today.spent, today.limit) == (
+        date(2026, 10, 1),
+        0,
+        pytest.approx(100_000),
+    )
+
+
 def test_income_due_today_still_counts() -> None:
     # 14 дней без трат: запас 1,4 млн делится на оставшиеся 17 дней
     assert budget(date(2026, 10, 15)).limit == pytest.approx(3_100_000 / 17)

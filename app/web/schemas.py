@@ -102,6 +102,12 @@ class DayPointOut(ApiModel):
     fact: float | None
 
 
+class DaySpendOut(ApiModel):
+    day: date
+    spent: float  # без платежей из списка
+    limit: float  # лимит, с которым день начался
+
+
 class ForecastItemOut(ApiModel):
     name: str
     day: int
@@ -153,6 +159,7 @@ class DashboardOut(ApiModel):
     frozen: FrozenOut | None = None
     groups: list[GroupPlanOut] = []
     daily: list[DayPointOut] = []
+    spending: list[DaySpendOut] = []
     upcoming: list[ForecastItemOut] = []
     subscriptions: list[SubscriptionOut] = []
     runway: RunwayOut | None = None
