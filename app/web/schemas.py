@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ApiModel(BaseModel):
@@ -193,3 +193,75 @@ class PlanOut(ApiModel):
     events: list[PlanEventOut] | None = None  # None — во вкладке нет блока прогноза
     goal: PlanGoalOut | None = None
     saved: int | None = None  # после сохранения — сколько правок записано
+
+
+MAX_SUM = Decimal(10) ** 12
+
+
+class EventValueIn(ApiModel):
+    """Строка списка: сумма со знаком — «+» поступление, «−» платёж."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=40)
+    day: int = Field(ge=1, le=31)
+    amount: Decimal = Field(ge=-MAX_SUM, le=MAX_SUM, decimal_places=2)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+
+    @field_validator("amount")
+    @classmethod
+    def not_zero(cls, value: Decimal) -> Decimal:
+        if value == 0:
+            raise ValueError("сумма — не 0")
+        return value
+
+
+class EventCellsIn(ApiModel):
+    """Строка списка, какой её видел пользователь (пустые поля — null)."""
+
+    name: str | None
+    day: int | None
+    amount: float | None
+    currency: str | None
+
+
+class ArticleChangeIn(ApiModel):
+    key: str = Field(min_length=3, max_length=200)
+    base: float
+    plan: Decimal = Field(ge=0, le=MAX_SUM, decimal_places=2)
+
+
+class EventChangeIn(ApiModel):
+    slot: int = Field(ge=0, le=50)
+    base: EventCellsIn
+    value: EventValueIn | None
+
+
+class GoalIn(ApiModel):
+    amount: Decimal = Field(ge=0, le=MAX_SUM, decimal_places=2)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+
+
+class GoalBaseIn(ApiModel):
+    amount: float
+    currency: str
+
+
+class GoalChangeIn(ApiModel):
+    base: GoalBaseIn
+    value: GoalIn
+
+
+class PlanSaveIn(ApiModel):
+    month: str = Field(pattern=r"^\d{4}-\d{2}$")
+    rows: list[ArticleChangeIn] = Field(default=[], max_length=300)
+    events: list[EventChangeIn] = Field(default=[], max_length=30)
+    goal: GoalChangeIn | None = None
+
+
+class PlanConflictOut(ApiModel):
+    """409: план поменяли после открытия — свежий план и что именно поменялось."""
+
+    error: ErrorOut
+    plan: PlanOut
+    conflicts: list[str]

@@ -346,15 +346,17 @@ class PlanSheets:
         self.tabs = {name: [list(row) for row in rows] for name, rows in tabs.items()}
         self.tabs["fact"] = fact or [FACT_HEADER]
         self.writes: list[list[dict[str, Any]]] = []
-        self.delay = 0.0  # пауза чтения: в тесте гонки оба чтения идут раньше записи
+        self.delay = 0.0  # пауза между чтением вкладки и записью — окно гонки
 
     def get_values(self, name: str) -> list[list[Any]]:
-        time.sleep(self.delay)
         if name not in self.tabs:
             raise WorksheetNotFound(name)
         return [list(row) for row in self.tabs[name]]
 
     def get_rates(self) -> Rates:
+        time.sleep(
+            self.delay
+        )  # save_plan: вкладка уже прочитана, запись ещё не сделана
         return Rates({"UZS": 1.0, "USD": 12_000.0, "RUB": 150.0})
 
     def write_cells(self, data: list[dict[str, Any]]) -> None:
