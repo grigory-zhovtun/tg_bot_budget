@@ -25,6 +25,7 @@ from app.domain import (
     resolve_category,
 )
 from app.services.google_sheets import GoogleSheetsService
+from app.services.plan_advice import AdvicePoint
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +107,21 @@ class MerchantCategory(BaseModel):
 
 
 MERCHANTS_SCHEMA = TypeAdapter(list[MerchantCategory]).json_schema()
+
+
+class AdviceItem(BaseModel):
+    """Пункт совета по плану; key и plan — только у пункта про одну статью."""
+
+    text: str
+    key: str | None = None
+    plan: float | None = None
+
+
+class PlanAdvice(BaseModel):
+    points: list[AdviceItem]
+
+
+PLAN_ADVICE_SCHEMA = PlanAdvice.model_json_schema()
 
 
 def merchant_hints(rows: list[list[Any]], limit: int = MAX_HINTS) -> list[str]:
@@ -256,6 +272,35 @@ def advice_prompt(numbers: str) -> str:
             "'🔮 Прогноз' — the month forecast vs the average month;",
             "'💡 Совет' — 2-3 concrete steps for the rest of the month.",
             "Use the category names as given. No intro or outro.",
+        ]
+    )
+
+
+def plan_advice_prompt(context: str) -> str:
+    """Запрос советника «Плана»: всё уже посчитано, модель только советует."""
+    return "\n".join(
+        [
+            "You are a strict and concise financial advisor for a family budget.",
+            "Below are the family notes, the draft plan for a month and the",
+            "family's own history; all numbers are already calculated —",
+            "do not recalculate them. You have no internet access: do not quote",
+            "current market prices; when you talk about prices, use the family's",
+            "own purchases (how many and the average check).",
+            "",
+            context,
+            "",
+            "Give at most 5 points in simple Russian, one or two sentences each:",
+            "- where the plan is clearly below the usual spending: the monthly",
+            "  history, the same month a year ago, past plans that were exceeded;",
+            "- where it can be cut to keep the savings goal — concretely: fewer",
+            "  purchases or a cheaper place, using the counts and average checks;",
+            "- whether the month balances: money left after the goal, the pace of",
+            "  this month and when the sums run out;",
+            "- respect the family notes: what not to cut, their goals.",
+            'For a point about one article set "key" to its key exactly as',
+            'given and "plan" to the suggested amount for the whole month in',
+            "the article's currency; otherwise leave them empty.",
+            "Use the article names as given. No intro or outro.",
         ]
     )
 
@@ -539,3 +584,18 @@ class GeminiService:
         response = await self._generate([prompt])
         text = response.text or "Не удалось провести анализ."
         return text if len(text) <= 4000 else text[:3900] + "..."
+
+    async def plan_advice(self, context: str) -> list[AdvicePoint]:
+        """Советы по черновику плана (structured output); проверяет их вызывающий."""
+        response = await self._generate(
+            [plan_advice_prompt(context)], PLAN_ADVICE_SCHEMA
+        )
+        if not response.text:
+            raise ValueError("Gemini не вернул ответ (пустой ответ или фильтр)")
+        advice = PlanAdvice.model_validate_json(response.text)
+        logger.info(
+            "Gemini %s: %d plan advice point(s)",
+            response.model_version,
+            len(advice.points),
+        )
+        return [AdvicePoint(item.text, item.key, item.plan) for item in advice.points]

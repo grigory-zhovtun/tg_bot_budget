@@ -7,17 +7,20 @@ from typing import Any
 import httpx
 import pytest
 from google.genai import errors, types
+from pydantic import ValidationError
 
 from app.domain import Catalog
 from app.services import ai_service
 from app.services.ai_service import (
     MERCHANTS_SCHEMA,
+    PLAN_ADVICE_SCHEMA,
     RESPONSE_SCHEMA,
     GeminiService,
     build_parse_prompt,
     merchant_hints,
     merchant_key,
 )
+from app.services.plan_advice import AdvicePoint
 
 HEADER = ["Дата", "Категория", "Название", "Сумма", "Баланс", "Комментарий"]
 
@@ -560,3 +563,37 @@ async def test_advice_stream_accumulates_text_with_the_same_prompt() -> None:
     assert texts == ["📊 Ана", "📊 Анализ", "📊 Анализ"]
     assert asked["model"] == "gemini-flash-latest"
     assert "Траты: 100" in asked["contents"][0]
+
+
+async def test_plan_advice_sends_the_context_and_reads_the_points() -> None:
+    answer = {
+        "points": [
+            {
+                "text": "Кофе: в плане 1,5 млн, а тратите 1,8 млн.",
+                "key": "кофе|UZS",
+                "plan": 1_800_000,
+            },
+            {"text": "Месяц сходится."},
+        ]
+    }
+    service, models, _ = make_service(json.dumps(answer, ensure_ascii=False))
+    points = await service.plan_advice("кофе|UZS | 🍔 ЕДА / кофе | расход | 1500000")
+    assert points == [
+        AdvicePoint("Кофе: в плане 1,5 млн, а тратите 1,8 млн.", "кофе|UZS", 1_800_000),
+        AdvicePoint("Месяц сходится."),
+    ]
+    [call] = models.calls
+    prompt = call["contents"][0]
+    assert "кофе|UZS | 🍔 ЕДА / кофе | расход | 1500000" in prompt
+    assert "at most 5 points" in prompt and "do not recalculate" in prompt
+    assert "no internet access" in prompt and "family notes" in prompt
+    assert call["config"].response_json_schema == PLAN_ADVICE_SCHEMA
+
+
+async def test_plan_advice_without_a_usable_answer_is_an_error() -> None:
+    service, _, _ = make_service(None)
+    with pytest.raises(ValueError, match="не вернул ответ"):
+        await service.plan_advice("…")
+    service, _, _ = make_service('{"points": "нет"}')
+    with pytest.raises(ValidationError):
+        await service.plan_advice("…")
