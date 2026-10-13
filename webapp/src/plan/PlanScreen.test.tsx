@@ -392,9 +392,7 @@ describe("PlanScreen", () => {
       await screen.findByRole("button", { name: "Сохранить 1 изменение" }),
     );
     expect(
-      await screen.findByText(
-        "Во вкладке нет места для новых статей. Правки не потеряны — сохраните ещё раз",
-      ),
+      await screen.findByText("Во вкладке нет места для новых статей"),
     ).toBeTruthy();
   });
 
@@ -505,5 +503,72 @@ describe("PlanScreen", () => {
     expect(
       screen.getByText("После цели остаётся 9,5 млн — месяц сходится."),
     ).toBeTruthy();
+  });
+
+  it("offers only the pairs that are not in the draft yet", async () => {
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi()} />);
+    const food = await screen.findByRole("region", { name: "🍔 ЕДА" });
+    await user.click(within(food).getByRole("button", { name: "＋ статья" }));
+    await user.click(screen.getByRole("button", { name: "5" }));
+    await user.click(screen.getByRole("button", { name: "Добавить" }));
+    await user.click(within(food).getByRole("button", { name: "＋ статья" }));
+    expect(screen.queryByRole("radiogroup", { name: "Валюта" })).toBeNull();
+    expect(screen.getByRole("status", { name: "Сумма" }).textContent).toContain(
+      "USD",
+    ); // ресторан в сумах уже в черновике — остался USD
+  });
+
+  it("turns a new article the other user added into a highlighted edit", async () => {
+    const fresh = {
+      ...planFixture,
+      rows: [
+        ...planFixture.rows,
+        {
+          key: "ресторан|UZS",
+          kind: "spend" as const,
+          group: "🍔 ЕДА",
+          subcategory: "ресторан",
+          icon: "🍷",
+          currency: "UZS",
+          plan: 300_000,
+          average: 600_000,
+          last: 900_000,
+          current: 0,
+          editable: true,
+        },
+      ],
+      addable: planFixture.addable.slice(1),
+    };
+    const savePlan = vi.fn<Api["savePlan"]>().mockRejectedValue(
+      new ApiError(
+        409,
+        "plan_changed",
+        "Пока вы правили, план поменяли",
+        {},
+        {
+          plan: fresh,
+          conflicts: ["ресторан|UZS"],
+        },
+      ),
+    );
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi({ savePlan })} />);
+    const food = await screen.findByRole("region", { name: "🍔 ЕДА" });
+    await user.click(within(food).getByRole("button", { name: "＋ статья" }));
+    for (const key of ["5", "0", "0", "0", "0", "0"]) {
+      await user.click(screen.getByRole("button", { name: key }));
+    }
+    await user.click(screen.getByRole("button", { name: "Добавить" }));
+    await user.click(
+      screen.getByRole("button", { name: "Сохранить 1 изменение" }),
+    );
+    const restaurant = await within(food).findByRole("button", {
+      name: "ресторан",
+    });
+    expect(restaurant.getAttribute("data-conflict")).toBe("true");
+    expect(
+      within(food).queryByRole("button", { name: "ресторан, новая" }),
+    ).toBeNull();
   });
 });

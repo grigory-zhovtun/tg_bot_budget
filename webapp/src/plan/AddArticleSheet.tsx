@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { PlanAddable, PlanHistory } from "../api";
+import { amountValue } from "../entry/amount";
 import { money } from "../format";
 import AmountPad from "./AmountPad";
 import { amountText, pairKey } from "./draft";
@@ -141,7 +142,7 @@ export default function AddArticleSheet({
       )}
       <button
         type="button"
-        disabled={!item}
+        disabled={!item || amountValue(text) <= 0}
         className="h-12 rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
         onClick={() => {
           if (item) onDone(item, text);

@@ -22,6 +22,7 @@ import {
   editGoal,
   editRow,
   emptyDraft,
+  pairKey,
   planTotals,
   rebase,
   removeRow,
@@ -264,6 +265,10 @@ export default function PlanScreen({
             setNotice(message);
             return;
           }
+          if (reason instanceof ApiError && reason.status === 422) {
+            setNotice(message);
+            return;
+          }
           setNotice(`${message}. ${KEPT}`);
         },
       )
@@ -469,9 +474,16 @@ export default function PlanScreen({
   const added = Object.entries(draft.added);
   const addedIn = (group: string) =>
     added.filter(([, row]) => row.group === group);
-  const offers = (group: string) =>
-    plan.addable.filter((item) => item.group === group);
-  const incomeOffers = plan.addable.filter((item) => item.kind === "income");
+  const offers = (group: string, keep: string | null = null) =>
+    plan.addable.filter((item) => {
+      const key = pairKey(item.subcategory, item.currency);
+      return item.group === group && (key === keep || !(key in draft.added));
+    });
+  const incomeOffers = plan.addable.filter(
+    (item) =>
+      item.kind === "income" &&
+      !(pairKey(item.subcategory, item.currency) in draft.added),
+  );
   const incomeAdded = added.filter(([, row]) => row.kind === "income");
   const adding = editing?.kind === "add" ? editing : null;
   const uzsOf = (row: AddedRow) =>
@@ -691,7 +703,7 @@ export default function PlanScreen({
       {adding && (
         <AddArticleSheet
           group={adding.group}
-          items={offers(adding.group)}
+          items={offers(adding.group, adding.key)}
           history={plan.history}
           initial={
             adding.key

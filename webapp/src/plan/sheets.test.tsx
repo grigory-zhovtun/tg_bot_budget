@@ -190,4 +190,23 @@ describe("AddArticleSheet", () => {
     await user.click(screen.getByRole("button", { name: "Убрать статью" }));
     expect(onRemove).toHaveBeenCalled();
   });
+
+  it("adds nothing until there is a sum", async () => {
+    const user = userEvent.setup();
+    render(
+      <AddArticleSheet
+        group="🍔 ЕДА"
+        items={food}
+        history={planFixture.history}
+        initial={null}
+        onDone={vi.fn()}
+        onRemove={null}
+        onClose={vi.fn()}
+      />,
+    );
+    const add = screen.getByRole("button", { name: "Добавить" });
+    expect(add.hasAttribute("disabled")).toBe(true);
+    await user.click(screen.getByRole("button", { name: "5" }));
+    expect(add.hasAttribute("disabled")).toBe(false);
+  });
 });

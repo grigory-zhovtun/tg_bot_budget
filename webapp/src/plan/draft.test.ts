@@ -252,6 +252,17 @@ describe("new articles", () => {
     const draft = addRow(start, offer("такси", "UZS"), "400000");
     expect(rebase(draft, planFixture).draft.added).toEqual(draft.added);
   });
+
+  it("are a conflict when the tab has the pair read-only", () => {
+    const draft = addRow(start, offer("ресторан", "UZS"), "500000");
+    const fresh = withRestaurant(500_000);
+    const rows = fresh.rows.map((item) =>
+      item.key === "ресторан|UZS" ? { ...item, editable: false } : item,
+    );
+    const next = rebase(draft, { ...fresh, rows });
+    expect(next.conflicts).toEqual(["ресторан|UZS"]);
+    expect(changeCount(next.draft)).toBe(0);
+  });
 });
 
 describe("drafts from before new articles", () => {

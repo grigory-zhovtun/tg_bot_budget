@@ -329,7 +329,9 @@ export function rebase(
     const article = fresh.rows.find((item) => item.key === key);
     if (article) {
       // пару успели добавить во вкладку: дальше это правка существующей статьи
-      if (!close(article.plan, amountValue(row.text))) conflicts.push(key);
+      if (!article.editable || !close(article.plan, amountValue(row.text))) {
+        conflicts.push(key);
+      }
       if (article.editable) next = editRow(next, article, row.text);
       continue;
     }
