@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   dayLabel,
+  longDay,
   itemAmount,
   money,
   shiftDay,
@@ -42,5 +43,12 @@ describe("itemAmount", () => {
   it("shows incomes in sums and payments in their currency", () => {
     expect(itemAmount(2_720_000, "UZS", 2_720_000)).toBe("+2,72 млн");
     expect(itemAmount(-650, "USD", -7_800_000)).toBe("−650,00 USD");
+  });
+});
+
+describe("longDay", () => {
+  it("names the day with the month", () => {
+    expect(longDay("2026-10-18")).toBe("18 октября");
+    expect(longDay("2027-03-01")).toBe("1 марта");
   });
 });

@@ -27,6 +27,7 @@ from app.services.analytics_service import (
     money,
     plan_lines,
 )
+from app.services.runway import Runway, uzs_runway
 
 COLUMN_O = 14  # блок прогноза: O название, P день, Q сумма, R валюта, S в сумах
 LIST_HEADER = "Поступления"  # «Поступления (+) и крупные платежи (−)»
@@ -78,6 +79,7 @@ class DayBudget:
     frozen_currency: str | None
     upcoming: tuple[ForecastItem, ...]
     over_plan: tuple[PlanLine, ...]
+    runway: Runway | None = None  # прогноз по сумам: когда кончатся, сколько обменять
 
 
 def _number(value: Any) -> float | None:
@@ -253,6 +255,7 @@ def day_budget(
             sorted((i for i in items if i.day >= today.day), key=lambda i: i.day)[:2]
         ),
         over_plan=tuple(over[:3]),
+        runway=uzs_runway(frame, items, today, rates),
     )
 
 
@@ -281,6 +284,26 @@ def _item_amount(item: ForecastItem) -> str:
     if item.currency == "UZS":
         return f"{sign}{short(abs(item.uzs))}"
     return f"{sign}{money(abs(item.amount))} {item.currency}"
+
+
+def runway_line(runway: Runway, today: date) -> str:
+    """«💳 Сумы 7,71 млн — хватит до 19.10 · до 30.10 обменять ≈ $1 160»."""
+    head = f"💳 Сумы {short(runway.balance)}"
+    if runway.short <= 0:
+        return f"{head} — до конца месяца хватит"
+    if runway.last_day is None or runway.last_day < today:
+        when = "уже закончились"
+    elif runway.last_day == today:
+        when = "хватит только на сегодня"
+    else:
+        when = f"хватит до {runway.last_day:%d.%m}"
+    target = f"до {runway.until:%d.%m}" if runway.until else "до конца месяца"
+    need = (
+        f"обменять ≈ ${money(runway.dollars)}"
+        if runway.dollars is not None
+        else f"не хватит {short(runway.short)}"
+    )
+    return f"{head} — {when} · {target} {need}"
 
 
 def format_day_budget(budget: DayBudget, now: bool = False) -> str:
@@ -330,6 +353,8 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
             sign = "+" if b.frozen_change > 0 else "−"
             line += f" (с 1-го числа {sign}{_cents(abs(b.frozen_change))} {b.frozen_currency})"
         lines.append(line)
+    if b.runway is not None:
+        lines.append(runway_line(b.runway, b.today))
     if b.goal > 0:
         if b.goal > b.growth:
             cut = (b.goal - b.growth) / b.days_left

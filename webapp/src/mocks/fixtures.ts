@@ -105,6 +105,14 @@ export const dashboardFixture: Dashboard = {
       state: "expected",
     },
   ],
+  runway: {
+    balance: 2_000_000,
+    pace: 500_000,
+    last_day: "2026-10-18",
+    short: 5_500_000,
+    until: "2026-10-30",
+    dollars: 460,
+  },
 };
 
 export const planFixture: MonthPlan = {
