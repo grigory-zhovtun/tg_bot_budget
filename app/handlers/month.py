@@ -33,6 +33,14 @@ def describe(tab: MonthTab) -> str | None:
             lines.append(f"Скрыл прошлые месяцы: {', '.join(tab.hidden)}.")
         lines.append("Поправьте план во вкладке, если в этом месяце он другой.")
         return "\n".join(lines)
+    if tab.revealed:
+        lines = [
+            f"📅 Новый месяц: вкладка «{tab.title}» с планом, составленным "
+            "заранее, стала текущей."
+        ]
+        if tab.hidden:
+            lines.append(f"Скрыл прошлые месяцы: {', '.join(tab.hidden)}.")
+        return "\n".join(lines)
     if tab.dates_fixed:
         return f"📅 Поправил даты месяца во вкладке «{tab.title}» (ячейки M1:M2)."
     return None

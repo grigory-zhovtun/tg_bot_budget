@@ -192,3 +192,160 @@ def test_owner_is_the_first_listed_id_not_the_smallest(
     monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset({42, 77}))
     monkeypatch.setattr(config, "OWNER_ID", 77)
     assert month.owner_chat_id() == 77
+
+
+def test_next_month_is_a_hidden_copy_of_the_current_one() -> None:
+    book = october_book()
+    tab = service_for(book).ensure_next_month_tab(date(2026, 10, 13))
+    assert tab == MonthTab("Nov 26", "Oct 26", created=True)
+    duplicate = book.batches[0]["requests"][0]["duplicateSheet"]
+    assert duplicate == {
+        "sourceSheetId": 29,
+        "insertSheetIndex": 29,
+        "newSheetName": "Nov 26",
+    }
+    visibility = [
+        r["updateSheetProperties"]["properties"] for r in book.batches[1]["requests"]
+    ]
+    assert visibility == [{"sheetId": 999, "hidden": True}]  # октябрь остаётся виден
+    [dates] = book.values
+    assert dates["data"] == [{"range": "'Nov 26'!M1:M2", "values": [[46327], [46356]]}]
+
+
+def test_next_month_that_exists_is_left_alone() -> None:
+    book = october_book()
+    november = Tab("Nov 26", 31, 28, hidden=True)
+    november.dates = [[46327], [46356]]
+    book.tabs.append(november)
+    tab = service_for(book).ensure_next_month_tab(date(2026, 10, 13))
+    assert tab == MonthTab("Nov 26")
+    assert book.batches == [] and book.values == []
+
+
+def test_next_month_created_meanwhile_is_not_an_error() -> None:
+    class Busy(Book):
+        def batch_update(self, body: dict[str, Any]) -> dict[str, Any]:
+            if "duplicateSheet" in body["requests"][0]:
+                # второй пользователь успел первым — имя уже занято
+                self.tabs.append(Tab("Nov 26", 31, 28, hidden=True))
+                raise RuntimeError('A sheet with the name "Nov 26" already exists')
+            return super().batch_update(body)
+
+    book = Busy(october_book().tabs)
+    tab = service_for(book).ensure_next_month_tab(date(2026, 10, 13))
+    assert tab == MonthTab("Nov 26")
+
+
+def test_next_month_after_december_is_january() -> None:
+    december = Tab("Dec 26", 40, 20, hidden=False)
+    december.dates = [[46357], [46387]]
+    book = Book([Tab("fact", 0, 6, False), december, Tab("system", 1, 42, False)])
+    tab = service_for(book).ensure_next_month_tab(date(2026, 12, 20))
+    assert tab.title == "Jan 27"
+    assert book.values[0]["data"] == [
+        {"range": "'Jan 27'!M1:M2", "values": [[46388], [46418]]}
+    ]
+
+
+def november_book() -> Book:
+    """1 ноября: «Nov 26» составлен заранее и спрятан, октябрь ещё виден."""
+    book = october_book()
+    november = Tab("Nov 26", 31, 28, hidden=True)
+    november.dates = [[46327], [46356]]
+    book.tabs.append(november)
+    return book
+
+
+def test_planned_month_becomes_visible_and_past_months_hide() -> None:
+    book = november_book()
+    tab = service_for(book).ensure_month_tab(date(2026, 11, 1))
+    assert tab == MonthTab("Nov 26", revealed=True, hidden=["Oct 26"])
+    visibility = [
+        r["updateSheetProperties"]["properties"] for r in book.batches[0]["requests"]
+    ]
+    assert visibility == [
+        {"sheetId": 31, "hidden": False},
+        {"sheetId": 29, "hidden": True},
+    ]
+    assert book.values == []
+
+
+def test_a_month_opened_by_hand_is_not_hidden_again() -> None:
+    book = november_book()
+    book.worksheet("Nov 26").isSheetHidden = False  # уже показан
+    tab = service_for(book).ensure_month_tab(date(2026, 11, 2))
+    assert tab == MonthTab("Nov 26")
+    assert book.batches == []
+
+
+@pytest.mark.usefixtures("owner")
+async def test_owner_is_told_the_planned_month_became_current() -> None:
+    context = job_context(MonthTab("Nov 26", revealed=True, hidden=["Oct 26"]))
+    await month.month_tab_job(context)
+    _, text = context.bot.send_message.await_args.args
+    assert text == (
+        "📅 Новый месяц: вкладка «Nov 26» с планом, составленным заранее, "
+        "стала текущей.\nСкрыл прошлые месяцы: Oct 26."
+    )
+
+
+def test_a_half_made_next_month_is_finished_on_the_next_try() -> None:
+    """Копия есть, но спрятать и поставить даты помешал сбой — доделать."""
+    book = october_book()
+    half = Tab("Nov 26", 31, 28, hidden=False)
+    half.dates = [[46296], [46326]]  # даты октября, как у источника
+    book.tabs.append(half)
+    tab = service_for(book).ensure_next_month_tab(date(2026, 10, 13))
+    assert tab == MonthTab("Nov 26")
+    visibility = [
+        r["updateSheetProperties"]["properties"] for r in book.batches[0]["requests"]
+    ]
+    assert visibility == [{"sheetId": 31, "hidden": True}]
+    assert book.values[0]["data"] == [
+        {"range": "'Nov 26'!M1:M2", "values": [[46327], [46356]]}
+    ]
+
+
+def test_a_copy_made_despite_an_error_is_finished() -> None:
+    class Lost(Book):
+        def batch_update(self, body: dict[str, Any]) -> dict[str, Any]:
+            if "duplicateSheet" in body["requests"][0]:
+                copy = Tab("Nov 26", 999, 29, hidden=False)
+                copy.dates = [[46296], [46326]]
+                self.tabs.append(copy)
+                raise RuntimeError("the reply was lost")  # копия сделана, ответа нет
+            return super().batch_update(body)
+
+    book = Lost(october_book().tabs)
+    tab = service_for(book).ensure_next_month_tab(date(2026, 10, 13))
+    assert tab == MonthTab("Nov 26")
+    visibility = [
+        r["updateSheetProperties"]["properties"] for r in book.batches[-1]["requests"]
+    ]
+    assert visibility == [{"sheetId": 999, "hidden": True}]
+    assert book.values[-1]["data"] == [
+        {"range": "'Nov 26'!M1:M2", "values": [[46327], [46356]]}
+    ]
+
+
+def test_hiding_the_copy_survives_one_failure() -> None:
+    class Flaky(Book):
+        failed = False
+
+        def batch_update(self, body: dict[str, Any]) -> dict[str, Any]:
+            if "updateSheetProperties" in body["requests"][0] and not self.failed:
+                self.failed = True
+                raise ConnectionError("token expired")
+            return super().batch_update(body)
+
+    book = Flaky(october_book().tabs)
+    service = service_for(book)
+    reconnects: list[bool] = []
+    service._authenticate = lambda: reconnects.append(True)
+    tab = service.ensure_next_month_tab(date(2026, 10, 13))
+    assert tab == MonthTab("Nov 26", "Oct 26", created=True)
+    assert reconnects == [True]
+    visibility = [
+        r["updateSheetProperties"]["properties"] for r in book.batches[-1]["requests"]
+    ]
+    assert visibility == [{"sheetId": 999, "hidden": True}]

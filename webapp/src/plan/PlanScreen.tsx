@@ -27,7 +27,7 @@ import {
 } from "./draft";
 import EventSheet from "./EventSheet";
 import GoalSheet from "./GoalSheet";
-import { monthShort, plural } from "./months";
+import { monthIn, monthName, monthShort, plural } from "./months";
 
 type Editing =
   | { kind: "article"; key: string }
@@ -145,6 +145,7 @@ export default function PlanScreen({
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<string[]>([]);
+  const [creating, setCreating] = useState(false);
   const draftRef = useRef(draft);
   const onDraftRef = useRef(onDraft);
   const inFlight = useRef(false); // второй тап до перерисовки не шлёт второй запрос
@@ -228,6 +229,29 @@ export default function PlanScreen({
       });
   }, [api, draft, onDraft]);
 
+  const create = useCallback(() => {
+    if (creating) return;
+    setCreating(true);
+    setNotice(null);
+    api
+      .createNextPlan()
+      .then(
+        (fresh) => {
+          haptic("success");
+          setPlan(fresh);
+        },
+        (reason: unknown) => {
+          haptic("error");
+          setNotice(
+            reason instanceof ApiError
+              ? reason.message
+              : "Не получилось создать план — попробуйте ещё раз",
+          );
+        },
+      )
+      .finally(() => setCreating(false));
+  }, [api, creating]);
+
   // Системная кнопка Telegram: «Сохранить N изменений», пока не открыто окно правки
   useEffect(() => {
     if (!tg || count === 0 || editing) return;
@@ -270,6 +294,37 @@ export default function PlanScreen({
           Повторить
         </button>
       </div>
+    );
+  }
+  if (plan.status === "not_created") {
+    return (
+      <section
+        className="flex flex-col items-center gap-3 rounded-2xl bg-section p-6 text-center"
+        aria-label="Следующий месяц"
+      >
+        <p className="text-4xl" aria-hidden="true">
+          📅
+        </p>
+        <h3 className="text-lg font-semibold">
+          {`Плана на ${monthName(month)} ещё нет`}
+        </h3>
+        <p className="text-sm text-hint">
+          {`Создам вкладку «${plan.title}» копией текущего месяца: статьи, суммы, поступления по дням и цель. Потом поправишь то, что ${monthIn(month)} будет по-другому. До 1-го числа вкладка спрятана в таблице, а бот и лимит считают по текущему месяцу.`}
+        </p>
+        {notice && (
+          <p className="text-sm text-danger" role="alert">
+            {notice}
+          </p>
+        )}
+        <button
+          type="button"
+          disabled={creating}
+          className="h-12 w-full rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
+          onClick={create}
+        >
+          {`Создать план на ${monthName(month)}`}
+        </button>
+      </section>
     );
   }
   if (plan.status !== "ok") {
