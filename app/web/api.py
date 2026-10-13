@@ -7,7 +7,7 @@
 
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from pydantic import ValidationError
@@ -23,6 +23,7 @@ from app.domain import currency_of, entry_row, local_today, month_title
 from app.handlers.messages import save_rows, seen_input
 from app.handlers.undo import undo_last
 from app.services.dashboard import Dashboard
+from app.services.plan import LoadedPlan, load_plan, shift_month
 from app.web.auth import WebUser, authenticate
 from app.web.schemas import (
     BootstrapOut,
@@ -37,7 +38,12 @@ from app.web.schemas import (
     GroupOut,
     GroupPlanOut,
     MessageOut,
+    PlanArticleOut,
+    PlanEventOut,
+    PlanGoalOut,
+    PlanHistoryOut,
     PlanItemOut,
+    PlanOut,
     RowsOut,
     SourceOut,
     SubcategoryOut,
@@ -56,6 +62,7 @@ FIELD_MESSAGES = {
     "source": "Такой карты нет — обновите приложение",
     "category": "Такой группы нет — обновите приложение",
     "subcategory": "Такой подкатегории нет — обновите приложение",
+    "month": "Можно открыть только текущий или следующий месяц",
 }
 SHEETS_DOWN = "Таблица не ответила — попробуйте ещё раз"
 
@@ -210,6 +217,76 @@ def dashboard_out(
     )
 
 
+def plan_month(text: str | None, today: date) -> date | None:
+    """«2026-10» → 01.10.2026, если это текущий или следующий месяц."""
+    try:
+        first = datetime.strptime(text or "", "%Y-%m").date()
+    except ValueError:
+        return None
+    current = today.replace(day=1)
+    return first if first in (current, shift_month(current, 1)) else None
+
+
+def plan_out(
+    first: date, today: date, loaded: LoadedPlan | None, icons: dict[str, str]
+) -> PlanOut:
+    """План месяца для экрана; без вкладки — только статус."""
+    month, title = f"{first:%Y-%m}", month_title(first)
+    if loaded is None:
+        status = "no_month_tab" if first == today.replace(day=1) else "not_created"
+        return PlanOut(month=month, title=title, status=status, today=today)
+    history, plan = loaded.history, loaded.plan
+    rows = []
+    for article in plan.articles:
+        average, last, current = history.of(article.key)
+        rows.append(
+            PlanArticleOut(
+                key=article.key,
+                kind=article.kind,
+                group=article.group,
+                subcategory=article.subcategory,
+                icon=icons.get(article.subcategory, ""),
+                currency=article.currency,
+                plan=article.plan,
+                average=average,
+                last=last,
+                current=current,
+                editable=article.editable,
+            )
+        )
+    events = None
+    if plan.events is not None:
+        events = [
+            PlanEventOut(
+                slot=e.slot,
+                name=e.name,
+                day=e.day,
+                amount=e.amount,
+                currency=e.currency,
+            )
+            for e in plan.events
+        ]
+    goal = None
+    if plan.goal is not None:
+        goal = PlanGoalOut(amount=plan.goal.amount, currency=plan.goal.currency)
+    return PlanOut(
+        month=month,
+        title=title,
+        status="ok",
+        today=today,
+        rates=dict(loaded.rates.to_uzs),
+        history=PlanHistoryOut(
+            average=[f"{m:%Y-%m}" for m in history.average_months],
+            last=f"{history.last_month:%Y-%m}",
+            current=f"{history.current_month:%Y-%m}",
+            current_days=history.current_days,
+        ),
+        rows=rows,
+        events=events,
+        goal=goal,
+    )
+
+
 def routes(application: Application) -> list[Route]:
     """Маршруты /api/*; application — приложение PTB (данные бота и пользователей)."""
 
@@ -298,9 +375,26 @@ def routes(application: Application) -> list[Route]:
         icons: dict[str, str] = application.bot_data.get("icons", {})
         return JSONResponse(dashboard_out(found, today, icons).model_dump(mode="json"))
 
+    async def month_plan(request: Request) -> JSONResponse:
+        user = current_user(request)
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        first = plan_month(request.query_params.get("month"), today)
+        if first is None:
+            return validation_error({"month"})
+        gs = application.bot_data["gs_service"]
+        try:
+            loaded = await asyncio.to_thread(load_plan, gs, month_title(first), today)
+        except Exception:
+            logger.exception("Plan failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        icons: dict[str, str] = application.bot_data.get("icons", {})
+        body = plan_out(first, today, loaded, icons)
+        return JSONResponse(body.model_dump(mode="json"))
+
     return [
         Route("/bootstrap", bootstrap),
         Route("/expenses", add_expense, methods=["POST"]),
         Route("/expenses/undo", undo_expense, methods=["POST"]),
         Route("/dashboard", dashboard),
+        Route("/plan", month_plan),
     ]

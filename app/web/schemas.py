@@ -144,3 +144,52 @@ class DashboardOut(ApiModel):
     daily: list[DayPointOut] = []
     upcoming: list[ForecastItemOut] = []
     subscriptions: list[SubscriptionOut] = []
+
+
+class PlanHistoryOut(ApiModel):
+    average: list[str]  # три полных месяца «YYYY-MM»
+    last: str
+    current: str
+    current_days: int
+
+
+class PlanArticleOut(ApiModel):
+    key: str
+    kind: Literal["spend", "income"]
+    group: str
+    subcategory: str
+    icon: str
+    currency: str
+    plan: float  # положительный, в валюте строки
+    average: float
+    last: float
+    current: float
+    editable: bool
+
+
+class PlanEventOut(ApiModel):
+    slot: int
+    name: str | None
+    day: int | None
+    amount: float | None  # со знаком: «+» поступление, «−» платёж
+    currency: str | None
+
+
+class PlanGoalOut(ApiModel):
+    amount: float
+    currency: str
+
+
+class PlanOut(ApiModel):
+    """План месяца для экрана «План»; без вкладки — только статус."""
+
+    month: str
+    title: str
+    status: Literal["ok", "not_created", "no_month_tab"]
+    today: date
+    rates: dict[str, float] = {}
+    history: PlanHistoryOut | None = None
+    rows: list[PlanArticleOut] = []
+    events: list[PlanEventOut] | None = None  # None — во вкладке нет блока прогноза
+    goal: PlanGoalOut | None = None
+    saved: int | None = None  # после сохранения — сколько правок записано
