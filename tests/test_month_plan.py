@@ -2,6 +2,7 @@
 
 import re
 import time
+from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
@@ -14,6 +15,7 @@ from app.domain import Rates
 from app.services.analytics_service import transactions_frame
 from app.services.google_sheets import GoogleSheetsService
 from app.services.plan import (
+    Addable,
     ArticleChange,
     Event,
     EventCells,
@@ -21,12 +23,16 @@ from app.services.plan import (
     EventValue,
     Goal,
     GoalChange,
+    NewArticle,
     PlanChanges,
+    addable,
     applied,
     article_history,
+    catalog_pairs,
     cell_updates,
     change_note,
     conflicts,
+    kind_of,
     load_plan,
     read_plan,
     save_plan,
@@ -335,6 +341,101 @@ def test_long_lists_are_cut_and_the_author_may_be_unknown() -> None:
     assert lines[0] == "✏️ Правки в плане на ноябрь:"
     assert lines[11] == "… и ещё 2"
     assert len(lines) == 13
+
+
+CATALOG = {
+    "🍔 ЕДА": ["кофе", "ресторан"],
+    "🏚️ ДОМ": ["квартплата"],
+    "💳 СЧЕТА": ["переводы"],
+    "💰 ДОХОДЫ": ["зарплата", "нач остаток"],
+}
+RESTAURANT = NewArticle("🍔 ЕДА", "ресторан", "UZS", 500_000)
+
+
+def test_articles_come_from_the_catalog_without_transfers_and_opening_balance() -> None:
+    assert catalog_pairs(CATALOG) == [
+        ("🍔 ЕДА", "кофе"),
+        ("🍔 ЕДА", "ресторан"),
+        ("🏚️ ДОМ", "квартплата"),
+        ("💰 ДОХОДЫ", "зарплата"),
+    ]
+    assert (kind_of("💰 ДОХОДЫ"), kind_of("🍔 ЕДА")) == ("income", "spend")
+
+
+def test_addable_pairs_are_what_the_tab_lacks_with_their_history() -> None:
+    history = article_history(
+        facts(fact_row(date(2026, 9, 5), "🍔 ЕДА", "ресторан", 600_000)),
+        date(2026, 10, 11),
+    )
+    found = addable(read_plan(TAB), CATALOG, CURRENCIES, history)
+    assert [(item.subcategory, item.currency) for item in found] == [
+        ("кофе", "RUB"),
+        ("кофе", "USD"),
+        ("ресторан", "UZS"),
+        ("ресторан", "RUB"),
+        ("ресторан", "USD"),
+        ("квартплата", "UZS"),
+        ("квартплата", "RUB"),
+        ("зарплата", "RUB"),
+        ("зарплата", "USD"),
+    ]
+    assert found[2] == Addable("🍔 ЕДА", "ресторан", "UZS", 200_000, 600_000, 0)
+
+
+def test_new_articles_must_come_from_the_catalog_in_a_known_currency() -> None:
+    plan = read_plan(TAB)
+
+    def check(*added: NewArticle) -> set[str]:
+        return unknown(plan, PlanChanges(added=added), CURRENCIES, CATALOG)
+
+    assert check(RESTAURANT) == set()
+    assert check(replace(RESTAURANT, subcategory="суши")) == {"new_rows"}
+    assert check(replace(RESTAURANT, group="🏚️ ДОМ")) == {"new_rows"}
+    assert check(replace(RESTAURANT, currency="EUR")) == {"new_rows"}
+    assert check(NewArticle("💳 СЧЕТА", "переводы", "UZS", 1)) == {"new_rows"}
+    assert check(NewArticle("💰 ДОХОДЫ", "нач остаток", "UZS", 1)) == {"new_rows"}
+    assert check(RESTAURANT, replace(RESTAURANT, plan=1)) == {"new_rows"}  # пара дважды
+    assert unknown(plan, PlanChanges(added=(RESTAURANT,)), CURRENCIES) == {"new_rows"}
+    empty = read_plan(month_tab([]))  # копировать формулы не с чего
+    assert unknown(empty, PlanChanges(added=(RESTAURANT,)), CURRENCIES, CATALOG) == {
+        "new_rows"
+    }
+
+
+def test_new_rows_stay_where_p9_counts_the_plan() -> None:
+    full = read_plan(
+        month_tab([article("Расходы", "🍔 ЕДА", f"статья {n}", 1) for n in range(58)])
+    )
+    assert max(a.row for a in full.articles) == 59
+    coffee = NewArticle("🍔 ЕДА", "кофе", "RUB", 5)
+    assert unknown(full, PlanChanges(added=(RESTAURANT,)), CURRENCIES, CATALOG) == set()
+    two = PlanChanges(added=(RESTAURANT, coffee))
+    assert unknown(full, two, CURRENCIES, CATALOG) == {"space"}
+
+
+def test_a_pair_added_meanwhile_is_a_conflict() -> None:
+    coffee = NewArticle("🍔 ЕДА", "кофе", "UZS", 900_000)  # кофе в сумах уже во вкладке
+    changes = PlanChanges(added=(coffee, RESTAURANT))
+    assert conflicts(read_plan(TAB), changes) == ["кофе|UZS"]
+    assert changes.count() == 2
+
+
+def test_the_note_lists_new_articles_and_free_money_counts_them() -> None:
+    changes = PlanChanges(added=(RESTAURANT, NewArticle("🍔 ЕДА", "кофе", "USD", 20)))
+    text = change_note(
+        read_plan(TAB),
+        changes,
+        Rates({"UZS": 1.0, "USD": 12_000.0}),
+        date(2026, 10, 1),
+        "Иван",
+        {"ресторан": "🍷"},
+    )
+    assert text.splitlines() == [
+        "✏️ Иван — правки в плане на октябрь:",
+        "＋ 🍷 ресторан: 500 000",
+        "＋ кофе USD: 20",
+        "Свободно: -5,50 млн → -6,24 млн",
+    ]
 
 
 class PlanSheets:
