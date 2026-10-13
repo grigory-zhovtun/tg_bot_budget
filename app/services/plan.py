@@ -6,12 +6,14 @@
 вкладка считает факт, по ней же находим строку, а не по номеру.
 """
 
+from collections.abc import Collection
 from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
 
 import pandas as pd
 
+from app.domain import Rates
 from app.services.day_budget import COLUMN_O, GOAL_LABEL, LIST_HEADER, TABLE_HEADER
 
 KINDS = {"Расходы": "spend", "Доходы": "income"}
@@ -197,3 +199,186 @@ def article_history(frame: pd.DataFrame, today: date) -> History:
         for key, values in by_key.items()
     }
     return History(months, months[-1], current, today.day, sums)
+
+
+TOLERANCE = 0.005  # суммы сравниваем до копейки
+
+
+@dataclass(frozen=True)
+class EventValue:
+    """Новое содержимое строки списка: сумма со знаком (+ поступление, − платёж)."""
+
+    name: str
+    day: int
+    amount: float
+    currency: str
+
+
+@dataclass(frozen=True)
+class ArticleChange:
+    key: str
+    base: float  # план, который видел пользователь
+    plan: float
+
+
+@dataclass(frozen=True)
+class EventChange:
+    slot: int
+    base: EventCells  # строка списка, которую видел пользователь
+    value: EventValue | None  # None — очистить строку
+
+
+@dataclass(frozen=True)
+class GoalChange:
+    base: tuple[float, str]
+    value: tuple[float, str]
+
+
+@dataclass(frozen=True)
+class PlanChanges:
+    articles: tuple[ArticleChange, ...] = ()
+    events: tuple[EventChange, ...] = ()
+    goal: GoalChange | None = None
+
+    def count(self) -> int:
+        return len(self.articles) + len(self.events) + int(self.goal is not None)
+
+
+def _same(left: float | None, right: float | None) -> bool:
+    if left is None or right is None:
+        return left is None and right is None
+    return abs(left - right) < TOLERANCE
+
+
+def unknown(
+    plan: MonthPlan, changes: PlanChanges, currencies: Collection[str]
+) -> set[str]:
+    """Поля, которые во вкладке не найти или нельзя править (ответ 422)."""
+    bad: set[str] = set()
+    editable = {a.key for a in plan.articles if a.editable}
+    keys = [change.key for change in changes.articles]
+    if len(set(keys)) != len(keys) or any(key not in editable for key in keys):
+        bad.add("rows")
+    slots = {event.slot for event in plan.events or ()}
+    chosen = [change.slot for change in changes.events]
+    if len(set(chosen)) != len(chosen) or any(
+        change.slot not in slots
+        or (change.value is not None and change.value.currency not in currencies)
+        for change in changes.events
+    ):
+        bad.add("events")
+    if changes.goal is not None and (
+        plan.goal is None or changes.goal.value[1] not in currencies
+    ):
+        bad.add("goal")
+    return bad
+
+
+def conflicts(plan: MonthPlan, changes: PlanChanges) -> list[str]:
+    """Что поменялось во вкладке после открытия плана: ключи, «event:<n>», «goal»."""
+    found: list[str] = []
+    articles = {a.key: a for a in plan.articles}
+    for change in changes.articles:
+        if not _same(articles[change.key].plan, change.base):
+            found.append(change.key)
+    events = {e.slot: e for e in plan.events or ()}
+    for change in changes.events:
+        name, day, amount, currency = events[change.slot].cells()
+        base_name, base_day, base_amount, base_currency = change.base
+        if (name, day, currency) != (base_name, base_day, base_currency) or not _same(
+            amount, base_amount
+        ):
+            found.append(f"event:{change.slot}")
+    if changes.goal is not None and plan.goal is not None:
+        amount, currency = changes.goal.base
+        if currency != plan.goal.currency or not _same(plan.goal.amount, amount):
+            found.append("goal")
+    return found
+
+
+def cell_updates(
+    title: str, plan: MonthPlan, changes: PlanChanges
+) -> list[dict[str, Any]]:
+    """Диапазоны для values_batch_update (RAW): D статей, O:R списка, Q:R цели."""
+    articles = {a.key: a for a in plan.articles}
+    events = {e.slot: e for e in plan.events or ()}
+    data: list[dict[str, Any]] = []
+    for change in changes.articles:
+        row = articles[change.key].row
+        data.append({"range": f"'{title}'!D{row}", "values": [[0.0 - change.plan]]})
+    for change in changes.events:
+        row = events[change.slot].row
+        value = change.value
+        cells: list[Any] = (
+            ["", "", "", ""]
+            if value is None
+            else [value.name, value.day, value.amount, value.currency]
+        )
+        data.append({"range": f"'{title}'!O{row}:R{row}", "values": [cells]})
+    if changes.goal is not None and plan.goal is not None:
+        amount, currency = changes.goal.value
+        row = plan.goal.row
+        data.append(
+            {"range": f"'{title}'!Q{row}:R{row}", "values": [[amount, currency]]}
+        )
+    return data
+
+
+def _filled(event: Event, value: EventValue | None) -> Event:
+    if value is None:
+        return replace(event, name=None, day=None, amount=None, currency=None)
+    return replace(
+        event,
+        name=value.name,
+        day=value.day,
+        amount=value.amount,
+        currency=value.currency,
+    )
+
+
+def applied(plan: MonthPlan, changes: PlanChanges) -> MonthPlan:
+    """План после правок — для «Свободно» в уведомлении."""
+    plans = {change.key: change.plan for change in changes.articles}
+    values = {change.slot: change.value for change in changes.events}
+    articles = tuple(replace(a, plan=plans.get(a.key, a.plan)) for a in plan.articles)
+    events: tuple[Event, ...] | None = None
+    if plan.events is not None:
+        events = tuple(
+            _filled(e, values[e.slot]) if e.slot in values else e for e in plan.events
+        )
+    goal = plan.goal
+    if changes.goal is not None and goal is not None:
+        amount, currency = changes.goal.value
+        goal = replace(goal, amount=amount, currency=currency)
+    return MonthPlan(articles, events, goal)
+
+
+@dataclass(frozen=True)
+class Totals:
+    """Итог плана в сумах по курсам system (как колонки H–J вкладки)."""
+
+    incomes: float  # строки списка со знаком «+»
+    spend: float  # план статей «Расходы»
+    goal: float
+    income_rows: float  # план статей «Доходы» — для сравнения со списком
+
+    @property
+    def free(self) -> float:
+        return self.incomes - self.spend - self.goal
+
+
+def totals(plan: MonthPlan, rates: Rates) -> Totals:
+    def uzs(amount: float, currency: str | None) -> float:
+        return amount * rates.to_uzs.get(currency or "", 0.0)
+
+    spend = sum(uzs(a.plan, a.currency) for a in plan.articles if a.kind == "spend")
+    income_rows = sum(
+        uzs(a.plan, a.currency) for a in plan.articles if a.kind == "income"
+    )
+    incomes = sum(
+        uzs(e.amount, e.currency)
+        for e in plan.events or ()
+        if e.name and e.amount is not None and e.amount > 0
+    )
+    goal = uzs(plan.goal.amount, plan.goal.currency) if plan.goal else 0.0
+    return Totals(incomes, spend, goal, income_rows)

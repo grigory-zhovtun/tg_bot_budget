@@ -5,8 +5,26 @@ from typing import Any
 
 import pytest
 
+from app.domain import Rates
 from app.services.analytics_service import transactions_frame
-from app.services.plan import Event, Goal, article_history, read_plan, shift_month
+from app.services.plan import (
+    ArticleChange,
+    Event,
+    EventCells,
+    EventChange,
+    EventValue,
+    Goal,
+    GoalChange,
+    PlanChanges,
+    applied,
+    article_history,
+    cell_updates,
+    conflicts,
+    read_plan,
+    shift_month,
+    totals,
+    unknown,
+)
 from tests.test_day_budget import FACT_HEADER, RATES, fact_row
 
 HEADER = ["Статья", "Категория", "Подкатегория", "План", "Факт", "Дельта", "Валюта"]
@@ -152,3 +170,117 @@ def test_months_go_back_across_the_new_year() -> None:
         date(2026, 11, 1),
         date(2026, 12, 1),
     )
+
+
+TAB = month_tab(
+    [
+        article("Расходы", "🍔 ЕДА", "кофе", 1_500_000),
+        article("Расходы", "🏚️ ДОМ", "квартплата", 500, "USD"),
+        article("Доходы", "💰 ДОХОДЫ", "зарплата", 20_000_000),
+    ],
+    goal=(1_000_000, "UZS"),
+)
+CURRENCIES = {"UZS", "USD", "RUB"}
+EMPTY: EventCells = (None, None, None, None)
+ADVANCE: EventCells = ("Аванс", 15, 3_000_000.0, "UZS")
+RENT: EventCells = ("Квартплата", 18, -500.0, "USD")
+
+
+def test_changes_must_point_to_editable_rows_and_known_currencies() -> None:
+    plan = read_plan(TAB)
+    good = PlanChanges(
+        articles=(ArticleChange("кофе|UZS", 1_500_000, 1_800_000),),
+        events=(EventChange(2, EMPTY, EventValue("Премия", 25, 1_000_000, "UZS")),),
+        goal=GoalChange((1_000_000, "UZS"), (2_000_000, "UZS")),
+    )
+    assert unknown(plan, good, CURRENCIES) == set()
+    bad = PlanChanges(
+        articles=(ArticleChange("кальян|UZS", 0, 1),),
+        events=(EventChange(30, EMPTY, None),),
+        goal=GoalChange((1_000_000, "UZS"), (2_000_000, "EUR")),
+    )
+    assert unknown(plan, bad, CURRENCIES) == {"rows", "events", "goal"}
+
+
+def test_the_same_row_twice_in_one_save_is_refused() -> None:
+    twice = PlanChanges(
+        articles=(
+            ArticleChange("кофе|UZS", 1_500_000, 1),
+            ArticleChange("кофе|UZS", 1_500_000, 2),
+        )
+    )
+    assert unknown(read_plan(TAB), twice, CURRENCIES) == {"rows"}
+
+
+def test_read_only_articles_cannot_be_changed() -> None:
+    rows = month_tab(
+        [
+            article("Расходы", "🍔 ЕДА", "кафе", 1),
+            article("Расходы", "🍔 ЕДА", "кафе", 2),
+        ]
+    )
+    change = PlanChanges(articles=(ArticleChange("кафе|UZS", 1, 5),))
+    assert unknown(read_plan(rows), change, CURRENCIES) == {"rows"}
+
+
+def test_nothing_conflicts_while_the_tab_is_as_the_user_saw_it() -> None:
+    changes = PlanChanges(
+        articles=(ArticleChange("кофе|UZS", 1_500_000, 1_800_000),),
+        events=(EventChange(0, ADVANCE, None), EventChange(2, EMPTY, None)),
+        goal=GoalChange((1_000_000, "UZS"), (0, "UZS")),
+    )
+    assert conflicts(read_plan(TAB), changes) == []
+
+
+def test_changes_made_after_opening_are_conflicts() -> None:
+    changes = PlanChanges(
+        articles=(ArticleChange("кофе|UZS", 1_400_000, 1_800_000),),
+        events=(EventChange(0, ("Аванс", 16, 3_000_000.0, "UZS"), None),),
+        goal=GoalChange((900_000, "UZS"), (0, "UZS")),
+    )
+    assert conflicts(read_plan(TAB), changes) == ["кофе|UZS", "event:0", "goal"]
+
+
+def test_only_the_changed_cells_are_written() -> None:
+    changes = PlanChanges(
+        articles=(ArticleChange("квартплата|USD", 500, 650.5),),
+        events=(
+            EventChange(1, RENT, None),
+            EventChange(2, EMPTY, EventValue("Премия", 25, 1_000_000, "UZS")),
+        ),
+        goal=GoalChange((1_000_000, "UZS"), (2_000_000, "UZS")),
+    )
+    assert cell_updates("Oct 26", read_plan(TAB), changes) == [
+        {"range": "'Oct 26'!D3", "values": [[-650.5]]},
+        {"range": "'Oct 26'!O13:R13", "values": [["", "", "", ""]]},
+        {"range": "'Oct 26'!O14:R14", "values": [["Премия", 25, 1_000_000, "UZS"]]},
+        {"range": "'Oct 26'!Q20:R20", "values": [[2_000_000, "UZS"]]},
+    ]
+
+
+def test_zero_plan_is_written_as_zero_not_minus_zero() -> None:
+    changes = PlanChanges(articles=(ArticleChange("кофе|UZS", 1_500_000, 0),))
+    [cell] = cell_updates("Oct 26", read_plan(TAB), changes)
+    assert str(cell["values"][0][0]) == "0.0"
+
+
+def test_free_money_is_incomes_minus_spending_minus_goal() -> None:
+    rates = Rates({"UZS": 1.0, "USD": 12_000.0})
+    plan = read_plan(TAB)
+    before = totals(plan, rates)
+    assert (before.incomes, before.spend, before.goal, before.income_rows) == (
+        3_000_000,
+        7_500_000,
+        1_000_000,
+        20_000_000,
+    )
+    assert before.free == -5_500_000
+    changed = applied(
+        plan,
+        PlanChanges(
+            articles=(ArticleChange("кофе|UZS", 1_500_000, 500_000),),
+            events=(EventChange(2, EMPTY, EventValue("ЗП", 30, 10_000_000, "UZS")),),
+            goal=GoalChange((1_000_000, "UZS"), (0, "UZS")),
+        ),
+    )
+    assert totals(changed, rates).free == 13_000_000 - 6_500_000
