@@ -14,6 +14,7 @@ from app.domain import month_title
 from app.services.analytics_service import MONTHS_RU
 from app.services.google_sheets import MonthTab
 from app.services.plan import shift_month
+from app.services.plan_advice import AdvicePoint
 from app.web.server import create_app
 from tests.test_day_budget import FACT_HEADER, fact_row
 from tests.test_month_plan import TAB, PlanSheets, article, month_tab
@@ -493,3 +494,87 @@ def test_the_owner_hears_of_a_month_tab_the_button_made(
 
 def test_creating_the_next_month_needs_an_allowed_user() -> None:
     assert create_next(plan_app(NextSheets()), user=777).status_code == 403
+
+
+def advice(**over: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "month": MONTH,
+        "rows": [{"key": "кофе|UZS", "plan": "1700000"}],
+        "new_rows": [],
+        "events": [],
+        "goal": None,
+    }
+    return {**body, **over}
+
+
+def advisor(answer: list[AdvicePoint] | Exception) -> SimpleNamespace:
+    call = (
+        AsyncMock(side_effect=answer)
+        if isinstance(answer, Exception)
+        else AsyncMock(return_value=answer)
+    )
+    return SimpleNamespace(enabled=True, plan_advice=call)
+
+
+def ask(application: Any, body: dict[str, Any], user: int = OWNER) -> Any:
+    return client_for(application).post(
+        "/api/plan/advice", json=body, headers=auth(user)
+    )
+
+
+def test_the_advisor_gets_the_draft_and_answers_with_checked_points() -> None:
+    sheets = sheets_with()
+    sheets.profile = "Семья из четырёх"
+    application = plan_app(sheets)
+    application.bot_data["ai_service"] = advisor(
+        [
+            AdvicePoint("Кофе: тратите больше плана.", "кофе|UZS", 1_834_567),
+            AdvicePoint("Кальяна в плане нет.", "кальян|UZS", 100),
+            AdvicePoint("Месяц не сходится."),
+        ]
+    )
+    new = {"group": "🍔 ЕДА", "subcategory": "кафе", "currency": "UZS", "plan": "1"}
+    response = ask(application, advice(new_rows=[new]))
+    assert response.status_code == 200
+    assert response.json() == {
+        "points": [
+            {
+                "text": "Кофе: тратите больше плана.",
+                "apply": {"key": "кофе|UZS", "plan": 1_835_000},
+            },
+            {"text": "Кальяна в плане нет.", "apply": None},
+            {"text": "Месяц не сходится.", "apply": None},
+        ]
+    }
+    context = application.bot_data["ai_service"].plan_advice.await_args.args[0]
+    assert context.startswith("О семье (написали сами):\nСемья из четырёх\n")
+    assert "кофе|UZS | 🍔 ЕДА / кофе | расход | 1700000 |" in context  # черновик
+    assert "кафе|UZS | 🍔 ЕДА / кафе | расход | 1 |" in context  # новая статья
+
+
+def test_without_the_advisor_the_answer_is_503() -> None:
+    application = plan_app()
+    down = {"code": "advisor_unavailable", "message": "Советник сейчас недоступен"}
+    response = ask(application, advice())  # ключа Gemini нет
+    assert (response.status_code, response.json()["error"]) == (503, down)
+    application.bot_data["ai_service"] = advisor(ConnectionError("quota"))
+    response = ask(application, advice())
+    assert (response.status_code, response.json()["error"]) == (503, down)
+
+
+def test_a_draft_the_tab_does_not_know_is_refused() -> None:
+    application = plan_app()
+    application.bot_data["ai_service"] = advisor([])
+    response = ask(application, advice(rows=[{"key": "кальян|UZS", "plan": "1"}]))
+    assert (response.status_code, list(response.json()["error"]["fields"])) == (
+        422,
+        ["rows"],
+    )
+    application.bot_data["ai_service"].plan_advice.assert_not_awaited()
+
+
+def test_the_advisor_needs_an_allowed_user() -> None:
+    application = plan_app()
+    client = client_for(application)
+    assert client.post("/api/plan/advice", json=advice()).status_code == 401
+    assert ask(application, advice(), user=777).status_code == 403

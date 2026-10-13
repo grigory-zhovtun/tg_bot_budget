@@ -32,6 +32,7 @@ from app.services.plan import (
     EventValue,
     GoalChange,
     LoadedPlan,
+    MonthPlan,
     NewArticle,
     PlanChanges,
     addable,
@@ -41,8 +42,11 @@ from app.services.plan import (
     save_plan,
     shift_month,
 )
+from app.services.plan_advice import advice_numbers, checked_points, gather_advice
 from app.web.auth import WebUser, authenticate
 from app.web.schemas import (
+    AdviceApplyOut,
+    AdvicePointOut,
     BootstrapOut,
     DashboardOut,
     DayPointOut,
@@ -57,6 +61,8 @@ from app.web.schemas import (
     GroupPlanOut,
     MessageOut,
     PlanAddableOut,
+    PlanAdviceIn,
+    PlanAdviceOut,
     PlanArticleOut,
     PlanConflictOut,
     PlanEventOut,
@@ -95,6 +101,7 @@ SHEETS_DOWN = "Таблица не ответила — попробуйте е�
 PLAN_LOCK = "plan_lock"  # bot_data: одно сохранение плана за раз — проверка и запись
 CONFLICT = "Пока вы правили, план поменяли — проверьте подсвеченные строки"
 NO_SPACE = "Во вкладке нет места для новых статей"
+ADVISOR_DOWN = "Советник сейчас недоступен"
 
 
 def error_response(
@@ -385,6 +392,44 @@ def plan_changes(body: PlanSaveIn) -> PlanChanges:
     )
 
 
+def advice_changes(body: PlanAdviceIn, plan: MonthPlan) -> PlanChanges:
+    """Черновик без base → правки поверх вкладки: база — то, что в ней сейчас."""
+    articles = {a.key: a.plan for a in plan.articles}
+    events = {e.slot: e.cells() for e in plan.events or ()}
+    goal = None
+    if body.goal is not None:
+        base = (plan.goal.amount, plan.goal.currency) if plan.goal else (0.0, "UZS")
+        goal = GoalChange(base, (float(body.goal.amount), body.goal.currency))
+    return PlanChanges(
+        articles=tuple(
+            ArticleChange(r.key, articles.get(r.key, 0.0), float(r.plan))
+            for r in body.rows
+        ),
+        events=tuple(
+            EventChange(
+                e.slot,
+                events.get(e.slot, (None, None, None, None)),
+                (
+                    None
+                    if e.value is None
+                    else EventValue(
+                        e.value.name,
+                        e.value.day,
+                        float(e.value.amount),
+                        e.value.currency,
+                    )
+                ),
+            )
+            for e in body.events
+        ),
+        goal=goal,
+        added=tuple(
+            NewArticle(n.group, n.subcategory, n.currency, float(n.plan))
+            for n in body.new_rows
+        ),
+    )
+
+
 async def author_name(bot: Bot, user: WebUser) -> str | None:
     """Имя для уведомления: из initData, иначе из чата с ботом."""
     if user.first_name:
@@ -593,6 +638,63 @@ def routes(application: Application) -> list[Route]:
         body = plan_out(first, today, loaded, icons, catalog)
         return JSONResponse(body.model_dump(mode="json"))
 
+    async def plan_advice(request: Request) -> JSONResponse:
+        user = current_user(request)
+        try:
+            body = PlanAdviceIn.model_validate_json(await request.body())
+        except ValidationError as error:
+            return validation_error(
+                {str(e["loc"][0]) if e["loc"] else "body" for e in error.errors()}
+            )
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        first = plan_month(body.month, today)
+        if first is None:
+            return validation_error({"month"})
+        ai = application.bot_data.get("ai_service")
+        if ai is None or not ai.enabled:
+            return error_response(503, "advisor_unavailable", ADVISOR_DOWN)
+        gs = application.bot_data["gs_service"]
+        catalog: Catalog = application.bot_data.get("subcategories", {})
+        try:
+            gathered = await asyncio.to_thread(
+                gather_advice,
+                gs,
+                first,
+                today,
+                lambda plan: advice_changes(body, plan),
+                catalog,
+            )
+        except WorksheetNotFound:
+            return validation_error({"month"})
+        except Exception:
+            logger.exception("Plan advice: the sheet failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if gathered.context is None:
+            return validation_error(set(gathered.invalid))
+        try:
+            points = await ai.plan_advice(advice_numbers(gathered.context))
+        except Exception:
+            logger.exception("Plan advice failed for user_id=%s", user.id)
+            return error_response(503, "advisor_unavailable", ADVISOR_DOWN)
+        tab = {a.key for a in gathered.plan.articles if a.editable}
+        editable = {a.key: a for a in gathered.context.draft.articles if a.key in tab}
+        checked = checked_points(points, editable)
+        logger.info("Plan advice: %d point(s) for user_id=%s", len(checked), user.id)
+        answer = PlanAdviceOut(
+            points=[
+                AdvicePointOut(
+                    text=p.text,
+                    apply=(
+                        None
+                        if p.key is None or p.plan is None
+                        else AdviceApplyOut(key=p.key, plan=p.plan)
+                    ),
+                )
+                for p in checked
+            ]
+        )
+        return JSONResponse(answer.model_dump(mode="json"))
+
     return [
         Route("/bootstrap", bootstrap),
         Route("/expenses", add_expense, methods=["POST"]),
@@ -601,4 +703,5 @@ def routes(application: Application) -> list[Route]:
         Route("/plan", month_plan),
         Route("/plan", save_month_plan, methods=["POST"]),
         Route("/plan/next", create_next_plan, methods=["POST"]),
+        Route("/plan/advice", plan_advice, methods=["POST"]),
     ]
