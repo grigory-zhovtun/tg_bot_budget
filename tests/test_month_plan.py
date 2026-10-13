@@ -1,8 +1,13 @@
 """Вкладка «План»: план месяца из вкладки, подсказки, правки, запись."""
 
+from datetime import date
 from typing import Any
 
-from app.services.plan import Event, Goal, read_plan
+import pytest
+
+from app.services.analytics_service import transactions_frame
+from app.services.plan import Event, Goal, article_history, read_plan, shift_month
+from tests.test_day_budget import FACT_HEADER, RATES, fact_row
 
 HEADER = ["Статья", "Категория", "Подкатегория", "План", "Факт", "Дельта", "Валюта"]
 EVENTS = [("Аванс", 15, 3_000_000, "UZS"), ("Квартплата", 18, -500, "USD")]
@@ -95,3 +100,55 @@ def test_events_and_goal_come_from_the_forecast_block() -> None:
 def test_without_the_forecast_block_events_and_goal_are_unknown() -> None:
     plan = read_plan([HEADER, article("Расходы", "🍔 ЕДА", "кафе", 100)])
     assert (plan.events, plan.goal) == (None, None)
+
+
+def facts(*rows: list[Any]) -> Any:
+    return transactions_frame([FACT_HEADER, *rows], RATES)
+
+
+def test_history_is_three_full_months_the_last_one_and_this_month() -> None:
+    frame = facts(
+        fact_row(date(2026, 6, 30), "🍔 ЕДА", "кофе", 5_000_000),  # до окна
+        fact_row(date(2026, 7, 5), "🍔 ЕДА", "кофе", 300_000),
+        fact_row(date(2026, 8, 5), "🍔 ЕДА", "кофе", 600_000),
+        fact_row(date(2026, 9, 5), "🍔 ЕДА", "кофе", 900_000),
+        fact_row(date(2026, 9, 6), "🍔 ЕДА", "кофе", -100_000),  # возврат
+        fact_row(date(2026, 10, 2), "🍔 ЕДА", "кофе", 250_000),
+        fact_row(date(2026, 10, 12), "🍔 ЕДА", "кофе", 7_000_000),  # после сегодня
+    )
+    history = article_history(frame, date(2026, 10, 11))
+    assert history.average_months == (
+        date(2026, 7, 1),
+        date(2026, 8, 1),
+        date(2026, 9, 1),
+    )
+    assert (history.last_month, history.current_month, history.current_days) == (
+        date(2026, 9, 1),
+        date(2026, 10, 1),
+        11,
+    )
+    average, last, current = history.of("кофе|UZS")
+    assert average == pytest.approx(1_700_000 / 3)
+    assert (last, current) == (800_000, 250_000)
+
+
+def test_months_without_records_are_zero_and_currencies_apart() -> None:
+    frame = facts(
+        fact_row(date(2026, 9, 5), "🍔 ЕДА", "кофе", 900_000),
+        fact_row(date(2026, 9, 5), "🍔 ЕДА", "кофе", 30, "USD"),
+    )
+    history = article_history(frame, date(2026, 10, 11))
+    assert history.of("кофе|UZS") == (300_000, 900_000, 0)
+    assert history.of("кофе|USD") == (10, 30, 0)
+    assert history.of("кафе|UZS") == (0, 0, 0)
+
+
+def test_months_go_back_across_the_new_year() -> None:
+    assert shift_month(date(2027, 1, 1), -3) == date(2026, 10, 1)
+    assert shift_month(date(2026, 12, 1), 1) == date(2027, 1, 1)
+    history = article_history(facts(), date(2027, 1, 3))
+    assert history.average_months == (
+        date(2026, 10, 1),
+        date(2026, 11, 1),
+        date(2026, 12, 1),
+    )

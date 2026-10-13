@@ -7,7 +7,10 @@
 """
 
 from dataclasses import dataclass, replace
+from datetime import date
 from typing import Any
+
+import pandas as pd
 
 from app.services.day_budget import COLUMN_O, GOAL_LABEL, LIST_HEADER, TABLE_HEADER
 
@@ -144,3 +147,53 @@ def read_plan(rows: list[list[Any]]) -> MonthPlan:
     """Значения вкладки месяца (UNFORMATTED) → статьи, список и цель."""
     events, goal = _forecast(rows)
     return MonthPlan(_articles(rows), events, goal)
+
+
+def shift_month(first: date, months: int) -> date:
+    """Первое число месяца на months вперёд (назад — с минусом)."""
+    index = first.year * 12 + first.month - 1 + months
+    return date(index // 12, index % 12 + 1, 1)
+
+
+@dataclass(frozen=True)
+class History:
+    """Подсказки: среднее за три полных месяца, прошлый и текущий месяц."""
+
+    average_months: tuple[date, ...]
+    last_month: date
+    current_month: date
+    current_days: int
+    sums: dict[str, tuple[float, float, float]]  # ключ → (среднее, прошлый, текущий)
+
+    def of(self, key: str) -> tuple[float, float, float]:
+        return self.sums.get(key, (0.0, 0.0, 0.0))
+
+
+def article_history(frame: pd.DataFrame, today: date) -> History:
+    """Суммы листа fact по паре (подкатегория, валюта) в валюте строки.
+
+    Знак как во вкладке: трата и доход плюс, возврат минус. Месяцы считаются от
+    сегодняшней даты, месяц без записей — ноль.
+    """
+    current = today.replace(day=1)
+    months = tuple(shift_month(current, -back) for back in (3, 2, 1))
+    window = frame[(frame["day"] >= months[0]) & (frame["day"] <= today)]
+    by_key: dict[str, dict[date, float]] = {}
+    if not window.empty:
+        month = window["day"].map(lambda value: value.replace(day=1))
+        totals = (
+            window.assign(month=month)
+            .groupby(["subcategory", "currency", "month"])["amount"]
+            .sum()
+        )
+        for (sub, currency, first), amount in totals.items():
+            by_key.setdefault(article_key(sub, currency), {})[first] = float(amount)
+    sums = {
+        key: (
+            sum(values.get(first, 0.0) for first in months) / len(months),
+            values.get(months[-1], 0.0),
+            values.get(current, 0.0),
+        )
+        for key, values in by_key.items()
+    }
+    return History(months, months[-1], current, today.day, sums)
