@@ -14,7 +14,14 @@ from typing import Any
 import pandas as pd
 
 from app.domain import Rates
-from app.services.day_budget import COLUMN_O, GOAL_LABEL, LIST_HEADER, TABLE_HEADER
+from app.services.analytics_service import MONTHS_RU, money
+from app.services.day_budget import (
+    COLUMN_O,
+    GOAL_LABEL,
+    LIST_HEADER,
+    TABLE_HEADER,
+    short,
+)
 
 KINDS = {"Расходы": "spend", "Доходы": "income"}
 MAX_EVENTS = 20  # строк списка; дальше — уже не список, а сломанная вкладка
@@ -382,3 +389,70 @@ def totals(plan: MonthPlan, rates: Rates) -> Totals:
     )
     goal = uzs(plan.goal.amount, plan.goal.currency) if plan.goal else 0.0
     return Totals(incomes, spend, goal, income_rows)
+
+
+NOTE_LINES = 10  # дальше — «… и ещё N»
+
+
+def _plain(value: float) -> str:
+    """«1 500 000», «650,50»: копейки, только если они есть."""
+    if float(value).is_integer():
+        return money(value)
+    return f"{value:,.2f}".replace(",", " ").replace(".", ",")
+
+
+def _amount(value: float, currency: str) -> str:
+    return _plain(value) if currency == "UZS" else f"{_plain(value)} {currency}"
+
+
+def _event_text(cells: EventCells) -> str:
+    name, day, amount, currency = cells
+    if not name or day is None or amount is None or not currency:
+        return "—"
+    sign = "+" if amount > 0 else "−"
+    return f"{day} · {name} {sign}{_amount(abs(amount), currency)}"
+
+
+def change_note(
+    plan: MonthPlan,
+    changes: PlanChanges,
+    rates: Rates,
+    month: date,
+    author: str | None,
+    icons: dict[str, str],
+) -> str:
+    """Сообщение второму: кто менял, что было → стало и «Свободно» до и после."""
+    articles = {a.key: a for a in plan.articles}
+    lines: list[str] = []
+    for change in changes.articles:
+        article = articles[change.key]
+        parts = (icons.get(article.subcategory, ""), article.subcategory)
+        label = " ".join(part for part in parts if part)
+        if article.currency != "UZS":
+            label += f" {article.currency}"
+        lines.append(f"{label}: {_plain(change.base)} → {_plain(change.plan)}")
+    for change in changes.events:
+        value = change.value
+        after = (
+            "удалено"
+            if value is None
+            else _event_text((value.name, value.day, value.amount, value.currency))
+        )
+        lines.append(f"📅 {_event_text(change.base)} → {after}")
+    if changes.goal is not None:
+        (was, was_code), (now, now_code) = changes.goal.base, changes.goal.value
+        lines.append(
+            f"🎯 Отложить: {_amount(was, was_code)} → {_amount(now, now_code)}"
+        )
+    shown = lines[:NOTE_LINES]
+    if len(lines) > NOTE_LINES:
+        shown.append(f"… и ещё {len(lines) - NOTE_LINES}")
+    name = MONTHS_RU[month.month - 1]
+    head = (
+        f"✏️ {author} — правки в плане на {name}:"
+        if author
+        else f"✏️ Правки в плане на {name}:"
+    )
+    before = totals(plan, rates).free
+    after_free = totals(applied(plan, changes), rates).free
+    return "\n".join([head, *shown, f"Свободно: {short(before)} → {short(after_free)}"])

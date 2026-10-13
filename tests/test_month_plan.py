@@ -19,6 +19,7 @@ from app.services.plan import (
     applied,
     article_history,
     cell_updates,
+    change_note,
     conflicts,
     read_plan,
     shift_month,
@@ -284,3 +285,45 @@ def test_free_money_is_incomes_minus_spending_minus_goal() -> None:
         ),
     )
     assert totals(changed, rates).free == 13_000_000 - 6_500_000
+
+
+def test_the_other_user_gets_what_changed() -> None:
+    rates = Rates({"UZS": 1.0, "USD": 12_000.0})
+    changes = PlanChanges(
+        articles=(
+            ArticleChange("кофе|UZS", 1_500_000, 1_800_000),
+            ArticleChange("квартплата|USD", 500, 650.5),
+        ),
+        events=(
+            EventChange(1, RENT, None),
+            EventChange(2, EMPTY, EventValue("Премия", 25, 1_000_000, "UZS")),
+        ),
+        goal=GoalChange((1_000_000, "UZS"), (2_000_000, "UZS")),
+    )
+    text = change_note(
+        read_plan(TAB), changes, rates, date(2026, 10, 1), "Иван", {"кофе": "☕"}
+    )
+    assert text.splitlines() == [
+        "✏️ Иван — правки в плане на октябрь:",
+        "☕ кофе: 1 500 000 → 1 800 000",
+        "квартплата USD: 500 → 650,50",
+        "📅 18 · Квартплата −500 USD → удалено",
+        "📅 — → 25 · Премия +1 000 000",
+        "🎯 Отложить: 1 000 000 → 2 000 000",
+        "Свободно: -5,50 млн → -7,61 млн",
+    ]
+
+
+def test_long_lists_are_cut_and_the_author_may_be_unknown() -> None:
+    rows = month_tab(
+        [article("Расходы", "🍔 ЕДА", f"статья {n}", 100) for n in range(12)]
+    )
+    changes = PlanChanges(
+        articles=tuple(ArticleChange(f"статья {n}|UZS", 100, 200) for n in range(12))
+    )
+    lines = change_note(
+        read_plan(rows), changes, Rates({"UZS": 1.0}), date(2026, 11, 1), None, {}
+    ).splitlines()
+    assert lines[0] == "✏️ Правки в плане на ноябрь:"
+    assert lines[11] == "… и ещё 2"
+    assert len(lines) == 13
