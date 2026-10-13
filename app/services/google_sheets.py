@@ -51,6 +51,9 @@ MARKS_RANGE = "F1:G60"
 SOURCES_RANGE = "F1:F60"
 MARKS_HEADER = "выписка по"
 SERIAL_ZERO = date(1899, 12, 30)
+# заголовок блока «🧠 О нас для советника» в первой строке листа system
+PROFILE_MARK = "О НАС"
+MAX_PROFILE = 2000
 
 
 def row_values(row: SheetRow) -> list[Any]:
@@ -215,6 +218,35 @@ class GoogleSheetsService:
             if name and icon:
                 icons[name] = icon
         return icons
+
+    def get_advisor_profile(self) -> str:
+        """Что владелец написал о семье для советника; нет блока или сбой — пусто.
+
+        Лист system: заголовок с «О нас» в первой строке любой колонки, текст —
+        в ячейках под ним до первой пустой.
+        """
+        try:
+            rows = self._with_retry(
+                "Reading advisor profile",
+                lambda: self._worksheet(config.SYSTEM_SHEET_NAME).get("A1:Z40"),
+            )
+        except Exception:
+            logger.exception("Could not read the advisor profile")
+            return ""
+        header = rows[0] if rows else []
+        column = next(
+            (i for i, cell in enumerate(header) if PROFILE_MARK in str(cell).upper()),
+            None,
+        )
+        if column is None:
+            return ""
+        lines: list[str] = []
+        for row in rows[1:]:
+            text = str(row[column]).strip() if column < len(row) else ""
+            if not text:
+                break
+            lines.append(text)
+        return "\n".join(lines)[:MAX_PROFILE]
 
     def get_emoji_packs(self) -> list[str]:
         """Наборы кастомных эмодзи для картинок на кнопках: system!J под заголовком."""

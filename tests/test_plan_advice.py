@@ -2,10 +2,19 @@
 
 from datetime import date
 
+import pytest
+from gspread.exceptions import WorksheetNotFound
+
 from app.domain import Rates
 from app.services.analytics_service import transactions_frame
 from app.services.day_budget import day_budget
-from app.services.plan import Article, article_history, read_plan
+from app.services.plan import (
+    Article,
+    ArticleChange,
+    PlanChanges,
+    article_history,
+    read_plan,
+)
 from app.services.plan_advice import (
     AdviceContext,
     AdvicePoint,
@@ -13,6 +22,7 @@ from app.services.plan_advice import (
     advice_numbers,
     checked_points,
     full_months,
+    gather_advice,
     monthly_sums,
     purchases,
     unplanned,
@@ -22,7 +32,7 @@ from tests.test_day_budget import FACT_HEADER, fact_row
 from tests.test_day_budget import RATES as BUDGET_RATES
 from tests.test_day_budget import frame as budget_frame
 from tests.test_day_budget import tab as budget_tab
-from tests.test_month_plan import TAB
+from tests.test_month_plan import CATALOG, TAB, PlanSheets, article, month_tab
 
 RATES = Rates({"UZS": 1.0, "USD": 12_000.0, "RUB": 150.0})
 COFFEE = Article("кофе|UZS", "spend", "🍔 ЕДА", "кофе", "UZS", 1_500_000, 2)
@@ -161,3 +171,52 @@ def test_apply_stays_only_for_editable_articles_with_a_sane_new_sum() -> None:
         AdvicePoint("Отрицательная сумма."),
         AdvicePoint("Как было."),  # до тысяч — 1 500 000, то же, что в черновике
     ]
+
+
+def test_the_context_is_gathered_from_the_tabs_the_fact_and_the_profile() -> None:
+    september = month_tab([article("Расходы", "🍔 ЕДА", "кофе", 1_200_000)])
+    fact = [FACT_HEADER, fact_row(date(2026, 9, 5), "🍔 ЕДА", "кофе", 900_000)]
+    sheets = PlanSheets({"Oct 26": TAB, "Sep 26": september}, fact)
+    sheets.profile = "Семья из четырёх"
+    changes = PlanChanges(articles=(ArticleChange("кофе|UZS", 1_500_000, 1_700_000),))
+    gathered = gather_advice(
+        sheets, date(2026, 10, 1), TODAY, lambda plan: changes, CATALOG
+    )
+    found = gathered.context
+    assert gathered.invalid == frozenset() and found is not None
+    assert [(a.key, a.plan) for a in found.draft.articles][0] == ("кофе|UZS", 1_700_000)
+    assert found.old_plans == {
+        date(2026, 9, 1): {"кофе|UZS": 1_200_000}
+    }  # июля, августа нет
+    assert len(found.months) == 12 and found.by_month["кофе|UZS"][-1] == 900_000
+    assert found.budget is not None and found.profile == "Семья из четырёх"
+
+
+def test_the_next_month_is_advised_with_this_month_pace() -> None:
+    sheets = PlanSheets({"Nov 26": TAB, "Oct 26": TAB})
+    gathered = gather_advice(
+        sheets, date(2026, 11, 1), TODAY, lambda plan: PlanChanges(), CATALOG
+    )
+    assert gathered.context is not None
+    assert gathered.context.month == date(2026, 11, 1)
+    assert gathered.context.budget is not None  # темп и деньги — октября
+
+
+def test_changes_the_tab_does_not_know_stop_the_advisor() -> None:
+    sheets = PlanSheets({"Oct 26": TAB})
+    changes = PlanChanges(articles=(ArticleChange("кальян|UZS", 0, 1),))
+    gathered = gather_advice(
+        sheets, date(2026, 10, 1), TODAY, lambda plan: changes, CATALOG
+    )
+    assert (gathered.invalid, gathered.context) == (frozenset({"rows"}), None)
+
+
+def test_without_the_planned_tab_there_is_nothing_to_advise() -> None:
+    with pytest.raises(WorksheetNotFound):
+        gather_advice(
+            PlanSheets({}),
+            date(2026, 10, 1),
+            TODAY,
+            lambda plan: PlanChanges(),
+            CATALOG,
+        )

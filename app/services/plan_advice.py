@@ -9,23 +9,33 @@
 """
 
 import calendar
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
+from typing import Any
 
 import pandas as pd
+from gspread.exceptions import WorksheetNotFound
 
-from app.domain import Rates, merchant_key
-from app.services.analytics_service import MONTHS_RU, expenses
-from app.services.day_budget import DayBudget
+from app import config
+from app.domain import Rates, merchant_key, month_title
+from app.services.analytics_service import MONTHS_RU, expenses, transactions_frame
+from app.services.day_budget import DayBudget, day_budget
+from app.services.google_sheets import GoogleSheetsService
 from app.services.plan import (
     TOLERANCE,
     Article,
+    Catalog,
     History,
     MonthPlan,
+    PlanChanges,
+    applied,
+    article_history,
     article_key,
+    read_plan,
     shift_month,
     totals,
+    unknown,
 )
 
 MAX_POINTS = 5
@@ -325,3 +335,67 @@ def checked_points(
             continue
         checked.append(AdvicePoint(text, article.key, value))
     return checked
+
+
+@dataclass(frozen=True)
+class Gathered:
+    plan: MonthPlan  # вкладка как есть: по ней видно, что можно править
+    context: AdviceContext | None  # None — правки не подходят к вкладке
+    invalid: frozenset[str] = frozenset()
+
+
+def _rows(gs: GoogleSheetsService, title: str) -> list[list[Any]] | None:
+    try:
+        return gs.get_values(title)
+    except WorksheetNotFound:
+        return None
+
+
+def gather_advice(
+    gs: GoogleSheetsService,
+    first: date,
+    today: date,
+    changes_for: Callable[[MonthPlan], PlanChanges],
+    catalog: Catalog,
+) -> Gathered:
+    """Всё для советника (синхронно): вкладки, факт, курсы, «О нас».
+
+    changes_for строит правки черновика по прочитанной вкладке: база правок —
+    то, что во вкладке сейчас. WorksheetNotFound — вкладки планируемого месяца нет.
+    """
+    rows = gs.get_values(month_title(first))
+    plan = read_plan(rows)
+    changes = changes_for(plan)
+    rates = gs.get_rates()
+    bad = unknown(plan, changes, rates.to_uzs.keys(), catalog)
+    bad.discard("space")  # советнику место для вставки не важно
+    if bad:
+        return Gathered(plan, None, frozenset(bad))
+    frame = transactions_frame(gs.get_values(config.FACT_SHEET_NAME), rates)
+    current = today.replace(day=1)
+    current_rows = rows if first == current else _rows(gs, month_title(current))
+    months = full_months(today, HISTORY_MONTHS)
+    old_plans: dict[date, dict[str, float]] = {}
+    for month in months[-3:]:
+        if (old := _rows(gs, month_title(month))) is not None:
+            old_plans[month] = {a.key: a.plan for a in read_plan(old).articles}
+    budget = None
+    if current_rows is not None:
+        budget = day_budget(frame, current_rows, today, rates, config.FROZEN_CURRENCY)
+    draft = applied(plan, changes)
+    recent = months[-PURCHASE_MONTHS:]
+    context = AdviceContext(
+        draft=draft,
+        month=first,
+        today=today,
+        rates=rates,
+        history=article_history(frame, today),
+        months=months,
+        by_month=monthly_sums(frame, months),
+        old_plans=old_plans,
+        purchases=purchases(frame, recent),
+        unplanned=unplanned(frame, recent, draft),
+        budget=budget,
+        profile=gs.get_advisor_profile(),
+    )
+    return Gathered(plan, context)

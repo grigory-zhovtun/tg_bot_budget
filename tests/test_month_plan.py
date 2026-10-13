@@ -450,12 +450,16 @@ class PlanSheets:
         self.tabs["fact"] = fact or [FACT_HEADER]
         self.writes: list[list[dict[str, Any]]] = []
         self.applied: list[list[dict[str, Any]]] = []
+        self.profile = ""  # блок «О нас» листа system
         self.delay = 0.0  # пауза между чтением вкладки и записью — окно гонки
 
     def get_values(self, name: str) -> list[list[Any]]:
         if name not in self.tabs:
             raise WorksheetNotFound(name)
         return [list(row) for row in self.tabs[name]]
+
+    def get_advisor_profile(self) -> str:
+        return self.profile
 
     def get_rates(self) -> Rates:
         time.sleep(
