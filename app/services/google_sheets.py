@@ -86,6 +86,7 @@ class MonthTab:
     created: bool = False
     dates_fixed: bool = False
     hidden: list[str] = field(default_factory=list)
+    revealed: bool = False  # 1-го числа показана вкладка, созданная заранее
 
 
 def _serial(day: date) -> int:
@@ -667,6 +668,19 @@ class GoogleSheetsService:
             past = [ws for _, ws in months if not ws.isSheetHidden]
             result.hidden = [ws.title for ws in past]
             self._set_hidden([(new_id, False)] + [(ws.id, True) for ws in past])
+        else:
+            tab = next(ws for ws in sheets if ws.title == result.title)
+            if tab.isSheetHidden:
+                # план составили заранее: месяц наступил — показать его, спрятать прошлые
+                past = [
+                    ws
+                    for ws in sheets
+                    if (start := parse_month_title(ws.title))
+                    and start < first
+                    and not ws.isSheetHidden
+                ]
+                self._set_hidden([(tab.id, False)] + [(ws.id, True) for ws in past])
+                result.revealed, result.hidden = True, [ws.title for ws in past]
         fixed = self._ensure_dates(result.title, first, last)
         result.dates_fixed = fixed and not result.created
         return result
