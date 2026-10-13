@@ -413,6 +413,10 @@ class NextSheets(PlanSheets):
         base = sheets_with()
         super().__init__({TITLE: base.tabs[TITLE]}, base.tabs["fact"])
         self.copies = 0
+        self.current = MonthTab(TITLE)  # что сделал ensure_month_tab с текущим месяцем
+
+    def ensure_month_tab(self, today: Any) -> MonthTab:
+        return self.current
 
     def ensure_next_month_tab(self, today: Any) -> MonthTab:
         title = month_title(NEXT)
@@ -471,3 +475,21 @@ def test_next_month_failure_is_503() -> None:
 def test_next_month_needs_a_signature() -> None:
     client = client_for(plan_app(NextSheets()))
     assert client.post("/api/plan/next").status_code == 401
+
+
+def test_the_owner_hears_of_a_month_tab_the_button_made(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "ANALYTICS_CHAT_ID", None)
+    monkeypatch.setattr(config, "OWNER_ID", OWNER)
+    sheets = NextSheets()
+    sheets.current = MonthTab(TITLE, "Sep 26", created=True, hidden=["Sep 26"])
+    application = plan_app(sheets)
+    assert create_next(application, user=WIFE).status_code == 200
+    chat_id, text = application.bot.send_message.await_args.args
+    assert chat_id == OWNER
+    assert text.startswith(f"📅 Новый месяц: создал вкладку «{TITLE}»")
+
+
+def test_creating_the_next_month_needs_an_allowed_user() -> None:
+    assert create_next(plan_app(NextSheets()), user=777).status_code == 403

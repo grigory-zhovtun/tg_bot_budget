@@ -22,6 +22,7 @@ from app import config
 from app.custom_icons import leading_emoji
 from app.domain import currency_of, entry_row, local_today, month_title
 from app.handlers.messages import save_rows, seen_input
+from app.handlers.month import describe, tell_owner
 from app.handlers.undo import undo_last
 from app.services.dashboard import Dashboard
 from app.services.plan import (
@@ -574,6 +575,7 @@ def routes(application: Application) -> list[Route]:
         lock: asyncio.Lock = application.bot_data.setdefault(PLAN_LOCK, asyncio.Lock())
         try:
             async with lock:
+                current = await asyncio.to_thread(gs.ensure_month_tab, today)
                 tab = await asyncio.to_thread(gs.ensure_next_month_tab, today)
                 loaded = await asyncio.to_thread(
                     load_plan, gs, month_title(first), today
@@ -581,6 +583,9 @@ def routes(application: Application) -> list[Route]:
         except Exception:
             logger.exception("Next month plan failed for user_id=%s", user.id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if text := describe(current, today):
+            # вкладку текущего месяца сделала кнопка раньше ночной задачи
+            await tell_owner(application.bot, text)
         if tab.created:
             logger.info("Plan tab %s created by user_id=%s", tab.title, user.id)
         icons: dict[str, str] = application.bot_data.get("icons", {})

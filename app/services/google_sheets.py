@@ -652,10 +652,15 @@ class GoogleSheetsService:
         (последний), поэтому у копии меняются только они; план остаётся
         прошлый. Прошедшие месяцы скрываются: видны fact, текущий месяц, system.
         Повторный вызов ничего не меняет.
+
+        Если вкладку в эту же секунду создал другой процесс (ночная задача и
+        кнопка «Создать план»), duplicateSheet откажет по имени — тогда берётся
+        готовая. 1-го числа видимые прошлые месяцы прячутся, даже если заранее
+        созданный месяц показали руками.
         """
         result = MonthTab(month_title(day))
         first, last = month_bounds(day)
-        sheets = self._with_retry("Listing sheets", self.sheet.worksheets)
+        sheets = self._with_retry("Listing sheets", lambda: self.sheet.worksheets())
         if not any(ws.title == result.title for ws in sheets):
             months = [
                 (start, ws)
@@ -665,20 +670,28 @@ class GoogleSheetsService:
             if not months:
                 raise ValueError("нет вкладки прошлого месяца, чтобы скопировать план")
             _, source = max(months, key=lambda item: item[0])
-            # без повтора: копия с тем же именем второй раз не создастся
-            reply = self.sheet.batch_update(
-                {
-                    "requests": [
-                        {
-                            "duplicateSheet": {
-                                "sourceSheetId": source.id,
-                                "insertSheetIndex": source.index,
-                                "newSheetName": result.title,
+            try:
+                # без повтора: копия с тем же именем второй раз не создастся
+                reply = self.sheet.batch_update(
+                    {
+                        "requests": [
+                            {
+                                "duplicateSheet": {
+                                    "sourceSheetId": source.id,
+                                    "insertSheetIndex": source.index,
+                                    "newSheetName": result.title,
+                                }
                             }
-                        }
-                    ]
-                }
-            )
+                        ]
+                    }
+                )
+            except Exception:
+                again = self._with_retry(
+                    "Listing sheets", lambda: self.sheet.worksheets()
+                )
+                if not any(ws.title == result.title for ws in again):
+                    raise
+                return self.ensure_month_tab(day)  # её только что создал другой процесс
             new_id = reply["replies"][0]["duplicateSheet"]["properties"]["sheetId"]
             result.created, result.source = True, source.title
             past = [ws for _, ws in months if not ws.isSheetHidden]
@@ -686,17 +699,21 @@ class GoogleSheetsService:
             self._set_hidden([(new_id, False)] + [(ws.id, True) for ws in past])
         else:
             tab = next(ws for ws in sheets if ws.title == result.title)
+            past = [
+                ws
+                for ws in sheets
+                if (start := parse_month_title(ws.title))
+                and start < first
+                and not ws.isSheetHidden
+            ]
             if tab.isSheetHidden:
                 # план составили заранее: месяц наступил — показать его, спрятать прошлые
-                past = [
-                    ws
-                    for ws in sheets
-                    if (start := parse_month_title(ws.title))
-                    and start < first
-                    and not ws.isSheetHidden
-                ]
                 self._set_hidden([(tab.id, False)] + [(ws.id, True) for ws in past])
                 result.revealed, result.hidden = True, [ws.title for ws in past]
+            elif day.day == 1 and past:
+                # заранее созданный месяц показали руками до 1-го — прошлые прячем сейчас
+                self._set_hidden([(ws.id, True) for ws in past])
+                result.hidden = [ws.title for ws in past]
         fixed = self._ensure_dates(result.title, first, last)
         result.dates_fixed = fixed and not result.created
         return result
@@ -712,7 +729,7 @@ class GoogleSheetsService:
         current = self.ensure_month_tab(today)
         first, last = month_bounds(month_bounds(today)[1] + timedelta(days=1))
         result = MonthTab(month_title(first))
-        sheets = self._with_retry("Listing sheets", self.sheet.worksheets)
+        sheets = self._with_retry("Listing sheets", lambda: self.sheet.worksheets())
         tab = next((ws for ws in sheets if ws.title == result.title), None)
         if tab is None:
             source = next(ws for ws in sheets if ws.title == current.title)
@@ -733,7 +750,9 @@ class GoogleSheetsService:
                 )
             except Exception:
                 # копию мог сделать другой процесс или наш запрос, чей ответ потерян
-                again = self._with_retry("Listing sheets", self.sheet.worksheets)
+                again = self._with_retry(
+                    "Listing sheets", lambda: self.sheet.worksheets()
+                )
                 tab = next((ws for ws in again if ws.title == result.title), None)
                 if tab is None:
                     raise

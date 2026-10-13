@@ -279,13 +279,67 @@ def test_a_month_opened_by_hand_is_not_hidden_again() -> None:
 
 
 @pytest.mark.usefixtures("owner")
-async def test_owner_is_told_the_planned_month_became_current() -> None:
+async def test_owner_is_told_the_planned_month_became_current(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(month, "local_today", lambda zone: date(2026, 11, 1))
     context = job_context(MonthTab("Nov 26", revealed=True, hidden=["Oct 26"]))
     await month.month_tab_job(context)
     _, text = context.bot.send_message.await_args.args
     assert text == (
         "📅 Новый месяц: вкладка «Nov 26» с планом, составленным заранее, "
         "стала текущей.\nСкрыл прошлые месяцы: Oct 26."
+    )
+
+
+def test_a_new_month_made_meanwhile_by_another_process_is_not_an_error() -> None:
+    class Busy(Book):
+        def batch_update(self, body: dict[str, Any]) -> dict[str, Any]:
+            if "duplicateSheet" in body["requests"][0]:
+                # кнопка «Создать план» в ту же секунду сделала вкладку и спрятала октябрь
+                november = Tab("Nov 26", 31, 28, hidden=False)
+                november.dates = [[46327], [46356]]
+                self.tabs.append(november)
+                self.worksheet("Oct 26").isSheetHidden = True
+                raise RuntimeError('A sheet with the name "Nov 26" already exists')
+            return super().batch_update(body)
+
+    book = Busy(october_book().tabs)
+    assert service_for(book).ensure_month_tab(date(2026, 11, 1)) == MonthTab("Nov 26")
+
+
+def test_listing_after_a_reconnect_uses_the_new_connection() -> None:
+    class Dead(Book):
+        def worksheets(self) -> list[Tab]:
+            raise ConnectionError("token expired")
+
+    fresh = october_book()
+    service = service_for(Dead(fresh.tabs))
+    service._authenticate = lambda: setattr(service, "sheet", fresh)
+    assert service.ensure_month_tab(date(2026, 10, 6)) == MonthTab("Oct 26")
+
+
+def test_on_the_first_past_months_hide_even_if_the_month_was_shown_by_hand() -> None:
+    book = november_book()
+    book.worksheet("Nov 26").isSheetHidden = False  # показали руками до 1-го
+    tab = service_for(book).ensure_month_tab(date(2026, 11, 1))
+    assert tab == MonthTab("Nov 26", hidden=["Oct 26"])
+    visibility = [
+        r["updateSheetProperties"]["properties"] for r in book.batches[0]["requests"]
+    ]
+    assert visibility == [{"sheetId": 29, "hidden": True}]
+
+
+def test_a_month_hidden_by_hand_and_shown_again_is_not_called_new() -> None:
+    text = month.describe(MonthTab("Oct 26", revealed=True), date(2026, 10, 14))
+    assert text == "📅 Вкладка «Oct 26» была скрыта — показал её: это текущий месяц."
+
+
+def test_past_months_hidden_on_the_first_are_reported() -> None:
+    text = month.describe(MonthTab("Nov 26", hidden=["Oct 26"]), date(2026, 11, 1))
+    assert text == (
+        "📅 Новый месяц: вкладка «Nov 26» уже открыта.\n"
+        "Скрыл прошлые месяцы: Oct 26."
     )
 
 
