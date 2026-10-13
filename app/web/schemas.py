@@ -126,6 +126,17 @@ class FrozenOut(ApiModel):
     change: float
 
 
+class RunwayOut(ApiModel):
+    """Прогноз по сумам: когда кончатся и сколько долларов обменять до поступления."""
+
+    balance: float
+    pace: float
+    last_day: date | None
+    short: float
+    until: date | None
+    dollars: float | None
+
+
 class DashboardOut(ApiModel):
     """Сводка: суммы в сумах; у пунктов списка и подписок amount — в их валюте."""
 
@@ -144,6 +155,7 @@ class DashboardOut(ApiModel):
     daily: list[DayPointOut] = []
     upcoming: list[ForecastItemOut] = []
     subscriptions: list[SubscriptionOut] = []
+    runway: RunwayOut | None = None
 
 
 class PlanHistoryOut(ApiModel):

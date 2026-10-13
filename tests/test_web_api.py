@@ -390,3 +390,17 @@ def test_left_today_follows_today_when_the_limit_is_gone() -> None:
     assert body["limit"] < 0
     # как /today: max(лимит, 0) − потрачено, то есть всё потраченное — сверх лимита
     assert body["left_today"] == pytest.approx(-body["spent_today"])
+
+
+def test_dashboard_has_the_sums_forecast() -> None:
+    spent = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000)
+    found = build_dashboard(frame(spent), tab(), date(2026, 10, 2), RATES, "USD")
+    body = dashboard_for(found).json()
+    assert body["runway"] == {
+        "balance": 4_600_000,
+        "pace": 400_000 / 14,
+        "last_day": None,
+        "short": 0,
+        "until": None,
+        "dollars": None,
+    }

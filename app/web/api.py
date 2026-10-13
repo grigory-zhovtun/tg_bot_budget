@@ -59,6 +59,7 @@ from app.web.schemas import (
     PlanOut,
     PlanSaveIn,
     RowsOut,
+    RunwayOut,
     SourceOut,
     SubcategoryOut,
     SubscriptionOut,
@@ -187,6 +188,17 @@ def dashboard_out(
         return DashboardOut(
             status="no_forecast", month=month, today=today, groups=groups
         )
+    runway = None
+    if budget.runway is not None:
+        r = budget.runway
+        runway = RunwayOut(
+            balance=r.balance,
+            pace=r.pace,
+            last_day=r.last_day,
+            short=r.short,
+            until=r.until,
+            dollars=r.dollars,
+        )
     frozen = None
     if budget.frozen is not None and budget.frozen_currency:
         frozen = FrozenOut(
@@ -234,6 +246,7 @@ def dashboard_out(
             )
             for sub in found.subscriptions
         ],
+        runway=runway,
     )
 
 

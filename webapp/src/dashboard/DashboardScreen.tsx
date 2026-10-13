@@ -5,7 +5,7 @@ import {
   type Dashboard,
   type SubscriptionState,
 } from "../api";
-import { itemAmount, money, short, withCurrency } from "../format";
+import { itemAmount, longDay, money, short, withCurrency } from "../format";
 import BalanceChart from "./BalanceChart";
 import GroupBars from "./GroupBars";
 
@@ -94,6 +94,52 @@ function Cards({ data }: { data: Dashboard }) {
   );
 }
 
+/** Когда при нынешнем темпе закончатся сумы и сколько долларов обменять. */
+function Sums({ data }: { data: Dashboard }) {
+  const runway = data.runway;
+  if (!runway) return null;
+  let when = "";
+  if (runway.short > 0) {
+    if (runway.last_day === null || runway.last_day < data.today) {
+      when = "Сумы уже закончились";
+    } else if (runway.last_day === data.today) {
+      when = "Хватит только на сегодня";
+    } else {
+      when = `Хватит до ${longDay(runway.last_day)}`;
+    }
+  }
+  const target = runway.until
+    ? `До ${longDay(runway.until)}`
+    : "До конца месяца";
+  return (
+    <section
+      className="flex flex-col gap-1 rounded-2xl bg-section p-4"
+      aria-label="Сумы"
+    >
+      <div className="flex items-baseline justify-between">
+        <p className="text-sm text-hint">💳 Сумы на картах и наличными</p>
+        <p className="font-semibold">{short(runway.balance)}</p>
+      </div>
+      <p className="text-xs text-hint">
+        {`тратите в среднем ${short(runway.pace)} в день (за 14 дней)`}
+      </p>
+      {runway.short <= 0 ? (
+        <p className="font-medium text-ok">До конца месяца хватит</p>
+      ) : (
+        <>
+          <p className="font-medium text-danger">{when}</p>
+          <p className="text-sm">
+            {runway.dollars !== null
+              ? `${target} обменять ≈ $${money(runway.dollars)}`
+              : `${target} обменять`}
+          </p>
+          <p className="text-xs text-hint">{`не хватит ${short(runway.short)}`}</p>
+        </>
+      )}
+    </section>
+  );
+}
+
 function Content({ data }: { data: Dashboard }) {
   if (data.status === "no_month_tab") {
     return <p>Вкладки месяца нет — бот создаёт её 1-го числа.</p>;
@@ -102,6 +148,7 @@ function Content({ data }: { data: Dashboard }) {
     <>
       <Today data={data} />
       <Cards data={data} />
+      <Sums data={data} />
       {data.status === "no_forecast" && (
         <p className="text-sm text-hint">
           Во вкладке месяца нет блока прогноза — лимит на день не посчитать.
