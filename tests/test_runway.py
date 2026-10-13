@@ -3,11 +3,18 @@
 from datetime import date, timedelta
 from typing import Any
 
+import pytest
+
 from app.domain import Rates
 from app.services.analytics_service import transactions_frame
-from app.services.day_budget import ForecastItem
-from app.services.runway import uzs_runway
-from tests.test_day_budget import FACT_HEADER, RATES, fact_row
+from app.services.day_budget import (
+    ForecastItem,
+    day_budget,
+    format_day_budget,
+    runway_line,
+)
+from app.services.runway import Runway, uzs_runway
+from tests.test_day_budget import FACT_HEADER, RATES, fact_row, frame, tab
 
 TODAY = date(2026, 10, 13)
 OPENING = fact_row(date(2026, 9, 1), "💰 ДОХОДЫ", "нач остаток", 9_000_000)
@@ -102,3 +109,67 @@ def test_a_list_day_past_the_month_end_counts_on_its_last_day() -> None:
     )
     assert runway.last_day == date(2026, 11, 24)
     assert (runway.short, runway.until) == (500_000, date(2026, 11, 30))
+
+
+@pytest.mark.parametrize(
+    ("runway", "line"),
+    [
+        (
+            Runway(
+                2_000_000,
+                500_000,
+                date(2026, 10, 18),
+                5_500_000,
+                date(2026, 10, 30),
+                460,
+            ),
+            "💳 Сумы 2,00 млн — хватит до 18.10 · до 30.10 обменять ≈ $460",
+        ),
+        (
+            Runway(7_600_000, 100_000, None, 0, None, None),
+            "💳 Сумы 7,60 млн — до конца месяца хватит",
+        ),
+        (
+            Runway(2_000_000, 500_000, date(2026, 10, 16), 7_500_000, None, 630),
+            "💳 Сумы 2,00 млн — хватит до 16.10 · до конца месяца обменять ≈ $630",
+        ),
+        (
+            Runway(
+                2_000_000,
+                500_000,
+                date(2026, 10, 18),
+                5_500_000,
+                date(2026, 10, 30),
+                None,
+            ),
+            "💳 Сумы 2,00 млн — хватит до 18.10 · до 30.10 не хватит 5,50 млн",
+        ),
+        (
+            Runway(
+                -400_000,
+                100_000,
+                date(2026, 10, 12),
+                1_900_000,
+                date(2026, 10, 30),
+                1_160,
+            ),
+            "💳 Сумы -400 000 — уже закончились · до 30.10 обменять ≈ $1 160",
+        ),
+        (
+            Runway(
+                300_000, 500_000, date(2026, 10, 13), 200_000, date(2026, 10, 15), 20
+            ),
+            "💳 Сумы 300 000 — хватит только на сегодня · до 15.10 обменять ≈ $20",
+        ),
+    ],
+)
+def test_the_morning_line(runway: Runway, line: str) -> None:
+    assert runway_line(runway, TODAY) == line
+
+
+def test_the_line_follows_the_frozen_money_in_the_morning_message() -> None:
+    budget = day_budget(frame(), tab(), date(2026, 10, 2), RATES, "USD")
+    assert budget is not None and budget.runway is not None
+    lines = format_day_budget(budget).splitlines()
+    frozen = next(i for i, text in enumerate(lines) if text.startswith("🧊"))
+    assert lines[frozen + 1] == "💳 Сумы 5,00 млн — до конца месяца хватит"
