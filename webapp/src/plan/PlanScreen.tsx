@@ -197,7 +197,9 @@ export default function PlanScreen({
           haptic("success");
           setPlan(fresh);
           setConflicts([]);
-          onDraft(emptyDraft(draft.month));
+          // правки, сделанные пока шло сохранение, остаются; записанные совпали
+          // со свежим планом и уходят сами
+          onDraft(rebase(draftRef.current, fresh).draft);
           setNotice(
             `✅ План сохранён: ${changesText(fresh.saved ?? changeCount(draft))}`,
           );
@@ -210,7 +212,7 @@ export default function PlanScreen({
               ? reason.message
               : "Не получилось сохранить";
           if (conflict) {
-            const next = rebase(draft, conflict.plan);
+            const next = rebase(draftRef.current, conflict.plan);
             setPlan(conflict.plan);
             setConflicts(conflict.conflicts);
             onDraft(next.draft);

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -81,7 +81,11 @@ describe("PlanScreen", () => {
   });
 
   it("edits an article, recounts the month and saves", async () => {
-    const api = fakeApi();
+    // сервер отвечает свежим планом — уже с записанной суммой
+    const savePlan = vi
+      .fn<Api["savePlan"]>()
+      .mockResolvedValue({ ...withCoffee(1_800_000), saved: 1 });
+    const api = fakeApi({ savePlan });
     const user = userEvent.setup();
     render(<Harness api={api} />);
     await user.click(await screen.findByRole("button", { name: "кофе" }));
@@ -125,6 +129,32 @@ describe("PlanScreen", () => {
     expect(await screen.findByText(message)).toBeTruthy();
     const coffee = screen.getByRole("button", { name: "кофе" });
     expect(coffee.getAttribute("data-conflict")).toBe("true");
+    expect(
+      screen.getByRole("button", { name: "Сохранить 1 изменение" }),
+    ).toBeTruthy();
+  });
+
+  it("keeps an edit made while the save is on its way", async () => {
+    let finish: (plan: MonthPlan) => void = () => undefined;
+    const savePlan = vi.fn<Api["savePlan"]>().mockImplementation(
+      () =>
+        new Promise<MonthPlan>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi({ savePlan })} initial={EDITED} />);
+    await user.click(
+      await screen.findByRole("button", { name: "Сохранить 1 изменение" }),
+    );
+    await user.click(screen.getByRole("button", { name: "кафе" }));
+    await user.click(screen.getByRole("button", { name: "= среднему" }));
+    await user.click(screen.getByRole("button", { name: "Готово" }));
+    await act(async () => {
+      finish({ ...withCoffee(1_800_000), saved: 1 });
+    });
+    expect(await screen.findByText(/План сохранён/)).toBeTruthy();
+    // кофе уже в таблице, а правка кафе, сделанная во время сохранения, осталась
     expect(
       screen.getByRole("button", { name: "Сохранить 1 изменение" }),
     ).toBeTruthy();
