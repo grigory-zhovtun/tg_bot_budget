@@ -2,8 +2,14 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type Api, type MonthPlan, type PlanArticle } from "../api";
-import { nextPlanFixture, planFixture } from "../mocks/fixtures";
+import {
+  ApiError,
+  type AdvicePoint,
+  type Api,
+  type MonthPlan,
+  type PlanArticle,
+} from "../api";
+import { adviceFixture, nextPlanFixture, planFixture } from "../mocks/fixtures";
 import { fakeApi } from "../test/fakeApi";
 import { editRow, emptyDraft, type Draft } from "./draft";
 import PlanScreen from "./PlanScreen";
@@ -426,6 +432,78 @@ describe("PlanScreen", () => {
       await screen.findByText(
         /Потом поправите то, что в ноябре будет по-другому/,
       ),
+    ).toBeTruthy();
+  });
+
+  it("asks the advisor about the draft and applies a point", async () => {
+    const planAdvice = vi
+      .fn<Api["planAdvice"]>()
+      .mockResolvedValue(adviceFixture);
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi({ planAdvice })} initial={EDITED} />);
+    await user.click(
+      await screen.findByRole("button", { name: "🧠 Совет по плану" }),
+    );
+    expect(planAdvice).toHaveBeenCalledWith(
+      expect.objectContaining({
+        month: "2026-10",
+        rows: [{ key: "кофе|UZS", plan: "1800000" }],
+      }),
+    );
+    expect(
+      await screen.findByText("После цели остаётся 9,5 млн — месяц сходится."),
+    ).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", {
+        name: "Применить: кафе → 2\u00a0800\u00a0000",
+      }),
+    );
+    expect(screen.getByRole("button", { name: "✓ Применено" })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: "Сохранить 2 изменения" }),
+    ).toBeTruthy();
+  });
+
+  it("says when the advisor is down and keeps the plan usable", async () => {
+    const planAdvice = vi
+      .fn<Api["planAdvice"]>()
+      .mockRejectedValue(
+        new ApiError(503, "advisor_unavailable", "Советник сейчас недоступен"),
+      );
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi({ planAdvice })} />);
+    await user.click(
+      await screen.findByRole("button", { name: "🧠 Совет по плану" }),
+    );
+    expect(await screen.findByText("Советник сейчас недоступен")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "кофе" }));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("asks once while the advisor thinks", async () => {
+    let answer: (value: { points: AdvicePoint[] }) => void = () => {};
+    const planAdvice = vi.fn<Api["planAdvice"]>().mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    render(<Harness api={fakeApi({ planAdvice })} />);
+    const button = await screen.findByRole("button", {
+      name: "🧠 Совет по плану",
+    });
+    act(() => {
+      button.click();
+      button.click(); // до перерисовки
+    });
+    expect(planAdvice).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Советник думает…")).toBeTruthy();
+    expect(button.hasAttribute("disabled")).toBe(true);
+    await act(async () => {
+      answer(adviceFixture);
+    });
+    expect(
+      screen.getByText("После цели остаётся 9,5 млн — месяц сходится."),
     ).toBeTruthy();
   });
 });
