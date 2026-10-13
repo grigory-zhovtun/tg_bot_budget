@@ -14,8 +14,14 @@ describe("DashboardScreen", () => {
     expect(screen.getByText(/лимит 500 000 · потрачено 120 000/)).toBeTruthy();
     expect(container.querySelector('[data-status="over"]')).not.toBeNull();
     expect(
-      screen.getByRole("img", { name: "Остаток по дням: план и факт" }),
+      screen.getByRole("img", {
+        name: "Траты по дням: 9 дней, сверх лимита — 2",
+      }),
     ).toBeTruthy();
+    expect(screen.getByText(/за 9 дней при плане 4,05 млн/)).toBeTruthy();
+    expect(screen.getByText("запас 1,10 млн")).toBeTruthy();
+    expect(screen.getByText("можно 500 000 в день")).toBeTruthy();
+    expect(screen.getByText("план 450 000 в день")).toBeTruthy();
     expect(screen.getByText("−650,00 USD")).toBeTruthy();
     expect(screen.getByText(/ждём/)).toBeTruthy();
   });
@@ -41,6 +47,38 @@ describe("DashboardScreen", () => {
     });
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
     expect(await screen.findByText("До конца месяца хватит")).toBeTruthy();
+  });
+
+  it("says how far the finished days went over the plan", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      today: "2026-10-03",
+      spending: [
+        { day: "2026-10-01", spent: 900_000, limit: 450_000 },
+        { day: "2026-10-02", spent: 800_000, limit: 435_000 },
+        { day: "2026-10-03", spent: 0, limit: 420_000 },
+      ],
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    expect(await screen.findByText("сверх на 800 000")).toBeTruthy();
+    expect(
+      screen.getByRole("img", {
+        name: "Траты по дням: 2 дня, сверх лимита — 2",
+      }),
+    ).toBeTruthy();
+  });
+
+  it("says when the finished days match the plan exactly", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      today: "2026-10-02",
+      spending: [
+        { day: "2026-10-01", spent: 450_000, limit: 450_000 },
+        { day: "2026-10-02", spent: 0, limit: 450_000 },
+      ],
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    expect(await screen.findByText("ровно по плану")).toBeTruthy();
   });
 
   it("opens a group to show its subcategories", async () => {
@@ -95,5 +133,6 @@ describe("DashboardScreen", () => {
     expect(
       screen.getByText(/до плана на конец месяца не хватает 1,10 млн/),
     ).toBeTruthy();
+    expect(screen.getByText("лимита нет")).toBeTruthy(); // в графике вместо «можно»
   });
 });

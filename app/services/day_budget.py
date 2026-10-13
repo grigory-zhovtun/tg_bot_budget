@@ -61,6 +61,15 @@ class Forecast:
 
 
 @dataclass(frozen=True)
+class DaySpend:
+    """День месяца: траты без платежей из списка и лимит, с которым день начался."""
+
+    day: date
+    spent: float
+    limit: float
+
+
+@dataclass(frozen=True)
 class DayBudget:
     today: date
     limit: float  # меньше нуля — до плана на конец месяца уже не хватает
@@ -80,6 +89,7 @@ class DayBudget:
     upcoming: tuple[ForecastItem, ...]
     over_plan: tuple[PlanLine, ...]
     runway: Runway | None = None  # прогноз по сумам: когда кончатся, сколько обменять
+    history: tuple[DaySpend, ...] = ()  # с 1-го числа по сегодняшний день
 
 
 def _number(value: Any) -> float | None:
@@ -256,6 +266,10 @@ def day_budget(
         ),
         over_plan=tuple(over[:3]),
         runway=uzs_runway(frame, items, today, rates),
+        history=tuple(
+            DaySpend(day, _spent_on(frame, day, items), limit_on(day))
+            for day in (first + timedelta(days=k) for k in range(today.day))
+        ),
     )
 
 

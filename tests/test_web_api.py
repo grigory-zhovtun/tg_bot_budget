@@ -359,6 +359,16 @@ def test_dashboard_numbers_come_from_the_month_tab() -> None:
     assert [item["name"] for item in body["upcoming"]] == ["Аванс", "Квартплата", "ЗП"]
 
 
+def test_dashboard_has_spending_and_limit_by_day() -> None:
+    spent = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000)
+    found = build_dashboard(frame(spent), tab(), date(2026, 10, 2), RATES, "USD")
+    body = dashboard_for(found).json()
+    assert body["spending"] == [
+        {"day": "2026-10-01", "spent": 400_000, "limit": pytest.approx(100_000)},
+        {"day": "2026-10-02", "spent": 0, "limit": pytest.approx(90_000)},
+    ]
+
+
 def test_dashboard_without_the_month_tab() -> None:
     body = dashboard_for(None).json()
     assert (body["status"], body["groups"]) == ("no_month_tab", [])

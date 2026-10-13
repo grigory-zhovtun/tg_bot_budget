@@ -41,6 +41,7 @@ from app.web.schemas import (
     BootstrapOut,
     DashboardOut,
     DayPointOut,
+    DaySpendOut,
     ErrorEnvelope,
     ErrorOut,
     ExpenseIn,
@@ -224,6 +225,10 @@ def dashboard_out(
         daily=[
             DayPointOut(day=point.day, plan=point.plan, fact=point.fact)
             for point in found.daily
+        ],
+        spending=[
+            DaySpendOut(day=day.day, spent=day.spent, limit=day.limit)
+            for day in budget.history
         ],
         upcoming=[
             ForecastItemOut(
