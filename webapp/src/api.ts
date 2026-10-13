@@ -85,6 +85,16 @@ export interface Subscription {
   state: SubscriptionState;
 }
 
+/** Прогноз по сумам: когда кончатся и сколько долларов обменять до поступления. */
+export interface Runway {
+  balance: number;
+  pace: number;
+  last_day: string | null; // последний день, когда сумы ещё не в минусе
+  short: number; // сколько сумов не хватит в самой низкой точке; 0 — хватает
+  until: string | null; // поступление, которое закроет минус; null — конец месяца
+  dollars: number | null; // сколько долларов обменять; null — нет курса
+}
+
 export interface Dashboard {
   status: "ok" | "no_month_tab" | "no_forecast";
   month: string;
@@ -106,6 +116,7 @@ export interface Dashboard {
   daily: DayPoint[];
   upcoming: ForecastItem[];
   subscriptions: Subscription[];
+  runway: Runway | null;
 }
 
 export interface PlanArticle {

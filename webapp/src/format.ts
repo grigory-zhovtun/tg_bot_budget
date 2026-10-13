@@ -31,6 +31,27 @@ export function shiftDay(isoDay: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+const GENITIVE = [
+  "января",
+  "февраля",
+  "марта",
+  "апреля",
+  "мая",
+  "июня",
+  "июля",
+  "августа",
+  "сентября",
+  "октября",
+  "ноября",
+  "декабря",
+];
+
+/** «2026-10-18» → «18 октября». */
+export function longDay(isoDay: string): string {
+  const [, month = "", day = ""] = isoDay.split("-");
+  return `${Number(day)} ${GENITIVE[Number(month) - 1] ?? month}`;
+}
+
 /** «Сегодня», «Вчера» или «08.10». */
 export function dayLabel(isoDay: string, today: string): string {
   if (isoDay === today) return "Сегодня";

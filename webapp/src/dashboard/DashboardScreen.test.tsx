@@ -20,6 +20,29 @@ describe("DashboardScreen", () => {
     expect(screen.getByText(/ждём/)).toBeTruthy();
   });
 
+  it("shows when the sums run out and how many dollars to exchange", async () => {
+    render(<DashboardScreen api={fakeApi()} />);
+    expect(await screen.findByText("Хватит до 18 октября")).toBeTruthy();
+    expect(screen.getByText("До 30 октября обменять ≈ $460")).toBeTruthy();
+    expect(screen.getByText("не хватит 5,50 млн")).toBeTruthy();
+  });
+
+  it("says when the sums last until the end of the month", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      runway: {
+        balance: 9_000_000,
+        pace: 100_000,
+        last_day: null,
+        short: 0,
+        until: null,
+        dollars: null,
+      },
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    expect(await screen.findByText("До конца месяца хватит")).toBeTruthy();
+  });
+
   it("opens a group to show its subcategories", async () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi()} />);
