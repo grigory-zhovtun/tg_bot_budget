@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, authHeader, REQUEST_TIMEOUT_MS, request } from "./api";
+import {
+  ApiError,
+  authHeader,
+  planConflict,
+  REQUEST_TIMEOUT_MS,
+  request,
+} from "./api";
+import { planFixture } from "./mocks/fixtures";
 
 describe("authHeader", () => {
   it("prefers Telegram initData", () => {
@@ -97,5 +104,30 @@ describe("request", () => {
     await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
     expect(await pending).toMatchObject({ status: 0, code: "timeout" });
     vi.useRealTimers();
+  });
+
+  it("keeps the body of a conflict with the fresh plan", async () => {
+    const body = {
+      error: {
+        code: "plan_changed",
+        message: "Пока вы правили, план поменяли",
+      },
+      plan: planFixture,
+      conflicts: ["кофе|UZS"],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(new Response(JSON.stringify(body), { status: 409 })),
+    );
+    const error: unknown = await request("/plan").catch((e: unknown) => e);
+    expect(planConflict(error)).toEqual({
+      plan: planFixture,
+      conflicts: ["кофе|UZS"],
+    });
+    expect(planConflict(new ApiError(503, "sheets_unavailable", "нет"))).toBe(
+      null,
+    );
   });
 });

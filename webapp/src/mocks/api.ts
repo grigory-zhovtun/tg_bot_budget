@@ -1,5 +1,10 @@
 import type { Api } from "../api";
-import { bootstrapFixture, dashboardFixture, writtenFixture } from "./fixtures";
+import {
+  bootstrapFixture,
+  dashboardFixture,
+  planFixture,
+  writtenFixture,
+} from "./fixtures";
 
 function later<T>(value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), 300));
@@ -11,4 +16,6 @@ export const mockApi: Api = {
   addExpense: () => later(writtenFixture),
   undo: () => later({ message: "↩️ Удалил из таблицы: строка 4169." }),
   dashboard: () => later(dashboardFixture),
+  plan: () => later(planFixture),
+  savePlan: () => later({ ...planFixture, saved: 1 }),
 };
