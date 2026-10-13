@@ -593,19 +593,18 @@ class GoogleSheetsService:
 
     def _set_hidden(self, pairs: list[tuple[int, bool]]) -> None:
         """Показать или спрятать вкладки одним запросом: (sheetId, hidden)."""
-        self.sheet.batch_update(
-            {
-                "requests": [
-                    {
-                        "updateSheetProperties": {
-                            "properties": {"sheetId": sheet_id, "hidden": hidden},
-                            "fields": "hidden",
-                        }
+        body = {
+            "requests": [
+                {
+                    "updateSheetProperties": {
+                        "properties": {"sheetId": sheet_id, "hidden": hidden},
+                        "fields": "hidden",
                     }
-                    for sheet_id, hidden in pairs
-                ]
-            }
-        )
+                }
+                for sheet_id, hidden in pairs
+            ]
+        }
+        self._with_retry("Changing visibility", lambda: self.sheet.batch_update(body))
 
     def _ensure_dates(self, title: str, first: date, last: date) -> bool:
         """M1:M2 вкладки — первый и последний день месяца; True — пришлось поправить."""
@@ -689,40 +688,45 @@ class GoogleSheetsService:
         """Вкладка следующего месяца копией текущей, скрытая до 1-го числа.
 
         Текущая вкладка остаётся видимой: бот и лимит живут по ней до конца
-        месяца. Вкладка уже есть — ничего не меняется. Если её в эту же секунду
-        создал другой процесс, duplicateSheet откажет по имени — тоже ничего.
+        месяца. Если вкладка уже есть — её в эту же секунду создал другой
+        процесс или прошлую попытку оборвал сбой, — она только доводится до
+        этого вида: спрятана, в M1:M2 даты следующего месяца.
         """
         current = self.ensure_month_tab(today)
         first, last = month_bounds(month_bounds(today)[1] + timedelta(days=1))
         result = MonthTab(month_title(first))
         sheets = self._with_retry("Listing sheets", self.sheet.worksheets)
-        if any(ws.title == result.title for ws in sheets):
-            return result
-        source = next(ws for ws in sheets if ws.title == current.title)
-        try:
-            # без повтора: копия с тем же именем второй раз не создастся
-            reply = self.sheet.batch_update(
-                {
-                    "requests": [
-                        {
-                            "duplicateSheet": {
-                                "sourceSheetId": source.id,
-                                "insertSheetIndex": source.index,
-                                "newSheetName": result.title,
+        tab = next((ws for ws in sheets if ws.title == result.title), None)
+        if tab is None:
+            source = next(ws for ws in sheets if ws.title == current.title)
+            try:
+                # без повтора: копия с тем же именем второй раз не создастся
+                reply = self.sheet.batch_update(
+                    {
+                        "requests": [
+                            {
+                                "duplicateSheet": {
+                                    "sourceSheetId": source.id,
+                                    "insertSheetIndex": source.index,
+                                    "newSheetName": result.title,
+                                }
                             }
-                        }
-                    ]
-                }
-            )
-        except Exception:
-            again = self._with_retry("Listing sheets", self.sheet.worksheets)
-            if any(ws.title == result.title for ws in again):
-                return result  # её только что создал другой процесс
-            raise
-        new_id = reply["replies"][0]["duplicateSheet"]["properties"]["sheetId"]
-        self._set_hidden([(new_id, True)])
+                        ]
+                    }
+                )
+            except Exception:
+                # копию мог сделать другой процесс или наш запрос, чей ответ потерян
+                again = self._with_retry("Listing sheets", self.sheet.worksheets)
+                tab = next((ws for ws in again if ws.title == result.title), None)
+                if tab is None:
+                    raise
+            else:
+                new_id = reply["replies"][0]["duplicateSheet"]["properties"]["sheetId"]
+                self._set_hidden([(new_id, True)])
+                result.created, result.source = True, current.title
+        if tab is not None and not tab.isSheetHidden:
+            self._set_hidden([(tab.id, True)])
         self._ensure_dates(result.title, first, last)
-        result.created, result.source = True, current.title
         return result
 
     def recategorize_row(
