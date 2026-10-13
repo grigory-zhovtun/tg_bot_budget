@@ -310,3 +310,37 @@ class PlanConflictOut(ApiModel):
     error: ErrorOut
     plan: PlanOut
     conflicts: list[str]
+
+
+class PlanAdviceRowIn(ApiModel):
+    key: str = Field(min_length=3, max_length=200)
+    plan: Decimal = Field(ge=0, le=MAX_SUM, decimal_places=2)
+
+
+class PlanAdviceEventIn(ApiModel):
+    slot: int = Field(ge=0, le=50)
+    value: EventValueIn | None
+
+
+class PlanAdviceIn(ApiModel):
+    """Черновик для советника: значения, как на экране, без того, что было."""
+
+    month: str = Field(pattern=r"^\d{4}-\d{2}$")
+    rows: list[PlanAdviceRowIn] = Field(default=[], max_length=300)
+    new_rows: list[NewArticleIn] = Field(default=[], max_length=10)
+    events: list[PlanAdviceEventIn] = Field(default=[], max_length=30)
+    goal: GoalIn | None = None
+
+
+class AdviceApplyOut(ApiModel):
+    key: str
+    plan: float
+
+
+class AdvicePointOut(ApiModel):
+    text: str
+    apply: AdviceApplyOut | None = None
+
+
+class PlanAdviceOut(ApiModel):
+    points: list[AdvicePointOut]

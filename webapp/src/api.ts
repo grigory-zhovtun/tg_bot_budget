@@ -212,6 +212,21 @@ export interface PlanConflict {
   conflicts: string[];
 }
 
+/** Пункт совета; apply — новая сумма статьи для «Применить». */
+export interface AdvicePoint {
+  text: string;
+  apply: { key: string; plan: number } | null;
+}
+
+/** Черновик для советника: значения, как на экране, без того, что было. */
+export interface PlanAdviceRequest {
+  month: string;
+  rows: { key: string; plan: string }[];
+  new_rows: PlanSave["new_rows"];
+  events: { slot: number; value: EventValue | null }[];
+  goal: { amount: string; currency: string } | null;
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -259,10 +274,13 @@ function isErrorBody(body: unknown): body is ErrorBody {
 
 // Таблица Google иногда думает долго, но не бесконечно ждём ответа
 export const REQUEST_TIMEOUT_MS = 25_000;
+// Советник: сервер ждёт модель до 60 с, ещё время — на чтение таблицы
+export const ADVICE_TIMEOUT_MS = 100_000;
 
 export async function request<T>(
   path: string,
   init: RequestInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<T> {
   const auth = authHeader(
     window.Telegram?.WebApp?.initData ?? "",
@@ -273,7 +291,7 @@ export async function request<T>(
   };
   if (auth) headers.Authorization = auth;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response: Response;
   try {
     response = await fetch(`/api${path}`, {
@@ -343,6 +361,12 @@ export const api = {
       body: JSON.stringify(input),
     }),
   createNextPlan: () => request<MonthPlan>("/plan/next", { method: "POST" }),
+  planAdvice: (input: PlanAdviceRequest) =>
+    request<{ points: AdvicePoint[] }>(
+      "/plan/advice",
+      { method: "POST", body: JSON.stringify(input) },
+      ADVICE_TIMEOUT_MS,
+    ),
 };
 
 export type Api = typeof api;

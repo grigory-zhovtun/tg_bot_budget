@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
+  api,
   authHeader,
   planConflict,
   REQUEST_TIMEOUT_MS,
@@ -103,6 +104,35 @@ describe("request", () => {
     const pending = request("/dashboard").catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(REQUEST_TIMEOUT_MS);
     expect(await pending).toMatchObject({ status: 0, code: "timeout" });
+    vi.useRealTimers();
+  });
+
+  it("waits for the advisor longer than for the table", async () => {
+    vi.useFakeTimers();
+    const later = REQUEST_TIMEOUT_MS + 15_000; // модель думала дольше обычного
+    const slow = vi.fn(
+      (_: string, init: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          init.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+          setTimeout(() => {
+            resolve(new Response('{"points": []}', { status: 200 }));
+          }, later);
+        }),
+    );
+    vi.stubGlobal("fetch", slow);
+    const pending = api
+      .planAdvice({
+        month: "2026-10",
+        rows: [],
+        new_rows: [],
+        events: [],
+        goal: null,
+      })
+      .catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(later);
+    expect(await pending).toEqual({ points: [] });
     vi.useRealTimers();
   });
 

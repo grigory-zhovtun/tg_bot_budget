@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ApiError,
   planConflict,
+  type AdvicePoint,
   type Api,
   type MonthPlan,
   type PlanArticle,
@@ -11,6 +12,7 @@ import { itemAmount, money, short, withCurrency } from "../format";
 import { haptic, telegram } from "../telegram";
 import { amountValue } from "../entry/amount";
 import AddArticleSheet from "./AddArticleSheet";
+import AdvicePanel, { type AdviceState } from "./AdvicePanel";
 import ArticleSheet from "./ArticleSheet";
 import {
   addRow,
@@ -20,12 +22,14 @@ import {
   editGoal,
   editRow,
   emptyDraft,
+  pairKey,
   planTotals,
   rebase,
   removeRow,
   rowPlan,
   shownEvents,
   shownGoal,
+  toAdvice,
   toSave,
   type AddedRow,
   type Draft,
@@ -181,6 +185,9 @@ export default function PlanScreen({
   const [notice, setNotice] = useState<string | null>(null);
   const [conflicts, setConflicts] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
+  const [advice, setAdvice] = useState<AdviceState | null>(null);
+  const [applied, setApplied] = useState<string[]>([]);
+  const asking = useRef(false); // второй тап до перерисовки не шлёт второй запрос
   const draftRef = useRef(draft);
   const onDraftRef = useRef(onDraft);
   const inFlight = useRef(false); // второй тап до перерисовки не шлёт второй запрос
@@ -258,6 +265,10 @@ export default function PlanScreen({
             setNotice(message);
             return;
           }
+          if (reason instanceof ApiError && reason.status === 422) {
+            setNotice(message);
+            return;
+          }
           setNotice(`${message}. ${KEPT}`);
         },
       )
@@ -295,6 +306,29 @@ export default function PlanScreen({
       .finally(() => {
         inFlight.current = false;
         setCreating(false);
+      });
+  }, [api]);
+
+  const ask = useCallback(() => {
+    if (asking.current) return;
+    asking.current = true;
+    setAdvice({ kind: "loading" });
+    setApplied([]);
+    api
+      .planAdvice(toAdvice(draftRef.current))
+      .then(
+        (answer) => setAdvice({ kind: "ready", points: answer.points }),
+        (reason: unknown) =>
+          setAdvice({
+            kind: "error",
+            message:
+              reason instanceof ApiError
+                ? reason.message
+                : "Советник сейчас недоступен",
+          }),
+      )
+      .finally(() => {
+        asking.current = false;
       });
   }, [api]);
 
@@ -417,12 +451,39 @@ export default function PlanScreen({
       ? events.find((item) => item.slot === editing.slot)
       : undefined;
   const close = () => setEditing(null);
+  const target = (point: AdvicePoint) =>
+    point.apply
+      ? plan.rows.find((row) => row.key === point.apply?.key && row.editable)
+      : undefined;
+  const applyLabel = (point: AdvicePoint) => {
+    const article = target(point);
+    if (!article || !point.apply) return null;
+    const foreign = article.currency !== "UZS";
+    const name = foreign
+      ? `${article.subcategory} ${article.currency}`
+      : article.subcategory;
+    return `Применить: ${name} → ${money(point.apply.plan, foreign ? 2 : 0)}`;
+  };
+  const applyPoint = (point: AdvicePoint) => {
+    const article = target(point);
+    if (!article || !point.apply) return;
+    const text = amountText(point.apply.plan, article.currency !== "UZS");
+    onDraft(editRow(draft, article, text));
+    setApplied((done) => [...done, point.text]);
+  };
   const added = Object.entries(draft.added);
   const addedIn = (group: string) =>
     added.filter(([, row]) => row.group === group);
-  const offers = (group: string) =>
-    plan.addable.filter((item) => item.group === group);
-  const incomeOffers = plan.addable.filter((item) => item.kind === "income");
+  const offers = (group: string, keep: string | null = null) =>
+    plan.addable.filter((item) => {
+      const key = pairKey(item.subcategory, item.currency);
+      return item.group === group && (key === keep || !(key in draft.added));
+    });
+  const incomeOffers = plan.addable.filter(
+    (item) =>
+      item.kind === "income" &&
+      !(pairKey(item.subcategory, item.currency) in draft.added),
+  );
   const incomeAdded = added.filter(([, row]) => row.kind === "income");
   const adding = editing?.kind === "add" ? editing : null;
   const uzsOf = (row: AddedRow) =>
@@ -553,6 +614,23 @@ export default function PlanScreen({
           )}
         </section>
       )}
+      <button
+        type="button"
+        disabled={advice?.kind === "loading"}
+        className="h-11 rounded-xl bg-section font-medium text-link disabled:opacity-50"
+        onClick={ask}
+      >
+        🧠 Совет по плану
+      </button>
+      {advice && (
+        <AdvicePanel
+          state={advice}
+          applyLabel={applyLabel}
+          applied={applied}
+          onApply={applyPoint}
+          onClose={() => setAdvice(null)}
+        />
+      )}
       {spend.map(([group, rows], index) => {
         const color = groupColor(group, index);
         const sum =
@@ -625,7 +703,7 @@ export default function PlanScreen({
       {adding && (
         <AddArticleSheet
           group={adding.group}
-          items={offers(adding.group)}
+          items={offers(adding.group, adding.key)}
           history={plan.history}
           initial={
             adding.key

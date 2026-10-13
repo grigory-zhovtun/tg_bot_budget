@@ -1,5 +1,6 @@
 import type { Api } from "../api";
 import {
+  adviceFixture,
   bootstrapFixture,
   dashboardFixture,
   nextPlanFixture,
@@ -29,4 +30,5 @@ export const mockApi: Api = {
     return later(nextPlanFixture);
   },
   savePlan: () => later({ ...planFixture, saved: 1 }),
+  planAdvice: () => later(adviceFixture),
 };

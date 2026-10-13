@@ -1,4 +1,10 @@
-import type { Bootstrap, Dashboard, ExpenseResult, MonthPlan } from "../api";
+import type {
+  AdvicePoint,
+  Bootstrap,
+  Dashboard,
+  ExpenseResult,
+  MonthPlan,
+} from "../api";
 
 export const bootstrapFixture: Bootstrap = {
   user: { id: 1, first_name: "Тест" },
@@ -269,4 +275,18 @@ export const notCreatedFixture: MonthPlan = {
   goal: null,
   addable: [],
   saved: null,
+};
+
+export const adviceFixture: { points: AdvicePoint[] } = {
+  points: [
+    {
+      text: "Кофе: в плане 1,5 млн, а тратите в среднем 1,8 млн.",
+      apply: { key: "кофе|UZS", plan: 1_800_000 },
+    },
+    {
+      text: "Кафе можно сократить до 2,8 млн — так цель сходится.",
+      apply: { key: "кафе|UZS", plan: 2_800_000 },
+    },
+    { text: "После цели остаётся 9,5 млн — месяц сходится.", apply: null },
+  ],
 };

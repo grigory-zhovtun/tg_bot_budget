@@ -432,3 +432,47 @@ def test_structure_requests_go_once_without_a_retry() -> None:
     with pytest.raises(ConnectionError):
         service.apply_requests([{"insertRange": {}}])
     assert service.reconnects == 0  # повтор вставил бы строки дважды
+
+
+def test_the_advisor_profile_is_the_text_under_its_header() -> None:
+    ws = FakeWorksheet(
+        cells=[
+            ["", "иконка", "🧠 О нас для советника"],
+            ["", "", "Семья из четырёх, Ташкент."],
+            ["", "", "На детях не экономим."],
+            [],
+            ["", "", "это уже не профиль"],
+        ]
+    )
+    assert make_service(ws).get_advisor_profile() == (
+        "Семья из четырёх, Ташкент.\nНа детях не экономим."
+    )
+
+
+def test_without_the_block_or_the_sheet_the_profile_is_empty() -> None:
+    assert (
+        make_service(FakeWorksheet(cells=[["", "иконка"]])).get_advisor_profile() == ""
+    )
+
+    class Down(FakeWorksheet):
+        def get(self, range_name: str, **options: Any) -> list[list[str]]:
+            raise ConnectionError("Google is down")
+
+    assert make_service(Down()).get_advisor_profile() == ""
+
+
+def test_the_sheet_id_survives_one_failure() -> None:
+    class Flaky(FakeSpreadsheet):
+        failed = False
+
+        def worksheet(self, name: str) -> FakeWorksheet:
+            if not self.failed:
+                self.failed = True
+                raise ConnectionError("token expired")
+            return self.ws
+
+    ws = FakeWorksheet(sheet_id=31)
+    service = make_service(ws)
+    service.sheet = Flaky(ws)
+    assert service.sheet_id("Oct 26") == 31
+    assert service.reconnects == 1

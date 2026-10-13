@@ -6,6 +6,7 @@ import type {
   PlanAddable,
   PlanArticle,
   PlanEvent,
+  PlanAdviceRequest,
   PlanGoal,
   PlanSave,
 } from "../api";
@@ -280,6 +281,18 @@ export function toSave(draft: Draft): PlanSave {
   };
 }
 
+/** Черновик для советника: то же, что сохраняем, но без базы. */
+export function toAdvice(draft: Draft): PlanAdviceRequest {
+  const save = toSave(draft);
+  return {
+    month: save.month,
+    rows: save.rows.map(({ key, plan }) => ({ key, plan })),
+    new_rows: save.new_rows,
+    events: save.events.map(({ slot, value }) => ({ slot, value })),
+    goal: save.goal ? save.goal.value : null,
+  };
+}
+
 /** Черновик поверх свежего плана: правки остаются, база — новые значения.
  * conflicts — где значение в таблице поменялось после начала правок. */
 export function rebase(
@@ -316,7 +329,9 @@ export function rebase(
     const article = fresh.rows.find((item) => item.key === key);
     if (article) {
       // пару успели добавить во вкладку: дальше это правка существующей статьи
-      if (!close(article.plan, amountValue(row.text))) conflicts.push(key);
+      if (!article.editable || !close(article.plan, amountValue(row.text))) {
+        conflicts.push(key);
+      }
       if (article.editable) next = editRow(next, article, row.text);
       continue;
     }

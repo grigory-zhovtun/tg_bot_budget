@@ -450,12 +450,16 @@ class PlanSheets:
         self.tabs["fact"] = fact or [FACT_HEADER]
         self.writes: list[list[dict[str, Any]]] = []
         self.applied: list[list[dict[str, Any]]] = []
+        self.profile = ""  # блок «О нас» листа system
         self.delay = 0.0  # пауза между чтением вкладки и записью — окно гонки
 
     def get_values(self, name: str) -> list[list[Any]]:
         if name not in self.tabs:
             raise WorksheetNotFound(name)
         return [list(row) for row in self.tabs[name]]
+
+    def get_advisor_profile(self) -> str:
+        return self.profile
 
     def get_rates(self) -> Rates:
         time.sleep(
@@ -598,6 +602,27 @@ def test_totals_row_is_the_sum_formula_under_the_articles() -> None:
     assert totals_row([["=SUM(H2:H40)"]], 41) == 41
     assert totals_row([[""], ["= sum(h2:h40)"]], 41) == 42
     assert totals_row([[123], []], 41) is None
+    assert totals_row([["=SUM(H$2:H$40)"]], 41) == 41
+
+
+def test_two_new_rows_of_one_group_stand_one_under_another() -> None:
+    coffee_rub = NewArticle("🍔 ЕДА", "кофе", "RUB", 5)
+    requests = insert_requests(7, read_plan(TAB), (RESTAURANT, coffee_rub), None)
+    inserts = [r["insertRange"]["range"] for r in requests if "insertRange" in r]
+    copies = [r["copyPaste"]["source"] for r in requests if "copyPaste" in r]
+    assert inserts == [grid(3), grid(4)]  # кофе — 2, ресторан — 3, кофе RUB — 4
+    assert copies == [grid(2), grid(3)]  # формулы второй — со строки первой
+
+
+def test_a_tab_without_a_totals_row_is_told_in_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    sheets = PlanSheets({"Oct 26": TAB})  # итоговой строки нет
+    outcome = save_plan(sheets, "Oct 26", PlanChanges(added=(RESTAURANT,)), CATALOG)
+    assert (outcome.invalid, outcome.conflicts) == (frozenset(), ())
+    [requests] = sheets.applied
+    assert not any("=SUM(" in str(r) for r in requests)
+    assert "No totals row under the articles of Oct 26" in caplog.text
 
 
 def test_new_rows_are_inserted_and_the_sums_go_to_the_shifted_rows() -> None:
