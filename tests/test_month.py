@@ -192,3 +192,54 @@ def test_owner_is_the_first_listed_id_not_the_smallest(
     monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset({42, 77}))
     monkeypatch.setattr(config, "OWNER_ID", 77)
     assert month.owner_chat_id() == 77
+
+
+def test_next_month_is_a_hidden_copy_of_the_current_one() -> None:
+    book = october_book()
+    tab = service_for(book).ensure_next_month_tab(date(2026, 10, 13))
+    assert tab == MonthTab("Nov 26", "Oct 26", created=True)
+    duplicate = book.batches[0]["requests"][0]["duplicateSheet"]
+    assert duplicate == {
+        "sourceSheetId": 29,
+        "insertSheetIndex": 29,
+        "newSheetName": "Nov 26",
+    }
+    visibility = [
+        r["updateSheetProperties"]["properties"] for r in book.batches[1]["requests"]
+    ]
+    assert visibility == [{"sheetId": 999, "hidden": True}]  # октябрь остаётся виден
+    [dates] = book.values
+    assert dates["data"] == [{"range": "'Nov 26'!M1:M2", "values": [[46327], [46356]]}]
+
+
+def test_next_month_that_exists_is_left_alone() -> None:
+    book = october_book()
+    book.tabs.append(Tab("Nov 26", 31, 28, hidden=True))
+    tab = service_for(book).ensure_next_month_tab(date(2026, 10, 13))
+    assert tab == MonthTab("Nov 26")
+    assert book.batches == [] and book.values == []
+
+
+def test_next_month_created_meanwhile_is_not_an_error() -> None:
+    class Busy(Book):
+        def batch_update(self, body: dict[str, Any]) -> dict[str, Any]:
+            if "duplicateSheet" in body["requests"][0]:
+                # второй пользователь успел первым — имя уже занято
+                self.tabs.append(Tab("Nov 26", 31, 28, hidden=True))
+                raise RuntimeError('A sheet with the name "Nov 26" already exists')
+            return super().batch_update(body)
+
+    book = Busy(october_book().tabs)
+    tab = service_for(book).ensure_next_month_tab(date(2026, 10, 13))
+    assert tab == MonthTab("Nov 26")
+
+
+def test_next_month_after_december_is_january() -> None:
+    december = Tab("Dec 26", 40, 20, hidden=False)
+    december.dates = [[46357], [46387]]
+    book = Book([Tab("fact", 0, 6, False), december, Tab("system", 1, 42, False)])
+    tab = service_for(book).ensure_next_month_tab(date(2026, 12, 20))
+    assert tab.title == "Jan 27"
+    assert book.values[0]["data"] == [
+        {"range": "'Jan 27'!M1:M2", "values": [[46388], [46418]]}
+    ]

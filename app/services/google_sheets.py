@@ -590,6 +590,44 @@ class GoogleSheetsService:
         )
         return True
 
+    def _set_hidden(self, pairs: list[tuple[int, bool]]) -> None:
+        """Показать или спрятать вкладки одним запросом: (sheetId, hidden)."""
+        self.sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "updateSheetProperties": {
+                            "properties": {"sheetId": sheet_id, "hidden": hidden},
+                            "fields": "hidden",
+                        }
+                    }
+                    for sheet_id, hidden in pairs
+                ]
+            }
+        )
+
+    def _ensure_dates(self, title: str, first: date, last: date) -> bool:
+        """M1:M2 вкладки — первый и последний день месяца; True — пришлось поправить."""
+        dates = [[_serial(first)], [_serial(last)]]
+        current = self._with_retry(
+            "Reading month dates",
+            lambda: self._worksheet(title).get(
+                "M1:M2", value_render_option=ValueRenderOption.unformatted
+            ),
+        )
+        if current == dates:
+            return False
+        self._with_retry(
+            "Writing month dates",
+            lambda: self.sheet.values_batch_update(
+                {
+                    "valueInputOption": "RAW",
+                    "data": [{"range": f"'{title}'!M1:M2", "values": dates}],
+                }
+            ),
+        )
+        return True
+
     def ensure_month_tab(self, day: date) -> MonthTab:
         """Вкладка план-факта месяца day: создать копией прошлой, если её нет.
 
@@ -626,42 +664,51 @@ class GoogleSheetsService:
             )
             new_id = reply["replies"][0]["duplicateSheet"]["properties"]["sheetId"]
             result.created, result.source = True, source.title
-            visibility = [(new_id, False)] + [
-                (ws.id, True) for _, ws in months if not ws.isSheetHidden
-            ]
-            result.hidden = [ws.title for _, ws in months if not ws.isSheetHidden]
-            self.sheet.batch_update(
+            past = [ws for _, ws in months if not ws.isSheetHidden]
+            result.hidden = [ws.title for ws in past]
+            self._set_hidden([(new_id, False)] + [(ws.id, True) for ws in past])
+        fixed = self._ensure_dates(result.title, first, last)
+        result.dates_fixed = fixed and not result.created
+        return result
+
+    def ensure_next_month_tab(self, today: date) -> MonthTab:
+        """Вкладка следующего месяца копией текущей, скрытая до 1-го числа.
+
+        Текущая вкладка остаётся видимой: бот и лимит живут по ней до конца
+        месяца. Вкладка уже есть — ничего не меняется. Если её в эту же секунду
+        создал другой процесс, duplicateSheet откажет по имени — тоже ничего.
+        """
+        current = self.ensure_month_tab(today)
+        first, last = month_bounds(month_bounds(today)[1] + timedelta(days=1))
+        result = MonthTab(month_title(first))
+        sheets = self._with_retry("Listing sheets", self.sheet.worksheets)
+        if any(ws.title == result.title for ws in sheets):
+            return result
+        source = next(ws for ws in sheets if ws.title == current.title)
+        try:
+            # без повтора: копия с тем же именем второй раз не создастся
+            reply = self.sheet.batch_update(
                 {
                     "requests": [
                         {
-                            "updateSheetProperties": {
-                                "properties": {"sheetId": sheet_id, "hidden": hidden},
-                                "fields": "hidden",
+                            "duplicateSheet": {
+                                "sourceSheetId": source.id,
+                                "insertSheetIndex": source.index,
+                                "newSheetName": result.title,
                             }
                         }
-                        for sheet_id, hidden in visibility
                     ]
                 }
             )
-
-        dates = [[_serial(first)], [_serial(last)]]
-        current = self._with_retry(
-            "Reading month dates",
-            lambda: self._worksheet(result.title).get(
-                "M1:M2", value_render_option=ValueRenderOption.unformatted
-            ),
-        )
-        if current != dates:
-            self._with_retry(
-                "Writing month dates",
-                lambda: self.sheet.values_batch_update(
-                    {
-                        "valueInputOption": "RAW",
-                        "data": [{"range": f"'{result.title}'!M1:M2", "values": dates}],
-                    }
-                ),
-            )
-            result.dates_fixed = not result.created
+        except Exception:
+            again = self._with_retry("Listing sheets", self.sheet.worksheets)
+            if any(ws.title == result.title for ws in again):
+                return result  # её только что создал другой процесс
+            raise
+        new_id = reply["replies"][0]["duplicateSheet"]["properties"]["sheetId"]
+        self._set_hidden([(new_id, True)])
+        self._ensure_dates(result.title, first, last)
+        result.created, result.source = True, current.title
         return result
 
     def recategorize_row(
