@@ -299,7 +299,12 @@ describe("toAdvice", () => {
       events: [
         {
           slot: 3,
-          value: { name: "Премия", day: 25, amount: "1000000", currency: "UZS" },
+          value: {
+            name: "Премия",
+            day: 25,
+            amount: "1000000",
+            currency: "UZS",
+          },
         },
       ],
       goal: { amount: "3000000", currency: "UZS" },
