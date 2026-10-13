@@ -1,12 +1,18 @@
 """Вкладка «План»: план месяца из вкладки, подсказки, правки, запись."""
 
+import re
+import time
 from datetime import date
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
+from gspread.exceptions import WorksheetNotFound
 
 from app.domain import Rates
 from app.services.analytics_service import transactions_frame
+from app.services.google_sheets import GoogleSheetsService
 from app.services.plan import (
     ArticleChange,
     Event,
@@ -21,7 +27,9 @@ from app.services.plan import (
     cell_updates,
     change_note,
     conflicts,
+    load_plan,
     read_plan,
+    save_plan,
     shift_month,
     totals,
     unknown,
@@ -327,3 +335,101 @@ def test_long_lists_are_cut_and_the_author_may_be_unknown() -> None:
     assert lines[0] == "✏️ Правки в плане на ноябрь:"
     assert lines[11] == "… и ещё 2"
     assert len(lines) == 13
+
+
+class PlanSheets:
+    """Вкладки в памяти: get_values, get_rates; write_cells меняет те же строки."""
+
+    def __init__(
+        self, tabs: dict[str, list[list[Any]]], fact: list[list[Any]] | None = None
+    ) -> None:
+        self.tabs = {name: [list(row) for row in rows] for name, rows in tabs.items()}
+        self.tabs["fact"] = fact or [FACT_HEADER]
+        self.writes: list[list[dict[str, Any]]] = []
+        self.delay = 0.0  # пауза чтения: в тесте гонки оба чтения идут раньше записи
+
+    def get_values(self, name: str) -> list[list[Any]]:
+        time.sleep(self.delay)
+        if name not in self.tabs:
+            raise WorksheetNotFound(name)
+        return [list(row) for row in self.tabs[name]]
+
+    def get_rates(self) -> Rates:
+        return Rates({"UZS": 1.0, "USD": 12_000.0, "RUB": 150.0})
+
+    def write_cells(self, data: list[dict[str, Any]]) -> None:
+        self.writes.append(data)
+        for item in data:
+            found = re.fullmatch(r"'(.+)'!([A-Z])(\d+)(?::[A-Z]\d+)?", item["range"])
+            assert found, item["range"]
+            title, column, row = found.group(1), found.group(2), int(found.group(3))
+            cells = self.tabs[title][row - 1]
+            for offset, value in enumerate(item["values"][0]):
+                cells[ord(column) - ord("A") + offset] = value
+
+
+def test_load_plan_reads_the_tab_rates_and_history() -> None:
+    sheets = PlanSheets(
+        {"Oct 26": TAB},
+        [FACT_HEADER, fact_row(date(2026, 9, 5), "🍔 ЕДА", "кофе", 900_000)],
+    )
+    loaded = load_plan(sheets, "Oct 26", date(2026, 10, 11))
+    assert loaded is not None
+    assert [a.key for a in loaded.plan.articles] == [
+        "кофе|UZS",
+        "квартплата|USD",
+        "зарплата|UZS",
+    ]
+    assert loaded.rates.to_uzs["USD"] == 12_000
+    assert loaded.history.of("кофе|UZS") == (300_000, 900_000, 0)
+
+
+def test_load_plan_without_the_tab_is_none() -> None:
+    assert load_plan(PlanSheets({}), "Nov 26", date(2026, 10, 11)) is None
+
+
+def test_save_plan_writes_and_the_tab_shows_the_new_plan() -> None:
+    sheets = PlanSheets({"Oct 26": TAB})
+    changes = PlanChanges(articles=(ArticleChange("кофе|UZS", 1_500_000, 1_800_000),))
+    outcome = save_plan(sheets, "Oct 26", changes)
+    assert (outcome.invalid, outcome.conflicts) == (frozenset(), ())
+    assert outcome.plan.articles[0].plan == 1_500_000  # вкладка до записи
+    assert read_plan(sheets.get_values("Oct 26")).articles[0].plan == 1_800_000
+
+
+def test_a_row_inserted_above_by_hand_still_gets_the_write() -> None:
+    sheets = PlanSheets({"Oct 26": TAB})
+    tab = sheets.tabs["Oct 26"]
+    tab.insert(1, ["Расходы", "🚌 ТРАНСПОРТ", "такси", -1, 0, 1, "UZS"] + [""] * 12)
+    changes = PlanChanges(articles=(ArticleChange("кофе|UZS", 1_500_000, 1_800_000),))
+    save_plan(sheets, "Oct 26", changes)
+    assert sheets.writes[0][0]["range"] == "'Oct 26'!D3"  # кофе съехал на строку 3
+
+
+def test_save_plan_with_a_conflict_writes_nothing() -> None:
+    sheets = PlanSheets({"Oct 26": TAB})
+    changes = PlanChanges(articles=(ArticleChange("кофе|UZS", 1_000_000, 1_800_000),))
+    outcome = save_plan(sheets, "Oct 26", changes)
+    assert outcome.conflicts == ("кофе|UZS",)
+    assert sheets.writes == []
+
+
+def test_save_plan_with_unknown_rows_writes_nothing() -> None:
+    sheets = PlanSheets({"Oct 26": TAB})
+    changes = PlanChanges(articles=(ArticleChange("кальян|UZS", 0, 1),))
+    outcome = save_plan(sheets, "Oct 26", changes)
+    assert outcome.invalid == frozenset({"rows"})
+    assert sheets.writes == []
+
+
+def test_write_cells_sends_one_raw_request() -> None:
+    book = SimpleNamespace(values_batch_update=Mock())
+    service = GoogleSheetsService.__new__(GoogleSheetsService)
+    service.client, service.sheet = None, book
+    service._worksheets, service._balance_cells = {}, None
+    data = [{"range": "'Oct 26'!D2", "values": [[-1.0]]}]
+    service.write_cells(data)
+    service.write_cells([])
+    book.values_batch_update.assert_called_once_with(
+        {"valueInputOption": "RAW", "data": data}
+    )

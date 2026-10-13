@@ -12,9 +12,11 @@ from datetime import date
 from typing import Any
 
 import pandas as pd
+from gspread.exceptions import WorksheetNotFound
 
+from app import config
 from app.domain import Rates
-from app.services.analytics_service import MONTHS_RU, money
+from app.services.analytics_service import MONTHS_RU, money, transactions_frame
 from app.services.day_budget import (
     COLUMN_O,
     GOAL_LABEL,
@@ -22,6 +24,7 @@ from app.services.day_budget import (
     TABLE_HEADER,
     short,
 )
+from app.services.google_sheets import GoogleSheetsService
 
 KINDS = {"Расходы": "spend", "Доходы": "income"}
 MAX_EVENTS = 20  # строк списка; дальше — уже не список, а сломанная вкладка
@@ -456,3 +459,44 @@ def change_note(
     before = totals(plan, rates).free
     after_free = totals(applied(plan, changes), rates).free
     return "\n".join([head, *shown, f"Свободно: {short(before)} → {short(after_free)}"])
+
+
+@dataclass(frozen=True)
+class LoadedPlan:
+    plan: MonthPlan
+    rates: Rates
+    history: History
+
+
+def load_plan(gs: GoogleSheetsService, title: str, today: date) -> LoadedPlan | None:
+    """Вкладка месяца, курсы и подсказки (синхронно); None — вкладки нет."""
+    try:
+        rows = gs.get_values(title)
+    except WorksheetNotFound:
+        return None
+    rates = gs.get_rates()
+    frame = transactions_frame(gs.get_values(config.FACT_SHEET_NAME), rates)
+    return LoadedPlan(read_plan(rows), rates, article_history(frame, today))
+
+
+@dataclass(frozen=True)
+class SaveOutcome:
+    plan: MonthPlan  # вкладка до записи
+    rates: Rates
+    invalid: frozenset[str] = frozenset()
+    conflicts: tuple[str, ...] = ()
+
+
+def save_plan(gs: GoogleSheetsService, title: str, changes: PlanChanges) -> SaveOutcome:
+    """Проверить правки по свежей вкладке и записать; при ошибке ничего не пишет.
+
+    WorksheetNotFound — вкладки месяца нет.
+    """
+    plan = read_plan(gs.get_values(title))
+    rates = gs.get_rates()
+    if bad := unknown(plan, changes, rates.to_uzs.keys()):
+        return SaveOutcome(plan, rates, invalid=frozenset(bad))
+    if found := conflicts(plan, changes):
+        return SaveOutcome(plan, rates, conflicts=tuple(found))
+    gs.write_cells(cell_updates(title, plan, changes))
+    return SaveOutcome(plan, rates)
