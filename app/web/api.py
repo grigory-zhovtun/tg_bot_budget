@@ -525,6 +525,27 @@ def routes(application: Application) -> list[Route]:
         await notify_others(application.bot, user.id, note)
         return JSONResponse(fresh.model_dump(mode="json"))
 
+    async def create_next_plan(request: Request) -> JSONResponse:
+        user = current_user(request)
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        first = shift_month(today.replace(day=1), 1)
+        gs = application.bot_data["gs_service"]
+        lock: asyncio.Lock = application.bot_data.setdefault(PLAN_LOCK, asyncio.Lock())
+        try:
+            async with lock:
+                tab = await asyncio.to_thread(gs.ensure_next_month_tab, today)
+                loaded = await asyncio.to_thread(
+                    load_plan, gs, month_title(first), today
+                )
+        except Exception:
+            logger.exception("Next month plan failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if tab.created:
+            logger.info("Plan tab %s created by user_id=%s", tab.title, user.id)
+        icons: dict[str, str] = application.bot_data.get("icons", {})
+        body = plan_out(first, today, loaded, icons)
+        return JSONResponse(body.model_dump(mode="json"))
+
     return [
         Route("/bootstrap", bootstrap),
         Route("/expenses", add_expense, methods=["POST"]),
@@ -532,4 +553,5 @@ def routes(application: Application) -> list[Route]:
         Route("/dashboard", dashboard),
         Route("/plan", month_plan),
         Route("/plan", save_month_plan, methods=["POST"]),
+        Route("/plan/next", create_next_plan, methods=["POST"]),
     ]

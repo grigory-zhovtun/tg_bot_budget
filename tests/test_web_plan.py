@@ -12,6 +12,7 @@ import pytest
 from app import config
 from app.domain import month_title
 from app.services.analytics_service import MONTHS_RU
+from app.services.google_sheets import MonthTab
 from app.services.plan import shift_month
 from app.web.server import create_app
 from tests.test_day_budget import FACT_HEADER, fact_row
@@ -329,3 +330,70 @@ async def test_two_saves_at_once_cannot_both_win() -> None:
         )
     assert sorted(a.status_code for a in answers) == [200, 409]
     assert len(sheets.writes) == 1
+
+
+class NextSheets(PlanSheets):
+    """Таблица, где «Создать план» копирует вкладку текущего месяца."""
+
+    def __init__(self) -> None:
+        base = sheets_with()
+        super().__init__({TITLE: base.tabs[TITLE]}, base.tabs["fact"])
+        self.copies = 0
+
+    def ensure_next_month_tab(self, today: Any) -> MonthTab:
+        title = month_title(NEXT)
+        if title in self.tabs:
+            return MonthTab(title)
+        self.tabs[title] = [list(row) for row in self.tabs[TITLE]]
+        self.copies += 1
+        return MonthTab(title, TITLE, created=True)
+
+
+def create_next(application: Any, user: int = OWNER) -> Any:
+    return client_for(application).post("/api/plan/next", headers=auth(user))
+
+
+def test_the_next_month_plan_is_a_copy_of_this_one() -> None:
+    sheets = NextSheets()
+    body = create_next(plan_app(sheets)).json()
+    assert (body["status"], body["month"], body["title"]) == (
+        "ok",
+        f"{NEXT:%Y-%m}",
+        month_title(NEXT),
+    )
+    assert body["rows"][0]["plan"] == 1_500_000
+    assert sheets.copies == 1
+
+
+def test_creating_twice_makes_one_tab() -> None:
+    sheets = NextSheets()
+    application = plan_app(sheets)
+    assert create_next(application).status_code == 200
+    assert create_next(application, WIFE).status_code == 200
+    assert sheets.copies == 1
+
+
+def test_the_new_month_can_be_saved() -> None:
+    sheets = NextSheets()
+    application = plan_app(sheets)
+    create_next(application)
+    response = post_plan(application, change(month=f"{NEXT:%Y-%m}"))
+    assert response.status_code == 200
+    assert sheets.writes[0][0]["range"] == f"'{month_title(NEXT)}'!D2"
+
+
+def test_next_month_failure_is_503() -> None:
+    class Broken(NextSheets):
+        def ensure_next_month_tab(self, today: Any) -> MonthTab:
+            raise ConnectionError("Google is down")
+
+    response = create_next(plan_app(Broken()))
+    assert (response.status_code, response.json()["error"]["code"]) == (
+        503,
+        "sheets_unavailable",
+    )
+
+
+def test_next_month_needs_a_signature() -> None:
+    client = client_for(plan_app(NextSheets()))
+    assert client.post("/api/plan/next").status_code == 401
