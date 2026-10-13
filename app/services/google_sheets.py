@@ -398,6 +398,23 @@ class GoogleSheetsService:
             ),
         )
 
+    def sheet_id(self, worksheet_name: str) -> int:
+        return self._worksheet(worksheet_name).id
+
+    def get_formulas(self, worksheet_name: str, cells: str) -> list[list[Any]]:
+        """Ячейки диапазона: формулы текстом («=SUM(H2:H40)»), значения как есть."""
+        return self._with_retry(
+            f"Reading formulas of {worksheet_name}",
+            lambda: self._worksheet(worksheet_name).get(
+                cells, value_render_option=ValueRenderOption.formula
+            ),
+        )
+
+    def apply_requests(self, requests: list[dict[str, Any]]) -> None:
+        """Один batch_update без повтора: повтор вставки после потерянного ответа
+        вставил бы строки дважды."""
+        self.sheet.batch_update({"requests": requests})
+
     def write_cells(self, data: list[dict[str, Any]]) -> None:
         """Значения как есть (RAW) одним запросом: применяются все или ни одно.
 

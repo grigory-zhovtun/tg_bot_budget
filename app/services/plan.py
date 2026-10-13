@@ -584,6 +584,106 @@ def change_note(
     return "\n".join([head, *shown, f"Свободно: {short(before)} → {short(after_free)}"])
 
 
+INSERT_COLUMNS = 12  # A–L: строка статьи; в M только M1:M2 — даты месяца
+
+
+def _grid(
+    sheet_id: int, row: int, first: int = 0, last: int = INSERT_COLUMNS
+) -> dict[str, int]:
+    """Строка row (с 1), колонки first..last-1 (с 0) — диапазон batch_update."""
+    return {
+        "sheetId": sheet_id,
+        "startRowIndex": row - 1,
+        "endRowIndex": row,
+        "startColumnIndex": first,
+        "endColumnIndex": last,
+    }
+
+
+def _cells(
+    sheet_id: int, row: int, first: int, *values: dict[str, Any]
+) -> dict[str, Any]:
+    return {
+        "updateCells": {
+            "range": _grid(sheet_id, row, first, first + len(values)),
+            "rows": [{"values": [{"userEnteredValue": value} for value in values]}],
+            "fields": "userEnteredValue",
+        }
+    }
+
+
+def insert_requests(
+    sheet_id: int,
+    plan: MonthPlan,
+    added: Sequence[NewArticle],
+    total_row: int | None,
+) -> list[dict[str, Any]]:
+    """Запросы batch_update: новые статьи строками A–L, каждая — за своей группой.
+
+    Вставляется только A–L со сдвигом вниз: справа в тех же строках блок
+    прогноза и таблица дней, а в M — даты месяца. Формулы и формат — копией
+    строки выше (ссылки на свою строку сдвигаются сами). Итоговая строка
+    переписывается на все статьи: вставку сразу под последней статьёй
+    диапазон SUM сам не захватывает. Запросы выполняются по порядку, поэтому
+    номера строк считаются с учётом предыдущих вставок.
+    """
+    rows = [(a.group, a.kind, a.row) for a in plan.articles]
+    requests: list[dict[str, Any]] = []
+    for new in added:
+        kind = kind_of(new.group)
+        after = max(
+            [row for group, _, row in rows if group == new.group]
+            or [row for _, other, row in rows if other == kind]
+            or [row for _, _, row in rows]
+        )
+        at = after + 1
+        rows = [(g, k, r + 1 if r >= at else r) for g, k, r in rows]
+        rows.append((new.group, kind, at))
+        if total_row is not None and total_row >= at:
+            total_row += 1
+        requests += [
+            {"insertRange": {"range": _grid(sheet_id, at), "shiftDimension": "ROWS"}},
+            {
+                "copyPaste": {
+                    "source": _grid(sheet_id, after),
+                    "destination": _grid(sheet_id, at),
+                    "pasteType": "PASTE_NORMAL",
+                }
+            },
+            _cells(
+                sheet_id,
+                at,
+                0,
+                {"stringValue": KIND_TEXT[kind]},
+                {"stringValue": new.group},
+                {"stringValue": new.subcategory},
+                {"numberValue": 0.0 - new.plan},
+            ),
+            _cells(sheet_id, at, 6, {"stringValue": new.currency}),
+        ]
+    if total_row is not None:
+        last = max(row for _, _, row in rows)
+        requests.append(
+            _cells(
+                sheet_id,
+                total_row,
+                7,
+                {"formulaValue": f"=SUM(H2:H{last})"},
+                {"formulaValue": f"=SUM(I2:I{last})"},
+            )
+        )
+    return requests
+
+
+def totals_row(column: list[list[Any]], first: int) -> int | None:
+    """Итоговая строка: первая «=SUM(H2:…» в столбце H, прочитанном со строки first."""
+    for offset, cells in enumerate(column):
+        text = _text(cells[0] if cells else "").replace(" ", "").upper()
+        if text.startswith("=SUM(H2:H"):
+            return first + offset
+    return None
+
+
 @dataclass(frozen=True)
 class LoadedPlan:
     plan: MonthPlan
@@ -610,16 +710,32 @@ class SaveOutcome:
     conflicts: tuple[str, ...] = ()
 
 
-def save_plan(gs: GoogleSheetsService, title: str, changes: PlanChanges) -> SaveOutcome:
+def save_plan(
+    gs: GoogleSheetsService,
+    title: str,
+    changes: PlanChanges,
+    catalog: Catalog | None = None,
+) -> SaveOutcome:
     """Проверить правки по свежей вкладке и записать; при ошибке ничего не пишет.
 
+    Новые статьи вставляются первыми, одним batch_update; потом вкладка
+    перечитывается, и суммы пишутся по новым номерам строк.
     WorksheetNotFound — вкладки месяца нет.
     """
     plan = read_plan(gs.get_values(title))
     rates = gs.get_rates()
-    if bad := unknown(plan, changes, rates.to_uzs.keys()):
+    if bad := unknown(plan, changes, rates.to_uzs.keys(), catalog):
         return SaveOutcome(plan, rates, invalid=frozenset(bad))
     if found := conflicts(plan, changes):
         return SaveOutcome(plan, rates, conflicts=tuple(found))
-    gs.write_cells(cell_updates(title, plan, changes))
+    current = plan
+    if changes.added:
+        last = max(a.row for a in plan.articles)
+        column = gs.get_formulas(title, f"H{last + 1}:H{last + 5}")
+        total = totals_row(column, last + 1)
+        requests = insert_requests(gs.sheet_id(title), plan, changes.added, total)
+        gs.apply_requests(requests)
+        current = read_plan(gs.get_values(title))
+    if data := cell_updates(title, current, changes):
+        gs.write_cells(data)
     return SaveOutcome(plan, rates)

@@ -32,12 +32,14 @@ from app.services.plan import (
     cell_updates,
     change_note,
     conflicts,
+    insert_requests,
     kind_of,
     load_plan,
     read_plan,
     save_plan,
     shift_month,
     totals,
+    totals_row,
     unknown,
 )
 from tests.test_day_budget import FACT_HEADER, RATES, fact_row
@@ -447,6 +449,7 @@ class PlanSheets:
         self.tabs = {name: [list(row) for row in rows] for name, rows in tabs.items()}
         self.tabs["fact"] = fact or [FACT_HEADER]
         self.writes: list[list[dict[str, Any]]] = []
+        self.applied: list[list[dict[str, Any]]] = []
         self.delay = 0.0  # пауза между чтением вкладки и записью — окно гонки
 
     def get_values(self, name: str) -> list[list[Any]]:
@@ -469,6 +472,39 @@ class PlanSheets:
             cells = self.tabs[title][row - 1]
             for offset, value in enumerate(item["values"][0]):
                 cells[ord(column) - ord("A") + offset] = value
+
+    def sheet_id(self, name: str) -> int:
+        return list(self.tabs).index(name)
+
+    def get_formulas(self, name: str, cells: str) -> list[list[Any]]:
+        found = re.fullmatch(r"H(\d+):H(\d+)", cells)
+        assert found, cells
+        rows = self.tabs[name]
+        first, last = int(found.group(1)), int(found.group(2))
+        return [[rows[n - 1][7]] for n in range(first, min(last, len(rows)) + 1)]
+
+    def apply_requests(self, requests: list[dict[str, Any]]) -> None:
+        """insertRange, copyPaste и updateCells — как таблица, только A–L."""
+        self.applied.append(requests)
+        for request in requests:
+            [(kind, body)] = request.items()
+            grid = body.get("range") or body["destination"]
+            rows = self.tabs[list(self.tabs)[grid["sheetId"]]]
+            row, left = grid["startRowIndex"], grid["startColumnIndex"]
+            if kind == "insertRange":
+                width = grid["endColumnIndex"]
+                rows.append([""] * len(rows[0]))
+                for index in range(len(rows) - 1, row, -1):
+                    rows[index][:width] = rows[index - 1][:width]
+                rows[row][:width] = [""] * width
+            elif kind == "copyPaste":
+                width = grid["endColumnIndex"]
+                source = body["source"]["startRowIndex"]
+                rows[row][:width] = list(rows[source][:width])
+            else:
+                for offset, cell in enumerate(body["rows"][0]["values"]):
+                    [value] = cell["userEnteredValue"].values()
+                    rows[row][left + offset] = value
 
 
 def test_load_plan_reads_the_tab_rates_and_history() -> None:
@@ -498,6 +534,107 @@ def test_save_plan_writes_and_the_tab_shows_the_new_plan() -> None:
     assert (outcome.invalid, outcome.conflicts) == (frozenset(), ())
     assert outcome.plan.articles[0].plan == 1_500_000  # вкладка до записи
     assert read_plan(sheets.get_values("Oct 26")).articles[0].plan == 1_800_000
+
+
+def tab_with_totals() -> list[list[Any]]:
+    """TAB с итоговой строкой 5 под статьями 2–4."""
+    rows = [list(row) for row in TAB]
+    rows[4][7:9] = ["=SUM(H2:H4)", "=SUM(I2:I4)"]
+    return rows
+
+
+def grid(row: int, first: int = 0, last: int = 12) -> dict[str, int]:
+    return {
+        "sheetId": 7,
+        "startRowIndex": row - 1,
+        "endRowIndex": row,
+        "startColumnIndex": first,
+        "endColumnIndex": last,
+    }
+
+
+def cells(row: int, first: int, *values: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "updateCells": {
+            "range": grid(row, first, first + len(values)),
+            "rows": [{"values": [{"userEnteredValue": value} for value in values]}],
+            "fields": "userEnteredValue",
+        }
+    }
+
+
+def test_a_new_row_shifts_only_the_article_columns() -> None:
+    bonus = NewArticle("💰 ДОХОДЫ", "премия", "UZS", 1_000_000)
+    assert insert_requests(7, read_plan(TAB), (bonus,), 5) == [
+        {"insertRange": {"range": grid(5), "shiftDimension": "ROWS"}},
+        {
+            "copyPaste": {
+                "source": grid(4),
+                "destination": grid(5),
+                "pasteType": "PASTE_NORMAL",
+            }
+        },
+        cells(
+            5,
+            0,
+            {"stringValue": "Доходы"},
+            {"stringValue": "💰 ДОХОДЫ"},
+            {"stringValue": "премия"},
+            {"numberValue": -1_000_000.0},
+        ),
+        cells(5, 6, {"stringValue": "UZS"}),
+        # строка сразу под последней статьёй: SUM(H2:H4) её бы не увидел
+        cells(6, 7, {"formulaValue": "=SUM(H2:H5)"}, {"formulaValue": "=SUM(I2:I5)"}),
+    ]
+
+
+def test_an_article_of_a_group_without_rows_goes_after_its_kind() -> None:
+    misc = NewArticle("🚧 РАЗНОЕ", "неучтенка", "UZS", 1)
+    [insert, *_] = insert_requests(7, read_plan(TAB), (misc,), None)
+    assert insert["insertRange"]["range"] == grid(4)  # под последним расходом
+
+
+def test_totals_row_is_the_sum_formula_under_the_articles() -> None:
+    assert totals_row([["=SUM(H2:H40)"]], 41) == 41
+    assert totals_row([[""], ["= sum(h2:h40)"]], 41) == 42
+    assert totals_row([[123], []], 41) is None
+
+
+def test_new_rows_are_inserted_and_the_sums_go_to_the_shifted_rows() -> None:
+    sheets = PlanSheets({"Oct 26": tab_with_totals()})
+    changes = PlanChanges(
+        articles=(ArticleChange("зарплата|UZS", 20_000_000, 21_000_000),),
+        added=(RESTAURANT, NewArticle("💰 ДОХОДЫ", "зарплата", "USD", 300)),
+    )
+    outcome = save_plan(sheets, "Oct 26", changes, CATALOG)
+    assert (outcome.invalid, outcome.conflicts) == (frozenset(), ())
+    tab = sheets.get_values("Oct 26")
+    assert [(a.key, a.row, a.plan) for a in read_plan(tab).articles] == [
+        ("кофе|UZS", 2, 1_500_000),
+        ("ресторан|UZS", 3, 500_000),
+        ("квартплата|USD", 4, 500),
+        ("зарплата|UZS", 5, 21_000_000),
+        ("зарплата|USD", 6, 300),
+    ]
+    assert tab[6][7:9] == ["=SUM(H2:H6)", "=SUM(I2:I6)"]  # итог — строка 7
+    assert tab[11][14:18] == ["Аванс", 15, 3_000_000, "UZS"]  # прогноз на месте
+    assert len(sheets.applied) == 1  # обе вставки — один batch_update
+    assert sheets.writes == [[{"range": "'Oct 26'!D5", "values": [[-21_000_000.0]]}]]
+
+
+def test_a_lost_reply_does_not_insert_twice() -> None:
+    class Lost(PlanSheets):
+        def apply_requests(self, requests: list[dict[str, Any]]) -> None:
+            super().apply_requests(requests)
+            raise ConnectionError("the reply was lost")  # вставка прошла, ответа нет
+
+    sheets = Lost({"Oct 26": tab_with_totals()})
+    changes = PlanChanges(added=(RESTAURANT,))
+    with pytest.raises(ConnectionError):
+        save_plan(sheets, "Oct 26", changes, CATALOG)
+    again = save_plan(sheets, "Oct 26", changes, CATALOG)
+    assert again.conflicts == ("ресторан|UZS",)
+    assert len(sheets.applied) == 1
 
 
 def test_a_row_inserted_above_by_hand_still_gets_the_write() -> None:
