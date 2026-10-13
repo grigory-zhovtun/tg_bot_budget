@@ -60,10 +60,11 @@ export interface GroupPlan {
   items: PlanItem[];
 }
 
-export interface DayPoint {
+/** День месяца: траты без платежей из списка и лимит, с которым день начался. */
+export interface DaySpend {
   day: string;
-  plan: number;
-  fact: number | null;
+  spent: number;
+  limit: number;
 }
 
 export interface ForecastItem {
@@ -113,7 +114,7 @@ export interface Dashboard {
     change: number;
   } | null;
   groups: GroupPlan[];
-  daily: DayPoint[];
+  spending: DaySpend[]; // с 1-го числа по сегодня
   upcoming: ForecastItem[];
   subscriptions: Subscription[];
   runway: Runway | null;

@@ -6,8 +6,8 @@ import {
   type SubscriptionState,
 } from "../api";
 import { itemAmount, longDay, money, short, withCurrency } from "../format";
-import BalanceChart from "./BalanceChart";
 import GroupBars from "./GroupBars";
+import SpendingChart from "./SpendingChart";
 
 const STATE_TEXT: Record<SubscriptionState, string> = {
   charged: "списано",
@@ -160,10 +160,15 @@ function Content({ data }: { data: Dashboard }) {
           <GroupBars groups={data.groups} />
         </section>
       )}
-      {data.daily.length > 0 && (
+      {data.spending.length > 0 && (
         <section className="flex flex-col gap-2">
-          <h2 className="font-semibold">Остаток по дням</h2>
-          <BalanceChart points={data.daily} />
+          <h2 className="font-semibold">Траты по дням</h2>
+          <SpendingChart
+            spending={data.spending}
+            today={data.today}
+            limit={data.limit}
+            planPerDay={data.plan_per_day}
+          />
         </section>
       )}
       {data.upcoming.length > 0 && (
