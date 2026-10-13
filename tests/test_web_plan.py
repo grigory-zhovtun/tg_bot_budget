@@ -16,7 +16,7 @@ from app.services.google_sheets import MonthTab
 from app.services.plan import shift_month
 from app.web.server import create_app
 from tests.test_day_budget import FACT_HEADER, fact_row
-from tests.test_month_plan import TAB, PlanSheets
+from tests.test_month_plan import TAB, PlanSheets, article, month_tab
 from tests.test_web_api import (
     OWNER,
     TODAY,
@@ -114,6 +114,26 @@ def test_plan_needs_a_signature() -> None:
     assert client.get(f"/api/plan?month={MONTH}").status_code == 401
 
 
+def test_plan_offers_the_catalog_pairs_missing_in_the_tab() -> None:
+    body = get_plan(sheets_with()).json()
+    pairs = [(item["subcategory"], item["currency"]) for item in body["addable"]]
+    assert pairs[:3] == [("продукты", "UZS"), ("продукты", "RUB"), ("продукты", "USD")]
+    assert ("кофе", "UZS") not in pairs  # уже во вкладке
+    assert all(item["group"] != "💳 СЧЕТА" for item in body["addable"])
+    coffee = body["addable"][pairs.index(("кофе", "USD"))]
+    assert coffee == {
+        "kind": "spend",
+        "group": "🍔 ЕДА",
+        "subcategory": "кофе",
+        "icon": "☕",
+        "currency": "USD",
+        "average": 0,
+        "last": 0,
+        "current": 0,
+    }
+    assert body["addable"][pairs.index(("зарплата", "USD"))]["kind"] == "income"
+
+
 EMPTY_CELLS = {"name": None, "day": None, "amount": None, "currency": None}
 
 
@@ -146,6 +166,49 @@ def test_save_writes_the_cells_and_answers_with_the_fresh_plan() -> None:
     body = response.json()
     assert (body["saved"], body["rows"][0]["plan"]) == (1, 1_800_000)
     assert sheets.writes == [[{"range": f"'{TITLE}'!D2", "values": [[-1_800_000.0]]}]]
+
+
+CAFE = {"group": "🍔 ЕДА", "subcategory": "кафе", "currency": "UZS", "plan": "700000"}
+
+
+def test_new_articles_are_inserted_saved_and_told() -> None:
+    sheets = sheets_with()
+    application = plan_app(sheets)
+    response = post_plan(application, change(new_rows=[CAFE]))
+    assert response.status_code == 200
+    body = response.json()
+    assert body["saved"] == 2
+    assert [(row["key"], row["plan"]) for row in body["rows"][:2]] == [
+        ("кофе|UZS", 1_800_000),
+        ("кафе|UZS", 700_000),
+    ]
+    pairs = [(item["subcategory"], item["currency"]) for item in body["addable"]]
+    assert ("кафе", "UZS") not in pairs
+    note = application.bot.send_message.await_args.kwargs["text"]
+    assert "＋ кафе: 700 000" in note
+
+
+def test_no_room_for_new_articles_is_said_plainly() -> None:
+    rows = [article("Расходы", "🚧 РАЗНОЕ", f"статья {n}", 1) for n in range(59)]
+    sheets = PlanSheets({TITLE: month_tab(rows)})
+    response = post_plan(plan_app(sheets), change(rows=[], new_rows=[CAFE]))
+    assert response.status_code == 422
+    message = "Во вкладке нет места для новых статей"
+    assert response.json()["error"] == {
+        "code": "validation",
+        "message": message,
+        "fields": {"new_rows": message},
+    }
+    assert sheets.applied == []
+
+
+def test_a_new_article_already_in_the_tab_is_a_conflict() -> None:
+    sheets = sheets_with()
+    coffee = {**CAFE, "subcategory": "кофе"}
+    response = post_plan(plan_app(sheets), change(rows=[], new_rows=[coffee]))
+    assert response.status_code == 409
+    assert response.json()["conflicts"] == ["кофе|UZS"]
+    assert sheets.applied == [] and sheets.writes == []
 
 
 def test_cents_of_a_currency_row_reach_the_sheet() -> None:
@@ -294,6 +357,17 @@ def test_a_conflict_writes_nothing_and_returns_the_fresh_plan() -> None:
             ),
             "goal",
         ),
+        (change(rows=[], new_rows=[{**CAFE, "subcategory": "суши"}]), "new_rows"),
+        (
+            change(
+                rows=[],
+                new_rows=[{**CAFE, "group": "💳 СЧЕТА", "subcategory": "переводы"}],
+            ),
+            "new_rows",
+        ),
+        (change(rows=[], new_rows=[{**CAFE, "currency": "EUR"}]), "new_rows"),
+        (change(rows=[], new_rows=[{**CAFE, "plan": "-1"}]), "new_rows"),
+        (change(rows=[], new_rows=[CAFE] * 11), "new_rows"),
         (change(rows=[]), "changes"),
         (change(month="1999-01"), "month"),
     ],
