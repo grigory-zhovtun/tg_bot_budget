@@ -397,6 +397,20 @@ class GoogleSheetsService:
             ),
         )
 
+    def write_cells(self, data: list[dict[str, Any]]) -> None:
+        """Значения как есть (RAW) одним запросом: применяются все или ни одно.
+
+        Повтор после переподключения безопасен: те же значения в тех же ячейках.
+        """
+        if not data:
+            return
+        self._with_retry(
+            "Writing cells",
+            lambda: self.sheet.values_batch_update(
+                {"valueInputOption": "RAW", "data": data}
+            ),
+        )
+
     def get_rates(self) -> Rates:
         """Курсы к суму из system!H2:I10: код валюты в H, курс (GOOGLEFINANCE) в I.
 

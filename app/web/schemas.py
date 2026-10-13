@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ApiModel(BaseModel):
@@ -144,3 +144,124 @@ class DashboardOut(ApiModel):
     daily: list[DayPointOut] = []
     upcoming: list[ForecastItemOut] = []
     subscriptions: list[SubscriptionOut] = []
+
+
+class PlanHistoryOut(ApiModel):
+    average: list[str]  # три полных месяца «YYYY-MM»
+    last: str
+    current: str
+    current_days: int
+
+
+class PlanArticleOut(ApiModel):
+    key: str
+    kind: Literal["spend", "income"]
+    group: str
+    subcategory: str
+    icon: str
+    currency: str
+    plan: float  # положительный, в валюте строки
+    average: float
+    last: float
+    current: float
+    editable: bool
+
+
+class PlanEventOut(ApiModel):
+    slot: int
+    name: str | None
+    day: int | None
+    amount: float | None  # со знаком: «+» поступление, «−» платёж
+    currency: str | None
+
+
+class PlanGoalOut(ApiModel):
+    amount: float
+    currency: str
+
+
+class PlanOut(ApiModel):
+    """План месяца для экрана «План»; без вкладки — только статус."""
+
+    month: str
+    title: str
+    status: Literal["ok", "not_created", "no_month_tab"]
+    today: date
+    rates: dict[str, float] = {}
+    history: PlanHistoryOut | None = None
+    rows: list[PlanArticleOut] = []
+    events: list[PlanEventOut] | None = None  # None — во вкладке нет блока прогноза
+    goal: PlanGoalOut | None = None
+    saved: int | None = None  # после сохранения — сколько правок записано
+
+
+MAX_SUM = Decimal(10) ** 12
+
+
+class EventValueIn(ApiModel):
+    """Строка списка: сумма со знаком — «+» поступление, «−» платёж."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=40)
+    day: int = Field(ge=1, le=31)
+    amount: Decimal = Field(ge=-MAX_SUM, le=MAX_SUM, decimal_places=2)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+
+    @field_validator("amount")
+    @classmethod
+    def not_zero(cls, value: Decimal) -> Decimal:
+        if value == 0:
+            raise ValueError("сумма — не 0")
+        return value
+
+
+class EventCellsIn(ApiModel):
+    """Строка списка, какой её видел пользователь (пустые поля — null)."""
+
+    name: str | None
+    day: int | None
+    amount: float | None
+    currency: str | None
+
+
+class ArticleChangeIn(ApiModel):
+    key: str = Field(min_length=3, max_length=200)
+    base: float
+    plan: Decimal = Field(ge=0, le=MAX_SUM, decimal_places=2)
+
+
+class EventChangeIn(ApiModel):
+    slot: int = Field(ge=0, le=50)
+    base: EventCellsIn
+    value: EventValueIn | None
+
+
+class GoalIn(ApiModel):
+    amount: Decimal = Field(ge=0, le=MAX_SUM, decimal_places=2)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+
+
+class GoalBaseIn(ApiModel):
+    amount: float
+    currency: str
+
+
+class GoalChangeIn(ApiModel):
+    base: GoalBaseIn
+    value: GoalIn
+
+
+class PlanSaveIn(ApiModel):
+    month: str = Field(pattern=r"^\d{4}-\d{2}$")
+    rows: list[ArticleChangeIn] = Field(default=[], max_length=300)
+    events: list[EventChangeIn] = Field(default=[], max_length=30)
+    goal: GoalChangeIn | None = None
+
+
+class PlanConflictOut(ApiModel):
+    """409: план поменяли после открытия — свежий план и что именно поменялось."""
+
+    error: ErrorOut
+    plan: PlanOut
+    conflicts: list[str]

@@ -1,4 +1,4 @@
-import type { Bootstrap, Dashboard, ExpenseResult } from "../api";
+import type { Bootstrap, Dashboard, ExpenseResult, MonthPlan } from "../api";
 
 export const bootstrapFixture: Bootstrap = {
   user: { id: 1, first_name: "Тест" },
@@ -105,4 +105,80 @@ export const dashboardFixture: Dashboard = {
       state: "expected",
     },
   ],
+};
+
+export const planFixture: MonthPlan = {
+  month: "2026-10",
+  title: "Oct 26",
+  status: "ok",
+  today: "2026-10-10",
+  rates: { UZS: 1, USD: 12_000, RUB: 150 },
+  history: {
+    average: ["2026-07", "2026-08", "2026-09"],
+    last: "2026-09",
+    current: "2026-10",
+    current_days: 10,
+  },
+  rows: [
+    {
+      key: "кофе|UZS",
+      kind: "spend",
+      group: "🍔 ЕДА",
+      subcategory: "кофе",
+      icon: "☕",
+      currency: "UZS",
+      plan: 1_500_000,
+      average: 1_800_000,
+      last: 2_000_000,
+      current: 700_000,
+      editable: true,
+    },
+    {
+      key: "кафе|UZS",
+      kind: "spend",
+      group: "🍔 ЕДА",
+      subcategory: "кафе",
+      icon: "🍽️",
+      currency: "UZS",
+      plan: 3_000_000,
+      average: 3_400_000,
+      last: 3_100_000,
+      current: 1_200_000,
+      editable: true,
+    },
+    {
+      key: "квартплата|USD",
+      kind: "spend",
+      group: "🏚️ ДОМ",
+      subcategory: "квартплата",
+      icon: "🔑",
+      currency: "USD",
+      plan: 500,
+      average: 500,
+      last: 500,
+      current: 0,
+      editable: true,
+    },
+    {
+      key: "зарплата|UZS",
+      kind: "income",
+      group: "💰 ДОХОДЫ",
+      subcategory: "зарплата",
+      icon: "💵",
+      currency: "UZS",
+      plan: 20_000_000,
+      average: 20_000_000,
+      last: 20_000_000,
+      current: 0,
+      editable: true,
+    },
+  ],
+  events: [
+    { slot: 0, name: "Аванс", day: 15, amount: 5_000_000, currency: "UZS" },
+    { slot: 1, name: "ЗП", day: 30, amount: 17_000_000, currency: "UZS" },
+    { slot: 2, name: "Квартплата", day: 18, amount: -500, currency: "USD" },
+    { slot: 3, name: null, day: null, amount: null, currency: null },
+  ],
+  goal: { amount: 2_000_000, currency: "UZS" },
+  saved: null,
 };

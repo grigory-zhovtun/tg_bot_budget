@@ -3,6 +3,7 @@ import type { Api } from "../api";
 import {
   bootstrapFixture,
   dashboardFixture,
+  planFixture,
   writtenFixture,
 } from "../mocks/fixtures";
 
@@ -15,6 +16,10 @@ export function fakeApi(overrides: Partial<Api> = {}): Api {
       .fn<Api["undo"]>()
       .mockResolvedValue({ message: "↩️ Удалил из таблицы: строка 4169." }),
     dashboard: vi.fn<Api["dashboard"]>().mockResolvedValue(dashboardFixture),
+    plan: vi.fn<Api["plan"]>().mockResolvedValue(planFixture),
+    savePlan: vi
+      .fn<Api["savePlan"]>()
+      .mockResolvedValue({ ...planFixture, saved: 1 }),
     ...overrides,
   };
 }

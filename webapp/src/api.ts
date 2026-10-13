@@ -108,21 +108,97 @@ export interface Dashboard {
   subscriptions: Subscription[];
 }
 
+export interface PlanArticle {
+  key: string;
+  kind: "spend" | "income";
+  group: string;
+  subcategory: string;
+  icon: string;
+  currency: string;
+  plan: number;
+  average: number;
+  last: number;
+  current: number;
+  editable: boolean;
+}
+
+export interface PlanEvent {
+  slot: number;
+  name: string | null;
+  day: number | null;
+  amount: number | null; // со знаком: «+» поступление, «−» платёж
+  currency: string | null;
+}
+
+export interface PlanGoal {
+  amount: number;
+  currency: string;
+}
+
+export interface PlanHistory {
+  average: string[];
+  last: string;
+  current: string;
+  current_days: number;
+}
+
+export interface MonthPlan {
+  month: string;
+  title: string;
+  status: "ok" | "not_created" | "no_month_tab";
+  today: string;
+  rates: Record<string, number>;
+  history: PlanHistory | null;
+  rows: PlanArticle[];
+  events: PlanEvent[] | null;
+  goal: PlanGoal | null;
+  saved: number | null;
+}
+
+export interface EventValue {
+  name: string;
+  day: number;
+  amount: string; // «1000000», «-650.5»
+  currency: string;
+}
+
+export interface PlanSave {
+  month: string;
+  rows: { key: string; base: number; plan: string }[];
+  events: {
+    slot: number;
+    base: Omit<PlanEvent, "slot">;
+    value: EventValue | null;
+  }[];
+  goal: {
+    base: PlanGoal;
+    value: { amount: string; currency: string };
+  } | null;
+}
+
+export interface PlanConflict {
+  plan: MonthPlan;
+  conflicts: string[];
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly fields: Record<string, string>;
+  readonly body: unknown; // всё тело ответа — у 409 там свежий план
 
   constructor(
     status: number,
     code: string,
     message: string,
     fields: Record<string, string> = {},
+    body: unknown = null,
   ) {
     super(message);
     this.status = status;
     this.code = code;
     this.fields = fields;
+    this.body = body;
   }
 }
 
@@ -189,7 +265,7 @@ export async function request<T>(
   if (!response.ok) {
     if (isErrorBody(body)) {
       const { code, message, fields } = body.error;
-      throw new ApiError(response.status, code, message, fields ?? {});
+      throw new ApiError(response.status, code, message, fields ?? {}, body);
     }
     throw new ApiError(
       response.status,
@@ -198,6 +274,25 @@ export async function request<T>(
     );
   }
   return body as T;
+}
+
+/** 409 сохранения плана: свежий план и что поменялось после открытия. */
+export function planConflict(error: unknown): PlanConflict | null {
+  if (!(error instanceof ApiError) || error.code !== "plan_changed")
+    return null;
+  const body = error.body;
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    !("plan" in body) ||
+    !("conflicts" in body)
+  ) {
+    return null;
+  }
+  return {
+    plan: body.plan as MonthPlan,
+    conflicts: body.conflicts as string[],
+  };
 }
 
 export const api = {
@@ -209,6 +304,13 @@ export const api = {
     }),
   undo: () => request<UndoResult>("/expenses/undo", { method: "POST" }),
   dashboard: () => request<Dashboard>("/dashboard"),
+  plan: (month: string) =>
+    request<MonthPlan>(`/plan?month=${encodeURIComponent(month)}`),
+  savePlan: (input: PlanSave) =>
+    request<MonthPlan>("/plan", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 };
 
 export type Api = typeof api;
