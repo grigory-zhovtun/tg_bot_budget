@@ -1593,13 +1593,13 @@ import os
 
 OLD_P5 = 'SUMIFS($S$12:$S$19;$P$12:$P$19;">="&DAY($P$1))'
 NEW_P5 = (
-    "SUMPRODUCT(IFERROR(IF(ABS($T$12:$T$19)>=0.9*ABS($Q$12:$Q$19);0;"
+    "SUMPRODUCT(IFERROR(IF(ABS($T$12:$T$19)>=0,9*ABS($Q$12:$Q$19);0;"
     "$S$12:$S$19*(1-$T$12:$T$19/$Q$12:$Q$19));0))"
 )
 OLD_Q10 = 'SUMIFS($Q$12:$Q$19;$R$12:$R$19;"USD";$Q$12:$Q$19;"<0";$P$12:$P$19;">="&DAY($P$1))'
 NEW_Q10 = (
     'SUMPRODUCT(IFERROR(($R$12:$R$19="USD")*($Q$12:$Q$19<0)*'
-    "(ABS($T$12:$T$19)<0.9*ABS($Q$12:$Q$19))*($Q$12:$Q$19-$T$12:$T$19);0))"
+    "(ABS($T$12:$T$19)<0,9*ABS($Q$12:$Q$19))*($Q$12:$Q$19-$T$12:$T$19);0))"
 )
 rows = json.load(open("../forecast-backup.json"))["values"]
 p5, q10 = rows[4][1], rows[9][2]  # O1:T20: P5 — строка 5, Q10 — строка 10
