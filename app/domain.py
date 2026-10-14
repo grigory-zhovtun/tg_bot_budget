@@ -8,7 +8,7 @@
 """
 
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -22,6 +22,7 @@ INCOME_GROUP = "💰 ДОХОДЫ"
 FALLBACK_CATEGORY = "🚧 РАЗНОЕ"
 FALLBACK_SUBCATEGORY = "неучтенка"
 MAX_AGE_DAYS = 400
+DOMINANT_SHARE = 0.8  # магазин с разными статьями решён, если в одной 80 % его строк
 MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")  # fmt: skip
 NBSP = chr(0xA0)
@@ -163,6 +164,11 @@ class SheetRow:
         return self.day.strftime("%d.%m.%Y")
 
 
+def row_name(row: SheetRow) -> str:
+    """Магазин или описание строки без служебного «AI: » и пометок «; ≈ …»."""
+    return row.comment.split(";")[0].removeprefix("AI: ").strip()
+
+
 @dataclass(frozen=True)
 class Skipped:
     """Операция, которую нельзя записать без участия человека."""
@@ -208,18 +214,30 @@ def _letters(text: str) -> str:
 # Комментарии, по которым не понять магазин: служебные строки бюджета
 _GENERIC = re.compile(
     r"^(без мерчанта|humo, тсп|выравнивание|перевод|конвертация|снятие|внесение|"
-    r"комиссия|остаток|наличные|←|→|ai$|\?\?)",
+    r"входящий|списание|комиссия|остаток|наличные|←|→|ai$|\?\?)",
+    re.IGNORECASE,
+)
+# Оплата через агрегатор без названия магазина: в SMS видно только Payme, Click, QR
+ANONYMOUS_PAYMENT = re.compile(
+    r"PAYME OPLATA|CLICK OPLATA|PAYME EDIN QR|PAYME QR\b.*|(?:AO|OOO) CLICK\b.*"
+    r"|.* to QRonlin.*",
     re.IGNORECASE,
 )
 
 
 def merchant_key(comment: str) -> str | None:
-    """«AI: Ip Ooo Anglesey Food (Сингапур); ≈ 3 USD» → «IP OOO ANGLESEY FOOD»."""
+    """«AI: Ip Ooo Anglesey Food (Сингапур); ≈ 3 USD» → «IP OOO ANGLESEY FOOD».
+
+    Хвост «>город» из SMS отбрасывается: YANDEX.GO>YUNUSOBOD — тот же YANDEX.GO.
+    Оплата через агрегатор (PAYME OPLATA, QR) — не магазин.
+    """
     text = re.sub(r"^(AI|SMS):\s*", "", (comment or "").strip(), flags=re.IGNORECASE)
     if not text or _GENERIC.match(text):
         return None
-    text = re.split(r"[;(,]| ≈ ", text, maxsplit=1)[0]
-    text = re.sub(r"\s+", " ", text).strip().upper()[:40]
+    text = re.split(r"[;(,>]| ≈ ", text, maxsplit=1)[0].strip()
+    if ANONYMOUS_PAYMENT.fullmatch(text):
+        return None
+    text = re.sub(r"\s+", " ", text).upper()[:40]
     return text if len(text) >= 3 and not text.isdigit() else None
 
 
@@ -245,8 +263,7 @@ class MerchantBook:
 
     def __init__(self, entries: Iterable[tuple[str, str, str]]) -> None:
         newest: dict[str, tuple[str, str]] = {}  # самая свежая строка магазина
-        decided: dict[str, tuple[str, str]] = {}  # самая свежая не «РАЗНОЕ»
-        choices: dict[str, set[tuple[str, str]]] = defaultdict(set)
+        counts: dict[str, Counter[tuple[str, str]]] = defaultdict(Counter)
         self.first: dict[str, set[tuple[str, str]]] = defaultdict(set)
         for category, subcategory, comment in reversed(list(entries)):
             key = merchant_key(comment)
@@ -260,14 +277,21 @@ class MerchantBook:
             for name in keys:
                 newest.setdefault(name, target)
                 if category != FALLBACK_CATEGORY:  # «РАЗНОЕ» — не решение владельца
-                    decided.setdefault(name, target)
-                    choices[name].add(target)
-        best = {name: decided.get(name, target) for name, target in newest.items()}
+                    counts[name][target] += 1
+        best: dict[str, tuple[str, str]] = {}
+        # Магазин с разными статьями решён, если в одну попало 80 % его строк;
+        # иначе (маркетплейс: продукты, химия, одежда) история его не решает
+        self.mixed: set[str] = set()
+        for name, target in newest.items():
+            if not counts[name]:
+                best[name] = target  # только «РАЗНОЕ»
+                continue
+            top, rows = counts[name].most_common(1)[0]
+            best[name] = top
+            if rows < DOMINANT_SHARE * counts[name].total():
+                self.mixed.add(name)
         self.exact = {k: v for k, v in best.items() if not k.startswith("core:")}
         self.core = {k[5:]: v for k, v in best.items() if k.startswith("core:")}
-        # Магазин, который владелец разносил по разным статьям (маркетплейс:
-        # продукты, химия, одежда), история не решает — смотрим, что куплено
-        self.mixed = {name for name, targets in choices.items() if len(targets) > 1}
 
     @classmethod
     def from_sheet(cls, rows: list[list[Any]]) -> "MerchantBook":

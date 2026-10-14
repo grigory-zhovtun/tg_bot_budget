@@ -3,6 +3,10 @@
 Сценарий: /fix → [какую операцию, если их несколько] → группа → подгруппа.
 Кнопки ссылаются на номера в списках справочника (callback_data ≤ 64 байт),
 перед записью строка сверяется с таблицей, как в /undo.
+
+Тот же диалог проверяет строки SMS с пометкой 🆕 или ❓: единственную — прямо в
+меню под сводкой («inline»), несколько — по очереди отдельным сообщением
+(«queue», кнопка «🔎 Проверить»). «✓ Верно» оставляет категорию как есть.
 """
 
 import asyncio
@@ -17,21 +21,38 @@ from telegram import (
     Message,
     Update,
 )
-from telegram.error import BadRequest
+from telegram.constants import KeyboardButtonStyle
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes
 
 from app.custom_icons import CustomIcons
-from app.domain import INCOME_GROUP, SheetRow, format_amount
+from app.domain import (
+    FALLBACK_CATEGORY,
+    INCOME_GROUP,
+    SheetRow,
+    format_amount,
+    row_name,
+)
 from app.errors import user_message
 from app.handlers.common import LAST_WRITE, premium_icons
 from app.handlers.receipts import mark_dirty
 from app.services.google_sheets import GoogleSheetsService
-from app.utils.keyboards import group_button, subcategory_button
+from app.sms_rows import NEW
+from app.utils.keyboards import (
+    LAST_UNDO,
+    action,
+    categories_menu,
+    category_prompt,
+    group_button,
+    subcategory_button,
+)
 
 logger = logging.getLogger(__name__)
 
-# user_data: {"write": снимок последней записи, "row": индекс строки, "category": группа}
+# user_data: {"write": снимок последней записи, "row": индекс строки, "category":
+# группа; у проверки ещё "mode", а в очереди — "queue", "done", "fixed", "total"}
 STATE = "fix_state"
+INLINE, QUEUE = "inline", "queue"
 CANCEL = InlineKeyboardButton("✖️ Отмена", callback_data="fix:x")
 STALE = "Кнопки устарели — наберите /fix ещё раз."
 
@@ -63,14 +84,20 @@ def _grid(
     return [buttons[i : i + per_row] for i in range(0, len(buttons), per_row)]
 
 
-def categories_keyboard(
-    categories: list[str], custom: CustomIcons | None = None
-) -> InlineKeyboardMarkup:
+def _groups(
+    categories: list[str], custom: CustomIcons | None
+) -> list[list[InlineKeyboardButton]]:
     buttons = [
         group_button(name, f"fix:c:{index}", custom)
         for index, name in enumerate(categories)
     ]
-    return InlineKeyboardMarkup([*_grid(buttons, 2), [CANCEL]])
+    return _grid(buttons, 2)
+
+
+def categories_keyboard(
+    categories: list[str], custom: CustomIcons | None = None
+) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([*_groups(categories, custom), [CANCEL]])
 
 
 def subcategories_keyboard(
@@ -84,6 +111,31 @@ def subcategories_keyboard(
     ]
     back = InlineKeyboardButton("⬅️ Назад", callback_data="fix:b")
     return InlineKeyboardMarkup([*_grid(buttons, 2), [back, CANCEL]])
+
+
+def check_keyboard(
+    categories: list[str], custom: CustomIcons | None, mode: str
+) -> InlineKeyboardMarkup:
+    """[✓ Верно], группы по две, внизу «↩️ Отменить запись» или «⏹ Хватит»."""
+    if mode == INLINE:
+        bottom = action("↩️ Отменить запись", LAST_UNDO, KeyboardButtonStyle.DANGER)
+    else:
+        bottom = InlineKeyboardButton("⏹ Хватит", callback_data="fix:x")
+    ok = action("✓ Верно", "fix:ok", KeyboardButtonStyle.SUCCESS)
+    return InlineKeyboardMarkup([[ok], *_groups(categories, custom), [bottom]])
+
+
+def check_text(last: dict, index: int, prefix: str = "") -> str:
+    """«🆕 OOO SHAVI CAFE • 48 000 UZS • VISA 9120 UZS» и что с категорией."""
+    row: SheetRow = last["rows"][index]
+    flag = last["checks"].get(index, "")
+    guessed = row.category != FALLBACK_CATEGORY
+    lead = "ИИ предлагает" if flag == NEW and guessed else "Записал как"
+    question = "Верно?" if guessed else "Что это?"
+    return (
+        f"{prefix}{flag} {row_name(row)} • {format_amount(row)} • {row.source}\n"
+        f"{lead}: {row.category} / {row.subcategory}. {question}"
+    )
 
 
 def rows_keyboard(rows: list[SheetRow]) -> InlineKeyboardMarkup:
@@ -122,6 +174,63 @@ async def _edit(
             raise
 
 
+def _menu(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
+    """Обычное меню групп под сводкой с кнопками последней записи."""
+    last = context.user_data.get(LAST_WRITE)
+    return categories_menu(
+        context.bot_data.get("categories", []),
+        last is not None,
+        premium_icons(context),
+        check=len(last.get("checks", {})) if last else 0,
+    )
+
+
+def inline_check(
+    context: ContextTypes.DEFAULT_TYPE,
+) -> tuple[str, InlineKeyboardMarkup]:
+    """Проверка единственной строки записи: текст и кнопки меню под сводкой."""
+    last = context.user_data[LAST_WRITE]
+    index = min(last["checks"])
+    context.user_data[STATE] = {"write": _snapshot(last), "row": index, "mode": INLINE}
+    categories = context.bot_data.get("categories", [])
+    return check_text(last, index), check_keyboard(
+        categories, premium_icons(context), INLINE
+    )
+
+
+def _queue_prompt(
+    context: ContextTypes.DEFAULT_TYPE, state: dict, last: dict
+) -> tuple[str, InlineKeyboardMarkup]:
+    prefix = f"🔎 {state['done'] + 1} из {state['total']}. "
+    categories = context.bot_data.get("categories", [])
+    return check_text(last, state["row"], prefix), check_keyboard(
+        categories, premium_icons(context), QUEUE
+    )
+
+
+async def start_check(
+    reply: Callable[..., Awaitable[Message]], context: ContextTypes.DEFAULT_TYPE
+) -> Message:
+    """«🔎 Проверить»: строки с пометкой по одной, новым сообщением."""
+    last = context.user_data.get(LAST_WRITE)
+    pending = sorted(last.get("checks", {})) if last else []
+    if not pending:
+        context.user_data.pop(STATE, None)
+        return await reply("Проверять нечего: все строки этой записи уже проверены.")
+    state = {
+        "write": _snapshot(last),
+        "row": pending[0],
+        "mode": QUEUE,
+        "queue": pending,
+        "done": 0,
+        "fixed": 0,
+        "total": len(pending),
+    }
+    context.user_data[STATE] = state
+    text, markup = _queue_prompt(context, state, last)
+    return await reply(text, reply_markup=markup)
+
+
 async def start_fix(
     reply: Callable[..., Awaitable[Message]], context: ContextTypes.DEFAULT_TYPE
 ) -> Message:
@@ -153,14 +262,95 @@ async def fix_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await start_fix(update.message.reply_text, context)
 
 
+async def _inline_done(
+    query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, text: str
+) -> None:
+    """Проверка в меню закончилась: под текстом снова обычное меню групп."""
+    context.user_data.pop(STATE, None)
+    source = context.user_data.get("source") or context.bot_data.get("last_source")
+    prompt = category_prompt(source) if source else "Категория:"
+    await _edit(query, f"{text}\n{prompt}", _menu(context))
+
+
+async def _refresh_menu(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """После проверки по очереди кнопка «🔎 Проверить» в меню под сводкой обновляется."""
+    last = context.user_data.get(LAST_WRITE)
+    if not last or not last.get("menu"):
+        return
+    chat_id, message_id = last["menu"]
+    try:
+        await context.bot.edit_message_reply_markup(
+            chat_id=chat_id, message_id=message_id, reply_markup=_menu(context)
+        )
+    except TelegramError as error:  # меню уже удалено или не изменилось
+        logger.debug("Menu after the check was not updated: %s", error)
+
+
+async def _checked(
+    query: CallbackQuery,
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict,
+    last: dict,
+    verdict: str,
+    fixed: bool,
+) -> None:
+    """Строка проверена: в меню — снова группы, в очереди — следующая строка."""
+    last.get("checks", {}).pop(state["row"], None)
+    if state["mode"] == INLINE:
+        await _inline_done(query, context, verdict)
+        return
+    state["done"] += 1
+    state["fixed"] += int(fixed)
+    state["queue"] = [i for i in state["queue"] if i in last.get("checks", {})]
+    state.pop("category", None)
+    if state["queue"]:
+        state["row"] = state["queue"][0]
+        state["write"] = _snapshot(last)  # строки могли поменяться — новый снимок
+        text, markup = _queue_prompt(context, state, last)
+        await _edit(query, f"{verdict}\n\n{text}", markup)
+        return
+    context.user_data.pop(STATE, None)
+    summary = f"✅ Проверено {state['done']}, исправлено {state['fixed']}."
+    await _edit(query, f"{verdict}\n{summary}")
+    await _refresh_menu(context)
+
+
+async def _stop(
+    query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, state: dict, text: str
+) -> None:
+    """Исправить не вышло: в меню — текст и снова группы, иначе — только текст."""
+    if state.get("mode") == INLINE:
+        await _inline_done(query, context, text)
+        return
+    context.user_data.pop(STATE, None)
+    await _edit(query, text)
+
+
+async def _cancel(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """«✖️ Отмена» и «⏹ Хватит»: в меню — снова группы, в очереди — итог."""
+    state = context.user_data.get(STATE) or {}
+    last = context.user_data.get(LAST_WRITE)
+    current = bool(last) and state.get("write") == _snapshot(last)
+    if current and state.get("mode") == INLINE:
+        await _inline_done(query, context, "Категорию оставил как есть.")
+        return
+    context.user_data.pop(STATE, None)
+    if current and state.get("mode") == QUEUE:
+        done, total = state["done"], state["total"]
+        await _edit(query, f"Проверку остановил: проверено {done} из {total}.")
+        await _refresh_menu(context)
+        return
+    await _edit(query, "Исправление отменено.")
+
+
 async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Кнопки /fix: fix:r:<i> — операция, fix:c:<i> — группа, fix:s:<i> — подгруппа."""
+    """Кнопки /fix и проверки: fix:r:<i> — операция, fix:c:<i> — группа,
+    fix:s:<i> — подгруппа, fix:ok — «✓ Верно», fix:b — назад, fix:x — отмена."""
     query = update.callback_query
-    _, action, *rest = (query.data or "").split(":")
+    _, step, *rest = (query.data or "").split(":")
     await query.answer()
-    if action == "x":
-        context.user_data.pop(STATE, None)
-        await _edit(query, "Исправление отменено.")
+    if step == "x":
+        await _cancel(query, context)
         return
     last = context.user_data.get(LAST_WRITE)
     state = context.user_data.get(STATE)
@@ -172,7 +362,7 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     categories: list[str] = context.bot_data.get("categories", [])
     subcategories: dict[str, list[str]] = context.bot_data.get("subcategories", {})
 
-    if action == "r":
+    if step == "r":
         index = _index(rest, rows)
         if index is None:
             await _edit(query, STALE)
@@ -188,15 +378,32 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await _edit(query, STALE)
         return
     row = rows[state["row"]]
-    if action == "b":
-        state.pop("category", None)
-        await _edit(
-            query,
-            f"✏️ {describe(row)}\nВыберите группу:",
-            categories_keyboard(categories, premium_icons(context)),
+    if step == "ok":
+        if "mode" not in state:
+            await _edit(query, STALE)
+            return
+        await _checked(
+            query, context, state, last, f"👍 Оставил: {describe(row)}", False
         )
         return
-    if action == "c":
+    if step == "b":
+        state.pop("category", None)
+        if state.get("mode") == INLINE:
+            await _edit(
+                query,
+                check_text(last, state["row"]),
+                check_keyboard(categories, premium_icons(context), INLINE),
+            )
+        elif state.get("mode") == QUEUE:
+            await _edit(query, *_queue_prompt(context, state, last))
+        else:
+            await _edit(
+                query,
+                f"✏️ {describe(row)}\nВыберите группу:",
+                categories_keyboard(categories, premium_icons(context)),
+            )
+        return
+    if step == "c":
         index = _index(rest, categories)
         if index is None:
             await _edit(query, STALE)
@@ -212,7 +419,7 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             ),
         )
         return
-    if action != "s" or "category" not in state:
+    if step != "s" or "category" not in state:
         await _edit(query, STALE)
         return
 
@@ -225,9 +432,10 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     number = last["first"] + state["row"]
     amount = amount_for(row, category)
     if amount is None:
-        context.user_data.pop(STATE, None)
-        await _edit(
+        await _stop(
             query,
+            context,
+            state,
             "Это списание — в доходы его не перенести. Если на самом деле это "
             f"поступление, поправьте строку {number} в таблице или удалите "
             "запись: /undo",
@@ -240,12 +448,19 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
     except Exception as error:
         logger.exception("Recategorization failed")
-        await _edit(query, f"❌ Не исправил: {user_message(error)}. /fix — ещё раз")
+        await _stop(
+            query,
+            context,
+            state,
+            f"❌ Не исправил: {user_message(error)}. /fix — ещё раз",
+        )
         return
-    context.user_data.pop(STATE, None)
     if not changed:
-        await _edit(
-            query, f"Строка {number} уже изменена в таблице — поправьте её там."
+        await _stop(
+            query,
+            context,
+            state,
+            f"Строка {number} уже изменена в таблице — поправьте её там.",
         )
         return
     fixed = dataclasses.replace(
@@ -256,4 +471,10 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         ai_service.forget_history()  # магазин сразу пойдёт в исправленную категорию
     mark_dirty(context.bot_data)  # доход стал тратой или наоборот — сверка списка
     logger.info("Row %s recategorized", number)
-    await _edit(query, f"✅ Исправил (строка {number}): {describe(fixed)}")
+    verdict = f"✅ Исправил (строка {number}): {describe(fixed)}"
+    if "mode" in state:
+        await _checked(query, context, state, last, verdict, True)
+        return
+    last.get("checks", {}).pop(state["row"], None)  # исправленная строка проверена
+    context.user_data.pop(STATE, None)
+    await _edit(query, verdict)

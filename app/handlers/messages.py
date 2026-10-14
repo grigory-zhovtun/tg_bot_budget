@@ -1,7 +1,5 @@
 import asyncio
-import hashlib
 import logging
-import re
 import tempfile
 import time
 from collections.abc import AsyncIterator, Sequence
@@ -27,15 +25,19 @@ from app.domain import (
     format_amount,
     local_today,
     manual_row,
+    row_name,
 )
 from app.errors import user_message
-from app.handlers import balances, icons, live, statement_import
+from app.handlers import balances, fix, icons, live, statement_import
+from app.handlers import sms as sms_chat
 from app.handlers.common import (
     CHOOSE_SOURCE,
     LAST_WRITE,
     SEEN_INPUTS,
     clear_tracked_messages,
+    input_fingerprint,
     premium_icons,
+    seen_input,
     show_main_menu,
     sources_keyboard,
     track_message,
@@ -52,9 +54,7 @@ from app.utils.keyboards import (
 
 logger = logging.getLogger(__name__)
 
-SEEN_LIMIT = 200  # сколько последних SMS/файлов помнить
-SEEN_TTL = 7 * 24 * 3600
-MIN_SMS_LENGTH = 20  # короче — это ручной ввод вроде «48000 латте», повтор законен
+SEEN_LIMIT = 1000  # сколько последних SMS/файлов помнить: в одной вставке до 50 SMS
 
 
 @asynccontextmanager
@@ -85,30 +85,6 @@ def _catalog(context: ContextTypes.DEFAULT_TYPE) -> Catalog:
         subcategories=context.bot_data.get("subcategories", {}),
         sources=context.bot_data.get("sources", []),
     )
-
-
-def input_fingerprint(
-    text: str | None, file_unique_id: str | None = None
-) -> str | None:
-    """Отпечаток SMS или файла: тот же текст или тот же файл Telegram — тот же ключ."""
-    if file_unique_id:
-        return f"file:{file_unique_id}"
-    normalized = re.sub(r"\s+", " ", text or "").strip().lower()
-    if len(normalized) < MIN_SMS_LENGTH:
-        return None
-    return "text:" + hashlib.sha256(normalized.encode()).hexdigest()[:16]
-
-
-def seen_input(
-    context: ContextTypes.DEFAULT_TYPE, fingerprint: str | None
-) -> dict | None:
-    """Запись о том, что этот вход уже записан в таблицу (не старше недели)."""
-    if fingerprint is None:
-        return None
-    entry = context.user_data.get(SEEN_INPUTS, {}).get(fingerprint)
-    if entry and time.time() - entry["at"] < SEEN_TTL:
-        return entry
-    return None
 
 
 def _remember(
@@ -221,19 +197,29 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await save_rows(context, update.effective_chat, [row], [])
             return
 
-    # 4. AI Parsing (Fallthrough)
-    ai_service = context.bot_data.get("ai_service")
-    if not ai_service or not config.GEMINI_API_KEY:
-        await update.message.reply_text(
-            "AI сервис не настроен. Пожалуйста, используйте кнопки для ручного ввода."
-        )
-        return
-
+    # 4. Уже записанные SMS или скрин второй раз не пишем
     fingerprint = input_fingerprint(
         msg_text, update.message.photo[-1].file_unique_id if is_photo else None
     )
     if entry := seen_input(context, fingerprint):
         await _report_duplicate(update, context, entry)
+        return
+
+    # 5. SMS знакомых видов — правилами; ИИ только подсказывает новые магазины
+    if not is_photo:
+        prepared = await sms_chat.prepare(
+            context, update.effective_chat.id, update.message, msg_text
+        )
+        if prepared is not None:
+            await _save_sms(update, context, prepared, fingerprint)
+            return
+
+    # 6. AI Parsing (Fallthrough)
+    ai_service = context.bot_data.get("ai_service")
+    if not ai_service or not config.GEMINI_API_KEY:
+        await update.message.reply_text(
+            "AI сервис не настроен. Пожалуйста, используйте кнопки для ручного ввода."
+        )
         return
 
     # Photo: Telegram always sends JPEG; read it into memory and drop the file
@@ -288,6 +274,33 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("AI parsing failed")
         await live.react(message, ReactionEmoji.THINKING_FACE)
         await update.effective_chat.send_message(f"Ошибка AI: {user_message(e)}")
+
+
+async def _save_sms(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    prepared: sms_chat.PreparedSms,
+    fingerprint: str | None,
+) -> None:
+    """Запись сообщения из SMS: сводка с пометками и реакция на сообщение."""
+    result = await save_rows(
+        context,
+        update.effective_chat,
+        prepared.rows,
+        prepared.skipped,
+        fingerprint,
+        flags=prepared.flags,
+        prints=prepared.prints,
+        notes=prepared.notes,
+    )
+    ai_service = context.bot_data.get("ai_service")
+    if result.written and any(prepared.flags) and ai_service is not None:
+        ai_service.forget_history()  # новые магазины и суммы — в историю сразу
+    done = result.written or prepared.quiet
+    await live.react(
+        update.message,
+        ReactionEmoji.THUMBS_UP if done else ReactionEmoji.THINKING_FACE,
+    )
 
 
 async def _to_rows(
@@ -373,11 +386,17 @@ async def save_rows(
     rows: Sequence[SheetRow],
     skipped: Sequence[Skipped],
     fingerprint: str | None = None,
+    *,
+    flags: Sequence[str | None] = (),
+    prints: Sequence[str | None] = (),
+    notes: Sequence[str] = (),
 ) -> SaveResult:
     """Записать строки в fact, обновить остатки, показать сводку в chat.
 
     Общая для чата и Mini App: под сводкой — «✏️ Исправить запись» и «↩️ Отменить
     запись», последняя запись и отпечаток входа — в user_data (для /undo и повторов).
+    Для SMS: flags — пометка каждой строки (🆕, ❓ или None), prints — отпечаток SMS
+    каждой строки (повтор этой SMS не запишется), notes — строки «⏭» в конце сводки.
     """
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
     lines: list[str] = []
@@ -398,10 +417,16 @@ async def save_rows(
                 "last": last,
                 "rows": list(rows),
                 "fingerprint": fingerprint,
+                "prints": [p for p in prints if p],
+                # строки с пометкой, которые ещё не проверены: номер → 🆕 или ❓
+                "checks": {i: flag for i, flag in enumerate(flags) if flag},
             }
             mark_dirty(context.bot_data)  # «Пришло к утру» сверит задача receipts
             if fingerprint:
                 _remember(context, fingerprint, first, last)
+            for offset, sms_print in enumerate(prints):
+                if sms_print:
+                    _remember(context, sms_print, first + offset, first + offset)
 
     updated: list[str] = []
     balances = {row.source: row.balance for row in rows if row.balance is not None}
@@ -414,9 +439,11 @@ async def save_rows(
         except Exception:
             logger.exception("Updating card balances failed")
 
-    for row in rows:
+    for index, row in enumerate(rows):
         sub = with_icon(row.subcategory, context.bot_data.get("icons"))
         line = f"✅ {format_amount(row)} • {row.category} ({sub}) • {row.source}"
+        if index < len(flags) and flags[index]:
+            line += f" • {flags[index]} {row_name(row)}"
         if row.balance is not None and row.source in updated:
             line += f" | 💳 {row.balance:,.0f}".replace(",", " ")
         lines.append(line)
@@ -438,6 +465,7 @@ async def save_rows(
 
     lines += await _plan_feedback(context, rows)
     lines += [f"⚠️ Не записал: {s.comment} — {s.reason}" for s in skipped]
+    lines += notes
     if not lines:
         lines.append("Не удалось распознать транзакции.")
 
@@ -445,8 +473,21 @@ async def save_rows(
     context.user_data.pop("category", None)
     context.user_data.pop("subcategory", None)
     await clear_tracked_messages(context, chat.id)
-    # после записи под сводкой — «✏️ Исправить запись» и «↩️ Отменить запись»
-    await show_main_menu(chat, context, "\n".join(lines), actions=bool(rows))
+    # после записи под сводкой — «✏️ Исправить запись» и «↩️ Отменить запись»,
+    # а если есть строки с пометкой — «🔎 Проверить»
+    checks = context.user_data[LAST_WRITE]["checks"] if rows else {}
+    # единственную строку с пометкой проверяем прямо в меню под сводкой
+    check_now = fix.inline_check(context) if len(rows) == 1 and checks else None
+    menu = await show_main_menu(
+        chat,
+        context,
+        "\n".join(lines),
+        actions=bool(rows),
+        check=len(checks),
+        menu=check_now,
+    )
+    if rows and menu is not None:
+        context.user_data[LAST_WRITE]["menu"] = (chat.id, menu.message_id)
     return SaveResult(len(rows), first, last, tuple(lines))
 
 

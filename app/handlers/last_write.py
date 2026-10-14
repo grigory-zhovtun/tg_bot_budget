@@ -1,7 +1,8 @@
-"""Кнопки под сводкой записи: «✏️ Исправить запись» и «↩️ Отменить запись».
+"""Кнопки под сводкой записи: «✏️ Исправить», «↩️ Отменить» и «🔎 Проверить».
 
 Кнопки стоят в сообщении с группами сразу под сводкой (клавиатура карт живёт на
 самой сводке). «Исправить» открывает тот же диалог, что /fix, отдельным
+сообщением; «Проверить» — строки SMS с пометкой по одной, тоже отдельным
 сообщением; «Отменить» сначала спрашивает в этом же сообщении — промахнуться по
 кнопке легче, чем набрать /undo.
 """
@@ -15,6 +16,7 @@ from app.handlers import fix
 from app.handlers.common import LAST_WRITE, premium_icons, track_message
 from app.handlers.undo import undo_last
 from app.utils.keyboards import (
+    LAST_CHECK,
     LAST_FIX,
     LAST_UNDO,
     LAST_UNDO_NO,
@@ -50,6 +52,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # диалог — новым сообщением, меню категорий под сводкой остаётся
         track_message(context, await fix.start_fix(query.message.reply_text, context))
         return
+    if query.data == LAST_CHECK:
+        track_message(context, await fix.start_check(query.message.reply_text, context))
+        return
 
     last = context.user_data.get(LAST_WRITE)
     if not last:
@@ -72,8 +77,9 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             f"↩️ Удалить {describe_write(last, icons)}?", reply_markup=confirm
         )
     elif query.data == LAST_UNDO_NO:
+        pending = len(last.get("checks", {}))
         await query.edit_message_text(
-            prompt, reply_markup=categories_menu(categories, True, custom)
+            prompt, reply_markup=categories_menu(categories, True, custom, pending)
         )
     elif query.data == LAST_UNDO_YES:
         result = await undo_last(context)

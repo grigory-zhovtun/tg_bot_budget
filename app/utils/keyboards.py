@@ -18,7 +18,7 @@ from app.custom_icons import CustomIcons, leading_emoji
 BACK = "⬅️ Назад"
 APP_BUTTON = "📱 Приложение"
 # Кнопки под сводкой записи (обработчик app/handlers/last_write.py)
-LAST_FIX, LAST_UNDO = "last:fix", "last:undo"
+LAST_FIX, LAST_UNDO, LAST_CHECK = "last:fix", "last:undo", "last:check"
 LAST_UNDO_YES, LAST_UNDO_NO = "last:undo:yes", "last:undo:no"
 
 
@@ -98,8 +98,13 @@ def categories_menu(
     categories: list[str],
     with_actions: bool = False,
     custom: CustomIcons | None = None,
+    check: int = 0,
 ) -> InlineKeyboardMarkup:
-    """Группы; сразу после записи сверху — «Исправить» и «Отменить» для неё."""
+    """Группы; сразу после записи сверху — «Исправить» и «Отменить» для неё.
+
+    check — сколько строк записи с пометкой 🆕/❓ ещё не проверено: над действиями
+    тогда стоит «🔎 Проверить (N)».
+    """
     rows = [
         list(row)
         for row in generate_categories_keyboard(categories, custom).inline_keyboard
@@ -112,6 +117,9 @@ def categories_menu(
                 action("↩️ Отменить запись", LAST_UNDO, KeyboardButtonStyle.DANGER),
             ],
         )
+        if check:
+            label = f"🔎 Проверить ({check})"
+            rows.insert(0, [action(label, LAST_CHECK, KeyboardButtonStyle.PRIMARY)])
     return InlineKeyboardMarkup(rows)
 
 
