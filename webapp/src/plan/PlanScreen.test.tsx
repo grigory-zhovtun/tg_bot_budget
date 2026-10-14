@@ -571,4 +571,24 @@ describe("PlanScreen", () => {
       within(food).queryByRole("button", { name: "ресторан, новая" }),
     ).toBeNull();
   });
+
+  it("shows what came in for the rows of the list", async () => {
+    const plan = vi.fn<Api["plan"]>().mockResolvedValue({
+      ...planFixture,
+      events: (planFixture.events ?? []).map((item) => {
+        if (item.slot === 0) {
+          return {
+            ...item,
+            status: "done" as const,
+            received: 5_000_000,
+            received_on: "2026-10-15",
+          };
+        }
+        return item.slot === 2 ? { ...item, status: "waiting" as const } : item;
+      }),
+    });
+    render(<Harness api={fakeApi({ plan })} />);
+    expect(await screen.findByText("✓ пришло 5,00 млн · 15.10")).toBeTruthy();
+    expect(screen.getByText("⏳ ждём с 18.10")).toBeTruthy();
+  });
 });

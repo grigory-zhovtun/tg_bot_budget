@@ -181,6 +181,7 @@ function Content({ data }: { data: Dashboard }) {
                 className="flex justify-between gap-2"
               >
                 <span>
+                  {item.day < Number(data.today.slice(8, 10)) ? "⏳ " : ""}
                   {String(item.day).padStart(2, "0")} — {item.name}
                 </span>
                 <span className={item.amount > 0 ? "text-ok" : ""}>

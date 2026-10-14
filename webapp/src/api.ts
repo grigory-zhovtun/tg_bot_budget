@@ -140,6 +140,9 @@ export interface PlanEvent {
   day: number | null;
   amount: number | null; // со знаком: «+» поступление, «−» платёж
   currency: string | null;
+  received?: number | null; // пришло по строке: в её валюте и со знаком
+  received_on?: string | null; // «YYYY-MM-DD» последней операции
+  status?: "done" | "partial" | "waiting" | "future";
 }
 
 export interface PlanGoal {
