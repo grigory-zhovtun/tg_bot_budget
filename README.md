@@ -211,9 +211,10 @@ Every day at 00:05 (`ANALYTICS_TIMEZONE`) and right after start the bot checks t
 ```bash
 pip install -r requirements-dev.txt
 ruff check . && black --check . && pytest -q
+cd webapp && npm ci && npm run lint && npm test && npm run build
 ```
 
-CI runs the same checks on every push and pull request.
+CI runs the same checks — the bot and the Mini App, as two jobs — on every push and pull request.
 
 ## Contributing
 
