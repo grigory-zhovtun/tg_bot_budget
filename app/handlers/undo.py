@@ -43,9 +43,10 @@ async def undo_last(context: ContextTypes.DEFAULT_TYPE) -> str:
     if not deleted:
         return f"В таблице {span} уже изменились — удалите их вручную, если нужно."
     mark_dirty(context.bot_data)
-    if fingerprint := last.get("fingerprint"):
-        # то же SMS после отмены можно прислать снова
-        context.user_data.get(SEEN_INPUTS, {}).pop(fingerprint, None)
+    seen = context.user_data.get(SEEN_INPUTS, {})
+    for fingerprint in [last.get("fingerprint"), *last.get("prints", [])]:
+        if fingerprint:  # те же SMS после отмены можно прислать снова
+            seen.pop(fingerprint, None)
     logger.info("Undo: deleted %s", span)
     return f"↩️ Удалил из таблицы: {span}."
 

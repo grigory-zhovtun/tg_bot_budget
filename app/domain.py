@@ -164,6 +164,11 @@ class SheetRow:
         return self.day.strftime("%d.%m.%Y")
 
 
+def row_name(row: SheetRow) -> str:
+    """Магазин или описание строки без служебного «AI: » и пометок «; ≈ …»."""
+    return row.comment.split(";")[0].removeprefix("AI: ").strip()
+
+
 @dataclass(frozen=True)
 class Skipped:
     """Операция, которую нельзя записать без участия человека."""
