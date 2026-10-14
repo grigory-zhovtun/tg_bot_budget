@@ -109,9 +109,7 @@ def build_dashboard(
     budget = day_budget(frame, rows, today, rates, frozen_currency)
     if forecast is None or budget is None:
         return Dashboard("no_forecast", None, groups, (), (), ())
-    upcoming = tuple(
-        sorted((i for i in forecast.items if i.day >= today.day), key=lambda i: i.day)
-    )
+    upcoming = budget.ahead
     return Dashboard(
         "ok",
         budget,

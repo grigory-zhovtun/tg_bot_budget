@@ -13,7 +13,8 @@
 """
 
 import calendar
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Any
 
@@ -27,13 +28,13 @@ from app.services.analytics_service import (
     money,
     plan_lines,
 )
+from app.services.receipts import NOTHING, Receipt, match_receipts, remaining
 from app.services.runway import Runway, uzs_runway
 
 COLUMN_O = 14  # блок прогноза: O название, P день, Q сумма, R валюта, S в сумах
 LIST_HEADER = "Поступления"  # «Поступления (+) и крупные платежи (−)»
 TABLE_HEADER = "Дата"  # таблица по дням под списком
 GOAL_LABEL = "Отложить за месяц"
-PAYMENT_MATCH = 0.01  # трата дня совпала с платежом из списка с точностью до 1 %
 WEEKDAYS = ("понедельник", "вторник", "среда", "четверг", "пятница", "суббота",
             "воскресенье")  # fmt: skip
 MONTHS_PREPOSITIONAL = ("январе", "феврале", "марте", "апреле", "мае", "июне", "июле",
@@ -52,6 +53,7 @@ class ForecastItem:
     amount: float  # в валюте пункта
     currency: str
     uzs: float
+    row: int = 0  # строка вкладки; 0 — пункт не из вкладки
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,7 @@ class DayBudget:
     over_plan: tuple[PlanLine, ...]
     runway: Runway | None = None  # прогноз по сумам: когда кончатся, сколько обменять
     history: tuple[DaySpend, ...] = ()  # с 1-го числа по сегодняшний день
+    ahead: tuple[ForecastItem, ...] = ()  # не пришедшие строки списка: что впереди
 
 
 def _number(value: Any) -> float | None:
@@ -117,8 +120,8 @@ def read_forecast(rows: list[list[Any]]) -> Forecast | None:
         return None
     items: list[ForecastItem] = []
     goal = 0.0
-    for row in rows[start + 1 :]:
-        name, day, amount, currency, uzs = _block(row)
+    for index in range(start + 1, len(rows)):
+        name, day, amount, currency, uzs = _block(rows[index])
         if name == TABLE_HEADER:
             break
         if GOAL_LABEL in str(name):
@@ -134,7 +137,9 @@ def read_forecast(rows: list[list[Any]]) -> Forecast | None:
             and uzs is not None
         ):
             code = str(currency).strip().upper() or "UZS"
-            items.append(ForecastItem(name.strip(), int(day), amount, code, uzs))
+            items.append(
+                ForecastItem(name.strip(), int(day), amount, code, uzs, index + 1)
+            )
     return Forecast(tuple(items), goal)
 
 
@@ -172,18 +177,23 @@ def _balance(frame: pd.DataFrame, through: date, column: str = "amount_uzs") -> 
     return float(flow[frame["day"] <= through].sum())
 
 
-def _spent_on(frame: pd.DataFrame, day: date, items: tuple[ForecastItem, ...]) -> float:
+def _spent_on(frame: pd.DataFrame, day: date, paid: frozenset[int]) -> float:
     """Траты дня без платежей из списка: квартплата не съедает лимит своего дня."""
     spent = expenses(frame)
-    amounts = list(spent.loc[spent["day"] == day, "amount_uzs"])
+    spent = spent[(spent["day"] == day) & ~spent.index.isin(list(paid))]
+    return float(spent["amount_uzs"].sum())
+
+
+def _ahead(
+    items: tuple[ForecastItem, ...], receipts: Mapping[int, Receipt]
+) -> tuple[ForecastItem, ...]:
+    """Не закрытые строки списка: сумма — что ещё впереди, по дню."""
+    left = []
     for item in items:
-        due = -item.uzs
-        if due <= 0:
-            continue
-        match = next((a for a in amounts if abs(a - due) <= PAYMENT_MATCH * due), None)
-        if match is not None:
-            amounts.remove(match)
-    return float(sum(amounts))
+        rest = remaining(item, receipts.get(item.row, NOTHING))
+        if rest:
+            left.append(replace(item, amount=rest, uzs=item.uzs * rest / item.amount))
+    return tuple(sorted(left, key=lambda item: item.day))
 
 
 def day_budget(
@@ -193,7 +203,11 @@ def day_budget(
     rates: Rates,
     frozen_currency: str | None,
 ) -> DayBudget | None:
-    """Лимит на сегодня по листу fact и вкладке месяца; None — во вкладке нет списка."""
+    """Лимит на сегодня по листу fact и вкладке месяца; None — во вкладке нет списка.
+
+    Строки списка — по сверке с fact (services.receipts): к утру дня — для лимита,
+    заморозки и прогноза по сумам; на сейчас — для «Впереди» и трат дня.
+    """
     forecast = read_forecast(rows)
     if forecast is None:
         return None
@@ -209,8 +223,13 @@ def day_budget(
     plan_end = opening + sum(item.uzs for item in items) - per_day * days
     target = max(plan_end, opening + forecast.savings_goal)
 
+    def ahead_on(day: date) -> tuple[ForecastItem, ...]:
+        """Строки списка, не пришедшие к утру дня day."""
+        receipts = match_receipts(frame, items, first, day - timedelta(days=1))
+        return _ahead(items, receipts)
+
     def limit_on(day: date) -> float:
-        ahead = sum(item.uzs for item in items if item.day >= day.day)
+        ahead = sum(item.uzs for item in ahead_on(day))
         left = _balance(frame, day - timedelta(days=1)) + ahead - target
         return left / (days - day.day + 1)
 
@@ -220,24 +239,25 @@ def day_budget(
         + sum(item.uzs for item in items if item.day <= passed)
         - per_day * passed
     )
+    morning = ahead_on(today)
+    now = match_receipts(frame, items, first, today)
+    paid = frozenset(index for receipt in now.values() for index in receipt.operations)
 
     frozen, change, frozen_uzs = None, 0.0, 0.0
     rate = rates.to_uzs.get(frozen_currency) if frozen_currency else None
     if rate:
         own = frame[frame["currency"] == frozen_currency]
 
-        def reserved(from_day: int) -> float:
+        def reserved(lines: tuple[ForecastItem, ...]) -> float:
             """Платежи в валюте заморозки, которые ещё впереди: они не отложены."""
             return -sum(
                 item.amount
-                for item in items
-                if item.currency == frozen_currency
-                and item.amount < 0
-                and item.day >= from_day
+                for item in lines
+                if item.currency == frozen_currency and item.amount < 0
             )
 
-        frozen = _balance(own, yesterday, "amount") - reserved(today.day)
-        start = _balance(own, first - timedelta(days=1), "amount") - reserved(1)
+        frozen = _balance(own, yesterday, "amount") - reserved(morning)
+        start = _balance(own, first - timedelta(days=1), "amount") - reserved(items)
         change, frozen_uzs = frozen - start, frozen * rate
 
     over = sorted(
@@ -245,6 +265,7 @@ def day_budget(
         key=lambda line: line.fact - line.plan,
         reverse=True,
     )
+    left_now = _ahead(items, now)
     return DayBudget(
         today=today,
         limit=limit_on(today),
@@ -252,24 +273,28 @@ def day_budget(
         days_left=days - today.day + 1,
         balance=_balance(frame, yesterday),
         planned_balance=planned,
-        yesterday_spent=_spent_on(frame, yesterday, items),
+        yesterday_spent=_spent_on(frame, yesterday, paid),
         yesterday_limit=limit_on(yesterday) if passed else None,
-        spent_today=_spent_on(frame, today, items),
+        spent_today=_spent_on(frame, today, paid),
         growth=plan_end - opening,
         goal=forecast.savings_goal,
         frozen=frozen,
         frozen_change=change,
         frozen_uzs=frozen_uzs,
         frozen_currency=frozen_currency,
-        upcoming=tuple(
-            sorted((i for i in items if i.day >= today.day), key=lambda i: i.day)[:2]
-        ),
+        upcoming=left_now[:2],
         over_plan=tuple(over[:3]),
-        runway=uzs_runway(frame, items, today, rates),
+        runway=uzs_runway(
+            frame,
+            [replace(item, day=max(item.day, today.day)) for item in morning],
+            today,
+            rates,
+        ),
         history=tuple(
-            DaySpend(day, _spent_on(frame, day, items), limit_on(day))
+            DaySpend(day, _spent_on(frame, day, paid), limit_on(day))
             for day in (first + timedelta(days=k) for k in range(today.day))
         ),
+        ahead=left_now,
     )
 
 
@@ -298,6 +323,12 @@ def _item_amount(item: ForecastItem) -> str:
     if item.currency == "UZS":
         return f"{sign}{short(abs(item.uzs))}"
     return f"{sign}{money(abs(item.amount))} {item.currency}"
+
+
+def _ahead_text(item: ForecastItem, today: date) -> str:
+    """«15.10 Аванс +2,00 млн»; опоздавшая строка — «⏳ 30.10 ЗП +10,00 млн»."""
+    late = "⏳ " if item.day < today.day else ""
+    return f"{late}{item.day:02d}.{today.month:02d} {item.name} {_item_amount(item)}"
 
 
 def runway_line(runway: Runway, today: date) -> str:
@@ -389,10 +420,7 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
     if b.upcoming:
         lines.append(
             "📅 Впереди: "
-            + " • ".join(
-                f"{item.day:02d}.{b.today.month:02d} {item.name} {_item_amount(item)}"
-                for item in b.upcoming
-            )
+            + " • ".join(_ahead_text(item, b.today) for item in b.upcoming)
         )
     return "\n".join(lines)
 

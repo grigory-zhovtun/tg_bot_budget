@@ -85,9 +85,9 @@ def budget(today: date, *rows: list[Any], **options: Any):
 def test_forecast_list_and_goal_are_read_from_the_block() -> None:
     forecast = read_forecast(tab(goal=3_000_000))
     assert forecast.items == (
-        ForecastItem("Аванс", 15, 2_000_000, "UZS", 2_000_000),
-        ForecastItem("ЗП", 30, 10_000_000, "UZS", 10_000_000),
-        ForecastItem("Квартплата", 18, -650, "USD", -7_800_000),
+        ForecastItem("Аванс", 15, 2_000_000, "UZS", 2_000_000, 12),
+        ForecastItem("ЗП", 30, 10_000_000, "UZS", 10_000_000, 13),
+        ForecastItem("Квартплата", 18, -650, "USD", -7_800_000, 14),
     )
     assert forecast.savings_goal == 3_000_000  # таблица по дням ниже — не пункты
     assert read_forecast([["Статья"], ["Расходы", "🍔 ЕДА", "кафе"]]) is None
@@ -323,3 +323,59 @@ async def test_today_command_shows_the_day_so_far() -> None:
     await analytics.today_command(update, context)
     update.message.reply_text.assert_awaited_once_with("💸")
     assert calls == [{"now": True}]
+
+
+ADVANCE_PAID = fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000)
+RENT_PAID = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 650, "USD")
+
+
+def test_an_early_salary_is_not_counted_twice() -> None:
+    early = fact_row(date(2026, 10, 29), "💰 ДОХОДЫ", "зарплата", 10_000_000)
+    day = budget(date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, early)
+    # (21,2 млн на картах − 18,1 млн к концу месяца) / 2 дня: зарплата уже на картах
+    assert day.limit == pytest.approx(1_550_000)
+    assert day.upcoming == ()
+
+
+def test_a_late_salary_stays_ahead() -> None:
+    day = budget(date(2026, 10, 31), ADVANCE_PAID, RENT_PAID)
+    # 11,2 млн на картах + 10 млн зарплаты впереди − 18,1 млн к концу месяца
+    assert day.limit == pytest.approx(3_100_000)
+    assert "📅 Впереди: ⏳ 30.10 ЗП +10,00 млн" in format_day_budget(day)
+
+
+def test_a_salary_that_came_today_keeps_the_morning_limit() -> None:
+    today = fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000)
+    day = budget(date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, today)
+    # лимит с утра: на вечер вчера зарплаты на картах не было — она ещё впереди
+    assert day.limit == pytest.approx(1_550_000)
+    assert day.upcoming == ()  # а в «Впереди» её уже нет
+
+
+def test_a_payment_a_bit_off_its_sum_does_not_eat_the_day() -> None:
+    rent = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 640, "USD")
+    cafe = fact_row(date(2026, 10, 18), "🍔 ЕДА", "кафе", 50_000)
+    assert budget(date(2026, 10, 19), rent, cafe).yesterday_spent == pytest.approx(
+        50_000
+    )
+
+
+def test_rent_paid_before_its_day_leaves_the_frozen_dollars() -> None:
+    early = fact_row(date(2026, 10, 16), "🏚️ ДОМ", "квартплата", 650, "USD")
+    assert budget(date(2026, 10, 17), early).frozen == 350
+
+
+def test_sums_wait_for_a_late_salary_today() -> None:
+    cafe = [
+        fact_row(date(2026, 10, day), "🍔 ЕДА", "кафе", 1_000_000)
+        for day in range(17, 31)
+    ]
+    late = budget(date(2026, 10, 31), ADVANCE_PAID, *cafe)
+    # сумы на вечер 30-го: 5 + 2 − 14 = −7 млн; зарплата 10 млн — сегодня
+    assert late.runway is not None and late.runway.short == 0
+
+
+def test_a_row_raised_after_it_came_opens_again() -> None:
+    raised = [("Аванс", 15, 5_000_000, "UZS"), *ITEMS[1:]]
+    day = budget(date(2026, 10, 16), ADVANCE_PAID, items=raised)
+    assert [(item.name, item.amount) for item in day.ahead][0] == ("Аванс", 3_000_000)
