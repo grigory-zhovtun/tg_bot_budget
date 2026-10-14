@@ -424,3 +424,22 @@ def test_each_sms_joins_one_pair_nearest_first() -> None:
     near = OWN_IN.replace("15:24", "15:23")
     rows, _ = rows_of(OWN_OUT, OWN_IN, near)
     assert [row.flag for row in rows].count(CHECK) == 1
+
+
+@pytest.mark.parametrize("cancel_first", [True, False])
+def test_hold_and_its_cancellation_alone_keep_the_bank_order(
+    cancel_first: bool,
+) -> None:
+    hold = CANCELLED.replace("Avtorizacija otmenena. Avtorizacija bekor qilindi.", "")
+    hold = hold.replace("3001000.00", "3000000.00")
+    rows, _ = rows_of(*((CANCELLED, hold) if cancel_first else (hold, CANCELLED)))
+    assert [row.item["direction"] for row in rows] == ["expense", "refund"]
+    assert [row.item["balance"] for row in rows] == [None, 3001000.0]
+
+
+def test_sms_of_one_minute_in_unknown_order_give_no_balance() -> None:
+    other = PURCHASE.replace("SHAVI CAFE", "KOFE UYI").replace(
+        "5000000.00", "4952000.00"
+    )
+    rows, _ = rows_of(other, PURCHASE)  # обе в 12:33: кто из них новее — неизвестно
+    assert [row.item["balance"] for row in rows] == [None, None]

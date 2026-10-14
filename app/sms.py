@@ -103,21 +103,30 @@ _UZCARD_KINDS = {
     "Popolnenie scheta": Kind.INCOMING,
 }
 _APOSTROPHES = "'‘’`ʻ"
+_UZCARD_KIND = "|".join(
+    re.escape(kind).replace("'", f"[{_APOSTROPHES}]") for kind in _UZCARD_KINDS
+)
 UZCARD = re.compile(
-    r"(?P<cancel>BEKOR QILINDI: |OTMENA )?(?P<kind>"
-    + "|".join(re.escape(k).replace("'", f"[{_APOSTROPHES}]") for k in _UZCARD_KINDS)
-    + r"):? (?P<desc>.*?),? ?(?:UZ,)?"
+    rf"(?P<cancel>BEKOR QILINDI: |OTMENA )?(?P<kind>{_UZCARD_KIND}):? "
+    r"(?P<desc>.*?),? ?(?:UZ,)?"
     r"(?P<day>\d{2})\.(?P<month>\d{2})\.(?P<year>\d{2}) (?P<time>\d{2}:\d{2}),? ?"
     r"karta \*{3}(?P<card>\d{4})\. "
     rf"(?:summa|Miqdor):(?P<amount>{_AMOUNT}) UZS[.,]? ?"
     rf"(?:balans|Qoldiq):(?P<balance>-?{_AMOUNT}) UZS"
 )
+# Служебная SMS (код, неверный PIN) тянется до конца строки или до следующей SMS
+_NEXT_SMS = (
+    r"Karta \*\d{4}\.|Avtorizacija otmenena|Hisobda mablag|Snyatiye,|Popolneniye,"
+    r"|Schet po karte|BEKOR QILINDI:|OTMENA |<#> |Kapitalbank|KAPITALBANK"
+    rf"|INCORRECT PIN|(?:{_UZCARD_KIND}):?"
+)
+_REST = rf".*?(?= (?:{_NEXT_SMS})|$)"
 CODES = re.compile(
-    r"(?:<#> )?KAPITALBANK NIKOMU NE PEREDAVAYTE KOD!.*"
-    r"|(?:<#> )?Kapitalbank kirish tasdiqlash kodi: .*"
+    rf"(?:<#> )?KAPITALBANK NIKOMU NE PEREDAVAYTE KOD!{_REST}"
+    rf"|(?:<#> )?Kapitalbank kirish tasdiqlash kodi: {_REST}"
     r"|Kapitalbank: data plateja .*?Kod podtverjdeniya(?: oplati)?: \d+"
 )
-INCORRECT_PIN = re.compile(r"INCORRECT PIN .*")
+INCORRECT_PIN = re.compile(rf"INCORRECT PIN {_REST}")
 
 
 def _when(match: re.Match[str], month: int) -> datetime:

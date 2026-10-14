@@ -202,3 +202,27 @@ def test_unusual_spaces_are_ignored() -> None:
 )
 def test_anything_unknown_goes_to_ai(text: str) -> None:
     assert parse_sms(text) is None
+
+
+@pytest.mark.parametrize(
+    ("service", "operation"),
+    [
+        (
+            "<#> KAPITALBANK NIKOMU NE PEREDAVAYTE KOD! Osteregaytes moshennikov. "
+            "Dlya oplati vvedite kod podtverjdeniya: 111111. abc123",
+            PURCHASE,
+        ),
+        (
+            "<#> Kapitalbank kirish tasdiqlash kodi: 22222. HECH KIMGA KODNI BERMANG!",
+            PURCHASE,
+        ),
+        (WRONG_PIN_SMS, UZCARD_QR),
+    ],
+)
+def test_service_sms_does_not_swallow_the_next_sms_on_its_line(
+    service: str, operation: str
+) -> None:
+    batch = parse_sms(f"{service} {operation}")
+    assert batch is not None
+    assert len(batch.skipped) == 1
+    assert [sms.text for sms in batch.operations] == [operation]

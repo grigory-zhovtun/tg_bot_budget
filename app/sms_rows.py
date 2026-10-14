@@ -246,6 +246,16 @@ def _amounts_match(debit: Sms, credit: Sms, rates: Rates) -> bool:
     )
 
 
+def _twins(cancel: Sms, purchase: Sms) -> bool:
+    """Отмена и её покупка: та же карта, сумма, валюта и описание."""
+    return (
+        cancel.cancelled
+        and not purchase.cancelled
+        and (cancel.card, cancel.amount, cancel.currency, cancel.description)
+        == (purchase.card, purchase.amount, purchase.currency, purchase.description)
+    )
+
+
 def find_pairs(
     operations: list[Sms], cards: list[str | None], rates: Rates
 ) -> dict[int, Pair]:
@@ -361,13 +371,23 @@ def sms_rows(
 
     Вставку из приложения «сверху новые» сначала разворачиваем: SMS одной минуты
     остаются в порядке банка. Остаток в «Проверку» — только у самой поздней SMS карты.
+    Если все SMS одной минуты, порядок вставки неизвестен: отмена идёт после своей
+    покупки, а остаток пишется, только когда последняя SMS карты известна точно.
     """
     ops = list(operations)
     if len(ops) > 1 and ops[0].at > ops[-1].at:
         ops.reverse()
+    unordered = len(ops) > 1 and len({sms.at for sms in ops}) == 1
+    if unordered:
+        ops.sort(key=lambda sms: sms.cancelled)  # отмена — после своей покупки
     order = sorted(range(len(ops)), key=lambda index: ops[index].at)
     cards = [card_source(sms.card, sources) for sms in ops]
     latest = {cards[i]: i for i in order if cards[i]}
+    if unordered:
+        for card in set(filter(None, cards)):
+            mine = [ops[i] for i in order if cards[i] == card]
+            if len(mine) > 1 and not (len(mine) == 2 and _twins(mine[1], mine[0])):
+                del latest[card]  # кто из них новее — неизвестно, остаток не пишем
     pairs = find_pairs(ops, cards, rates)
     rows: list[SmsRow] = []
     skipped: list[Skipped] = []
@@ -381,7 +401,7 @@ def sms_rows(
                 Skipped(f"карта *{sms.card} не найдена в листе system", what)
             )
             continue
-        own = latest[source] == i and sms.balance_currency == currency_of(source)
+        own = latest.get(source) == i and sms.balance_currency == currency_of(source)
         balance = sms.balance if own else None
         if i in pairs:
             rows += _pair_rows(sms, source, pairs[i], balance)
