@@ -55,6 +55,10 @@ def test_groups_sum_their_lines_in_sheet_order() -> None:
 
 def test_every_upcoming_item_is_listed_by_day() -> None:
     found = build_dashboard(frame(), tab(), date(2026, 10, 16), RATES, "USD")
+    # аванс 15-го не пришёл — он впереди, первым
+    assert [item.name for item in found.upcoming] == ["Аванс", "Квартплата", "ЗП"]
+    paid = fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000)
+    found = build_dashboard(frame(paid), tab(), date(2026, 10, 16), RATES, "USD")
     assert [item.name for item in found.upcoming] == ["Квартплата", "ЗП"]
 
 

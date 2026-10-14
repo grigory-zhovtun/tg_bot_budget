@@ -37,6 +37,7 @@ import {
 import EventSheet from "./EventSheet";
 import GoalSheet from "./GoalSheet";
 import { monthIn, monthName, monthShort, plural } from "./months";
+import { receiptHint } from "./receipt";
 
 type Editing =
   | { kind: "article"; key: string }
@@ -583,6 +584,9 @@ export default function PlanScreen({
             const conflict = conflicts.includes(`event:${item.slot}`);
             const edited = draft.events[String(item.slot)] !== undefined;
             const amount = item.amount ?? 0;
+            const original = plan.events?.find((e) => e.slot === item.slot);
+            const hint =
+              !edited && original ? receiptHint(original, plan.month) : null;
             return (
               <button
                 key={item.slot}
@@ -594,8 +598,11 @@ export default function PlanScreen({
                 <span className="w-8 rounded-lg bg-section py-0.5 text-center text-xs font-bold">
                   {item.day}
                 </span>
-                <span className={`flex-1 ${edited ? "text-link" : ""}`}>
+                <span
+                  className={`flex flex-1 flex-col ${edited ? "text-link" : ""}`}
+                >
                   {item.name}
+                  {hint && <span className="text-xs text-hint">{hint}</span>}
                 </span>
                 <span className={amount > 0 ? "text-ok" : "text-danger"}>
                   {itemAmount(amount, item.currency ?? "UZS", amount)}

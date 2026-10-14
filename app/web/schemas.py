@@ -192,6 +192,9 @@ class PlanEventOut(ApiModel):
     day: int | None
     amount: float | None  # со знаком: «+» поступление, «−» платёж
     currency: str | None
+    received: float | None = None  # пришло по строке: в её валюте и со знаком
+    received_on: date | None = None  # дата последней операции
+    status: Literal["done", "partial", "waiting", "future"] = "future"
 
 
 class PlanGoalOut(ApiModel):

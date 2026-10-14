@@ -8,6 +8,7 @@ from telegram.ext import ContextTypes
 
 from app.errors import user_message
 from app.handlers.common import LAST_WRITE, SEEN_INPUTS
+from app.handlers.receipts import mark_dirty
 from app.services.google_sheets import GoogleSheetsService
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ async def undo_last(context: ContextTypes.DEFAULT_TYPE) -> str:
 
     if not deleted:
         return f"В таблице {span} уже изменились — удалите их вручную, если нужно."
+    mark_dirty(context.bot_data)
     if fingerprint := last.get("fingerprint"):
         # то же SMS после отмены можно прислать снова
         context.user_data.get(SEEN_INPUTS, {}).pop(fingerprint, None)

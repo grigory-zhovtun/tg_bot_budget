@@ -368,6 +368,7 @@ async def test_undo_deletes_the_last_write_and_forgets_the_sms() -> None:
     update, context, sheets = make_chat(SMS, {}, ai)
     await messages.text_handler(update, context)
 
+    context.bot_data.pop("receipts_dirty")  # запись уже попросила сверку
     command, _ = again(update, context, "/undo")
     await undo.undo(command, context)
     first, last, rows = sheets.undone
@@ -375,6 +376,7 @@ async def test_undo_deletes_the_last_write_and_forgets_the_sms() -> None:
     assert command.message.reply_text.await_args.args[0] == (
         "↩️ Удалил из таблицы: строка 4169."
     )
+    assert context.bot_data["receipts_dirty"] is True
 
     # после отмены то же SMS снова записывается
     resent, _ = again(update, context, SMS)
@@ -502,3 +504,20 @@ async def test_cards_keyboard_opens_the_mini_app_with_a_fresh_link(
     assert button.web_app.url.startswith(prefix)
     token = button.web_app.url.removeprefix(prefix)
     assert check_launch_token(token, config.TELEGRAM_TOKEN).id == 1  # чат make_chat
+
+
+async def test_a_write_asks_for_a_list_reconciliation() -> None:
+    update, context, _ = make_chat("48000 латте", manual_state())
+    await messages.text_handler(update, context)
+    assert context.bot_data["receipts_dirty"] is True
+
+
+async def test_a_failed_write_does_not_ask_for_it() -> None:
+    class BrokenSheets(FakeSheets):
+        def append_transactions(self, rows: list[Any]) -> tuple[int, int]:
+            raise ConnectionError("Google is down")
+
+    update, context, _ = make_chat("48000 латте", manual_state())
+    context.bot_data["gs_service"] = BrokenSheets()
+    await messages.text_handler(update, context)
+    assert "receipts_dirty" not in context.bot_data

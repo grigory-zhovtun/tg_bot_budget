@@ -1,10 +1,10 @@
 """API вкладки «План»: план месяца, сохранение, конфликты, уведомления."""
 
 import asyncio
-from datetime import timedelta
+from datetime import date, timedelta
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import httpx
 import pytest
@@ -72,6 +72,9 @@ def test_plan_has_rows_with_hints_events_goal_and_rates() -> None:
         "day": 15,
         "amount": 3_000_000,
         "currency": "UZS",
+        "received": None,
+        "received_on": None,
+        "status": ANY,  # future или waiting — по сегодняшней дате
     }
     assert body["events"][2]["name"] is None
     assert body["goal"] == {"amount": 1_000_000, "currency": "UZS"}
@@ -265,6 +268,9 @@ def test_events_and_goal_are_saved() -> None:
         "day": 25,
         "amount": 1_000_000,
         "currency": "UZS",
+        "received": None,
+        "received_on": None,
+        "status": ANY,
     }
     assert fresh["events"][1]["amount"] == -650.5
     assert fresh["goal"] == {"amount": 2_000_000, "currency": "UZS"}
@@ -597,3 +603,53 @@ def test_the_advisor_needs_an_allowed_user() -> None:
     client = client_for(application)
     assert client.post("/api/plan/advice", json=advice()).status_code == 401
     assert ask(application, advice(), user=777).status_code == 403
+
+
+def test_a_saved_plan_asks_for_a_list_reconciliation() -> None:
+    application = plan_app()
+    assert post_plan(application, change()).status_code == 200
+    assert application.bot_data["receipts_dirty"] is True
+
+
+OCTOBER_EVENTS = [
+    ("Аванс", 15, 3_000_000, "UZS"),
+    ("ЗП RUB", 10, 100_000, "RUB"),
+    ("Квартплата", 18, -500, "USD"),
+    ("Премия", 12, 1_000_000, "UZS"),
+]
+OCTOBER_FACT = [
+    FACT_HEADER,
+    fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 3_000_000),
+    fact_row(date(2026, 10, 10), "💰 ДОХОДЫ", "зарплата", 40_000, "RUB"),
+]
+
+
+def october(monkeypatch: pytest.MonkeyPatch, *titles: str) -> PlanSheets:
+    monkeypatch.setattr(web_api, "local_today", lambda zone: date(2026, 10, 16))
+    tab = month_tab([article("Расходы", "🍔 ЕДА", "кофе", 1_000)], OCTOBER_EVENTS)
+    return PlanSheets({title: tab for title in titles}, OCTOBER_FACT)
+
+
+def test_list_rows_tell_what_came_in_this_month(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = get_plan(october(monkeypatch, "Oct 26"), month="2026-10").json()
+    assert [
+        (e["name"], e["status"], e["received"], e["received_on"])
+        for e in body["events"][:5]
+    ] == [
+        ("Аванс", "done", 3_000_000, "2026-10-15"),
+        ("ЗП RUB", "partial", 40_000, "2026-10-10"),
+        ("Квартплата", "future", None, None),
+        ("Премия", "waiting", None, None),
+        (None, "future", None, None),
+    ]
+
+
+def test_the_next_month_has_nothing_received_yet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sheets = october(monkeypatch, "Oct 26", "Nov 26")
+    body = get_plan(sheets, month="2026-11").json()
+    assert {e["status"] for e in body["events"]} == {"future"}
+    assert {e["received"] for e in body["events"]} == {None}

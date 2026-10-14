@@ -1,0 +1,90 @@
+"""Колонка «Пришло к утру»: что бот пишет во вкладку месяца."""
+
+from datetime import date
+from typing import Any
+
+from gspread.exceptions import WorksheetNotFound
+
+from app.services.receipts_sync import COLUMN_T, RECEIVED_HEADER, sync_receipts
+from tests.test_day_budget import FACT_HEADER, OPENING, RATES, fact_row, tab
+
+ADVANCE_PAID = fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000)
+
+
+def wide(rows: list[list[Any]]) -> list[list[Any]]:
+    return [list(row) + [""] * (COLUMN_T + 1 - len(row)) for row in rows]
+
+
+class Sheets:
+    """Вкладка «Oct 26» и fact в памяти; write_cells пишет в колонку T."""
+
+    def __init__(self, rows: list[list[Any]] | None, *fact: list[Any]) -> None:
+        self.tabs = {} if rows is None else {"Oct 26": wide(rows)}
+        self.fact = [FACT_HEADER, *OPENING, *fact]
+        self.writes: list[list[dict[str, Any]]] = []
+
+    def get_values(self, name: str) -> list[list[Any]]:
+        if name == "fact":
+            return self.fact
+        if name not in self.tabs:
+            raise WorksheetNotFound(name)
+        return [list(row) for row in self.tabs[name]]
+
+    def get_rates(self) -> Any:
+        return RATES
+
+    def write_cells(self, data: list[dict[str, Any]]) -> None:
+        self.writes.append(data)
+        for item in data:
+            title, cell = item["range"].split("!")
+            row = int(cell.removeprefix("T"))
+            self.tabs[title.strip("'")][row - 1][COLUMN_T] = item["values"][0][0]
+
+    def column(self) -> list[Any]:
+        """T11:T15 — заголовок, аванс, ЗП, квартплата, пустая строка списка."""
+        return [row[COLUMN_T] for row in self.tabs["Oct 26"][10:15]]
+
+
+def test_what_came_by_this_morning_is_written_under_the_header() -> None:
+    sheets = Sheets(tab(), ADVANCE_PAID)
+    assert sync_receipts(sheets, date(2026, 10, 16)) == 2
+    assert sheets.column() == [RECEIVED_HEADER, 2_000_000, "", "", ""]
+
+
+def test_todays_income_waits_for_the_night() -> None:
+    sheets = Sheets(tab(), ADVANCE_PAID)
+    sync_receipts(sheets, date(2026, 10, 15))
+    assert sheets.column() == [RECEIVED_HEADER, "", "", "", ""]
+
+
+def test_nothing_changed_nothing_is_written() -> None:
+    sheets = Sheets(tab(), ADVANCE_PAID)
+    sync_receipts(sheets, date(2026, 10, 16))
+    assert sync_receipts(sheets, date(2026, 10, 16)) == 0
+    assert len(sheets.writes) == 1
+
+
+def test_stale_values_are_cleared() -> None:
+    rows = wide(tab())
+    rows[10][COLUMN_T] = RECEIVED_HEADER
+    rows[12][COLUMN_T] = 5_000  # ЗП не приходила
+    rows[14][COLUMN_T] = "x"  # пустая строка списка
+    sheets = Sheets(rows)
+    assert sync_receipts(sheets, date(2026, 10, 16)) == 2
+    assert sheets.column() == [RECEIVED_HEADER, "", "", "", ""]
+
+
+def test_on_the_first_the_new_month_starts_empty() -> None:
+    rows = wide(tab())
+    rows[10][COLUMN_T] = RECEIVED_HEADER
+    rows[11][COLUMN_T] = 2_000_000  # отметка прошлого месяца в копии вкладки
+    sheets = Sheets(rows, ADVANCE_PAID)
+    sync_receipts(sheets, date(2026, 10, 1))
+    assert sheets.column()[1] == ""
+
+
+def test_without_the_tab_or_the_list_nothing_is_written() -> None:
+    assert sync_receipts(Sheets(None), date(2026, 10, 16)) == 0
+    no_list = Sheets([["Статья", "Категория"], ["Расходы", "🍔 ЕДА", "кафе"]])
+    assert sync_receipts(no_list, date(2026, 10, 16)) == 0
+    assert no_list.writes == []

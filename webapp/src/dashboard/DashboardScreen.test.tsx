@@ -135,4 +135,21 @@ describe("DashboardScreen", () => {
     ).toBeTruthy();
     expect(screen.getByText("лимита нет")).toBeTruthy(); // в графике вместо «можно»
   });
+
+  it("marks a row of the list that is late", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      upcoming: [
+        {
+          name: "ЗП",
+          day: 5,
+          amount: 10_000_000,
+          currency: "UZS",
+          uzs: 10_000_000,
+        },
+      ],
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    expect(await screen.findByText("⏳ 05 — ЗП")).toBeTruthy();
+  });
 });

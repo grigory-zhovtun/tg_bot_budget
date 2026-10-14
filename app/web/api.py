@@ -7,6 +7,7 @@
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -23,11 +24,13 @@ from app.custom_icons import leading_emoji
 from app.domain import currency_of, entry_row, local_today, month_title
 from app.handlers.messages import save_rows, seen_input
 from app.handlers.month import describe, tell_owner
+from app.handlers.receipts import mark_dirty
 from app.handlers.undo import undo_last
 from app.services.dashboard import Dashboard
 from app.services.plan import (
     ArticleChange,
     Catalog,
+    Event,
     EventChange,
     EventValue,
     GoalChange,
@@ -43,6 +46,7 @@ from app.services.plan import (
     shift_month,
 )
 from app.services.plan_advice import advice_numbers, checked_points, gather_advice
+from app.services.receipts import NOTHING, Line, Receipt, receipt_status
 from app.web.auth import WebUser, authenticate
 from app.web.schemas import (
     AdviceApplyOut,
@@ -282,6 +286,29 @@ def plan_month(text: str | None, today: date) -> date | None:
     return first if first in (current, shift_month(current, 1)) else None
 
 
+def event_out(
+    event: Event, receipts: Mapping[int, Receipt] | None, today: date
+) -> PlanEventOut:
+    """Строка списка для экрана; receipts — сверка текущего месяца, None — следующий."""
+    status, received, on = "future", None, None
+    if receipts is not None and event.day is not None and event.amount is not None:
+        line = Line(event.row, event.day, event.amount, event.currency or "UZS")
+        receipt = receipts.get(event.row, NOTHING)
+        status = receipt_status(line, receipt, today)
+        if receipt.received:
+            received, on = receipt.received, receipt.on
+    return PlanEventOut(
+        slot=event.slot,
+        name=event.name,
+        day=event.day,
+        amount=event.amount,
+        currency=event.currency,
+        received=received,
+        received_on=on,
+        status=status,
+    )
+
+
 def plan_out(
     first: date,
     today: date,
@@ -313,18 +340,11 @@ def plan_out(
                 editable=article.editable,
             )
         )
+    current = first == today.replace(day=1)
     events = None
     if plan.events is not None:
-        events = [
-            PlanEventOut(
-                slot=e.slot,
-                name=e.name,
-                day=e.day,
-                amount=e.amount,
-                currency=e.currency,
-            )
-            for e in plan.events
-        ]
+        receipts = loaded.receipts if current else None
+        events = [event_out(e, receipts, today) for e in plan.events]
     goal = None
     if plan.goal is not None:
         goal = PlanGoalOut(amount=plan.goal.amount, currency=plan.goal.currency)
@@ -606,6 +626,7 @@ def routes(application: Application) -> list[Route]:
             )
             return JSONResponse(conflict.model_dump(mode="json"), status_code=409)
         fresh.saved = changes.count()
+        mark_dirty(application.bot_data)  # строку списка могли поменять
         logger.info(
             "Plan %s: %s changes by user_id=%s", title, changes.count(), user.id
         )

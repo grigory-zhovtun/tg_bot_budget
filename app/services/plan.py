@@ -9,7 +9,7 @@
 import logging
 import re
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Any
 
@@ -17,7 +17,7 @@ import pandas as pd
 from gspread.exceptions import WorksheetNotFound
 
 from app import config
-from app.domain import INCOME_GROUP, Rates
+from app.domain import INCOME_GROUP, Rates, month_title
 from app.services.analytics_service import (
     MONTHS_RU,
     OPENING_BALANCE,
@@ -33,6 +33,7 @@ from app.services.day_budget import (
     short,
 )
 from app.services.google_sheets import GoogleSheetsService
+from app.services.receipts import Line, Receipt, match_receipts
 
 logger = logging.getLogger(__name__)
 
@@ -194,6 +195,15 @@ def read_plan(rows: list[list[Any]]) -> MonthPlan:
     """Значения вкладки месяца (UNFORMATTED) → статьи, список и цель."""
     events, goal = _forecast(rows)
     return MonthPlan(_articles(rows), events, goal)
+
+
+def list_lines(plan: MonthPlan) -> list[Line]:
+    """Заполненные строки списка — для сверки с fact."""
+    return [
+        Line(e.row, e.day, e.amount, e.currency)
+        for e in plan.events or ()
+        if e.day is not None and e.amount is not None and e.currency
+    ]
 
 
 def shift_month(first: date, months: int) -> date:
@@ -696,6 +706,7 @@ class LoadedPlan:
     plan: MonthPlan
     rates: Rates
     history: History
+    receipts: Mapping[int, Receipt] = field(default_factory=dict)  # что пришло
 
 
 def load_plan(gs: GoogleSheetsService, title: str, today: date) -> LoadedPlan | None:
@@ -706,7 +717,14 @@ def load_plan(gs: GoogleSheetsService, title: str, today: date) -> LoadedPlan | 
         return None
     rates = gs.get_rates()
     frame = transactions_frame(gs.get_values(config.FACT_SHEET_NAME), rates)
-    return LoadedPlan(read_plan(rows), rates, article_history(frame, today))
+    plan = read_plan(rows)
+    first = today.replace(day=1)
+    receipts = (
+        match_receipts(frame, list_lines(plan), first, today)
+        if title == month_title(first)
+        else {}
+    )
+    return LoadedPlan(plan, rates, article_history(frame, today), receipts)
 
 
 @dataclass(frozen=True)

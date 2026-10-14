@@ -33,6 +33,7 @@ from app.handlers import (
     last_write,
     messages,
     month,
+    receipts,
     statement_import,
     transactions,
     undo,
@@ -150,6 +151,12 @@ def _schedule_month_tab(app: Application) -> None:
         month.month_tab_job, time=dtime(0, 5, tzinfo=zone), name="month_tab"
     )
     app.job_queue.run_once(month.month_tab_job, 30, name="month_tab_on_start")
+    app.job_queue.run_repeating(
+        receipts.receipts_job,
+        interval=receipts.INTERVAL_SECONDS,
+        first=receipts.INTERVAL_SECONDS,
+        name="receipts",
+    )
 
 
 async def _weekly_digest(context: ContextTypes.DEFAULT_TYPE) -> None:

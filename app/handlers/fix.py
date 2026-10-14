@@ -24,6 +24,7 @@ from app.custom_icons import CustomIcons
 from app.domain import INCOME_GROUP, SheetRow, format_amount
 from app.errors import user_message
 from app.handlers.common import LAST_WRITE, premium_icons
+from app.handlers.receipts import mark_dirty
 from app.services.google_sheets import GoogleSheetsService
 from app.utils.keyboards import group_button, subcategory_button
 
@@ -253,5 +254,6 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     rows[state["row"]] = fixed  # /undo и следующий /fix сверяют уже новую категорию
     if ai_service := context.bot_data.get("ai_service"):
         ai_service.forget_history()  # магазин сразу пойдёт в исправленную категорию
+    mark_dirty(context.bot_data)  # доход стал тратой или наоборот — сверка списка
     logger.info("Row %s recategorized", number)
     await _edit(query, f"✅ Исправил (строка {number}): {describe(fixed)}")
