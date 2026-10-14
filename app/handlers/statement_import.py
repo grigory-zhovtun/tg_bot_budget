@@ -20,6 +20,7 @@ from app import config
 from app.domain import INCOME_GROUP, Catalog, currency_of
 from app.errors import user_message
 from app.handlers.common import LAST_WRITE
+from app.handlers.receipts import mark_dirty
 from app.services.google_sheets import GoogleSheetsService
 from app.statements import (
     TEMPORARY_MARK,
@@ -354,6 +355,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # строки сдвинулись (удаление временных) — /undo для прошлой записи уже неверен
     context.user_data.pop(LAST_WRITE, None)
+    mark_dirty(context.bot_data)  # операции задним числом — сверка списка
     lines = ["✅ Выписки загружены", *report]
     try:
         balances = await asyncio.to_thread(gs_service.get_table_balances)

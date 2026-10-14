@@ -613,7 +613,7 @@ def test_a_saved_plan_asks_for_a_list_reconciliation() -> None:
 
 OCTOBER_EVENTS = [
     ("Аванс", 15, 3_000_000, "UZS"),
-    ("ЗП СПб", 10, 100_000, "RUB"),
+    ("ЗП RUB", 10, 100_000, "RUB"),
     ("Квартплата", 18, -500, "USD"),
     ("Премия", 12, 1_000_000, "UZS"),
 ]
@@ -639,7 +639,7 @@ def test_list_rows_tell_what_came_in_this_month(
         for e in body["events"][:5]
     ] == [
         ("Аванс", "done", 3_000_000, "2026-10-15"),
-        ("ЗП СПб", "partial", 40_000, "2026-10-10"),
+        ("ЗП RUB", "partial", 40_000, "2026-10-10"),
         ("Квартплата", "future", None, None),
         ("Премия", "waiting", None, None),
         (None, "future", None, None),

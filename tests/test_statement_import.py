@@ -197,6 +197,8 @@ async def test_statement_preview_then_write() -> None:
     assert "VISA 9120 UZS: 14 000 000" in result
     assert ai.asked == [["NEW CAFE"]]  # второй раз Gemini не спрашивали
     assert statement_import.BASKET not in context.user_data
+    # выписка приносит операции задним числом — «Пришло к утру» надо сверить
+    assert context.bot_data["receipts_dirty"] is True
 
     # повторное нажатие ничего не записывает
     await statement_import.button(press(context, "import:ok:1"), context)
@@ -213,6 +215,7 @@ async def test_cancel_changes_nothing() -> None:
     await statement_import.button(update, context)
     assert sheets.appended == [] and sheets.marks == {}
     assert "отменён" in update.callback_query.edit_message_text.await_args.args[0]
+    assert "receipts_dirty" not in context.bot_data
 
 
 async def test_second_statement_rebuilds_one_preview() -> None:
