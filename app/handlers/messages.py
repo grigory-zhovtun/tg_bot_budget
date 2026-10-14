@@ -28,7 +28,7 @@ from app.domain import (
     row_name,
 )
 from app.errors import user_message
-from app.handlers import balances, icons, live, statement_import
+from app.handlers import balances, fix, icons, live, statement_import
 from app.handlers.common import (
     CHOOSE_SOURCE,
     LAST_WRITE,
@@ -438,8 +438,15 @@ async def save_rows(
     # после записи под сводкой — «✏️ Исправить запись» и «↩️ Отменить запись»,
     # а если есть строки с пометкой — «🔎 Проверить»
     checks = context.user_data[LAST_WRITE]["checks"] if rows else {}
+    # единственную строку с пометкой проверяем прямо в меню под сводкой
+    check_now = fix.inline_check(context) if len(rows) == 1 and checks else None
     menu = await show_main_menu(
-        chat, context, "\n".join(lines), actions=bool(rows), check=len(checks)
+        chat,
+        context,
+        "\n".join(lines),
+        actions=bool(rows),
+        check=len(checks),
+        menu=check_now,
     )
     if rows and menu is not None:
         context.user_data[LAST_WRITE]["menu"] = (chat.id, menu.message_id)
