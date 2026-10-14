@@ -597,3 +597,9 @@ def test_the_advisor_needs_an_allowed_user() -> None:
     client = client_for(application)
     assert client.post("/api/plan/advice", json=advice()).status_code == 401
     assert ask(application, advice(), user=777).status_code == 403
+
+
+def test_a_saved_plan_asks_for_a_list_reconciliation() -> None:
+    application = plan_app()
+    assert post_plan(application, change()).status_code == 200
+    assert application.bot_data["receipts_dirty"] is True

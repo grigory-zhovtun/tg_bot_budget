@@ -23,6 +23,7 @@ from app.custom_icons import leading_emoji
 from app.domain import currency_of, entry_row, local_today, month_title
 from app.handlers.messages import save_rows, seen_input
 from app.handlers.month import describe, tell_owner
+from app.handlers.receipts import mark_dirty
 from app.handlers.undo import undo_last
 from app.services.dashboard import Dashboard
 from app.services.plan import (
@@ -606,6 +607,7 @@ def routes(application: Application) -> list[Route]:
             )
             return JSONResponse(conflict.model_dump(mode="json"), status_code=409)
         fresh.saved = changes.count()
+        mark_dirty(application.bot_data)  # строку списка могли поменять
         logger.info(
             "Plan %s: %s changes by user_id=%s", title, changes.count(), user.id
         )

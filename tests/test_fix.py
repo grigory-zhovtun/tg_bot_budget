@@ -123,6 +123,7 @@ async def test_single_row_goes_straight_to_groups_and_is_fixed() -> None:
         == "✅ Исправил (строка 4190): 48 000 UZS • TEZKOR • 🍔 ЕДА (кафе) • VISA 9120 UZS"
     )
     assert markup is None
+    assert context.bot_data["receipts_dirty"] is True
     # /undo и повторный /fix сверяют строку уже с новой категорией
     assert context.user_data[LAST_WRITE]["rows"] == [row("🍔 ЕДА", "кафе")]
     assert context.bot_data["ai_service"].forgotten == 1
@@ -162,6 +163,7 @@ async def test_row_changed_in_the_sheet_is_left_alone() -> None:
     assert text == "Строка 4190 уже изменена в таблице — поправьте её там."
     assert context.user_data[LAST_WRITE]["rows"] == [row()]
     assert context.bot_data["ai_service"].forgotten == 0
+    assert "receipts_dirty" not in context.bot_data
 
 
 async def test_sheet_error_is_reported() -> None:

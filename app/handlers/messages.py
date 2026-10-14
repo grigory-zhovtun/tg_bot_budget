@@ -40,6 +40,7 @@ from app.handlers.common import (
     sources_keyboard,
     track_message,
 )
+from app.handlers.receipts import mark_dirty
 from app.services.analytics_service import TRANSFERS_GROUP
 from app.services.google_sheets import GoogleSheetsService
 from app.statements import is_kapitalbank_statement, parse_statement, pdf_text
@@ -398,6 +399,7 @@ async def save_rows(
                 "rows": list(rows),
                 "fingerprint": fingerprint,
             }
+            mark_dirty(context.bot_data)  # «Пришло к утру» сверит задача receipts
             if fingerprint:
                 _remember(context, fingerprint, first, last)
 

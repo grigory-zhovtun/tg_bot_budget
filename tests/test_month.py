@@ -155,6 +155,13 @@ def owner(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "OWNER_ID", 42)
 
 
+@pytest.fixture(autouse=True)
+def reconcile(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    sync = AsyncMock(return_value=0)
+    monkeypatch.setattr(month, "sync_now", sync)
+    return sync
+
+
 @pytest.mark.usefixtures("owner")
 async def test_owner_is_told_about_the_new_tab() -> None:
     context = job_context(MonthTab("Nov 26", "Oct 26", created=True, hidden=["Oct 26"]))
@@ -403,3 +410,17 @@ def test_hiding_the_copy_survives_one_failure() -> None:
         r["updateSheetProperties"]["properties"] for r in book.batches[-1]["requests"]
     ]
     assert visibility == [{"sheetId": 999, "hidden": True}]
+
+
+@pytest.mark.usefixtures("owner")
+async def test_the_list_is_reconciled_every_night(reconcile: AsyncMock) -> None:
+    context = job_context(MonthTab("Oct 26"))
+    await month.month_tab_job(context)
+    reconcile.assert_awaited_once()
+    assert reconcile.await_args.args[0] is context.bot_data
+
+
+@pytest.mark.usefixtures("owner")
+async def test_no_reconciliation_when_the_sheet_fails(reconcile: AsyncMock) -> None:
+    await month.month_tab_job(job_context(ConnectionError("offline")))
+    reconcile.assert_not_awaited()

@@ -118,6 +118,14 @@ def test_month_tab_is_checked_daily_and_on_start(
     assert "month_tab_on_start" in jobs
 
 
+def test_the_list_is_reconciled_every_two_minutes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = build(monkeypatch)
+    jobs = {job.name: job for job in app.job_queue.jobs()}
+    assert jobs["receipts"].trigger.interval.total_seconds() == 120
+
+
 def test_weekly_digest_runs_on_sunday_evening(monkeypatch: pytest.MonkeyPatch) -> None:
     app = build(monkeypatch, WEEKLY_DIGEST_TIME="20:00")
     job = {job.name: job for job in app.job_queue.jobs()}["weekly_digest"]

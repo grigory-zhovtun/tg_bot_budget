@@ -9,6 +9,7 @@ from telegram.ext import ContextTypes
 
 from app import config
 from app.domain import local_today
+from app.handlers.receipts import sync_now
 from app.services.google_sheets import GoogleSheetsService, MonthTab
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,7 @@ async def month_tab_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     except Exception:
         logger.exception("Month tab check failed")
         return
+    await sync_now(context.bot_data, today)  # 1-го числа — уже по новой вкладке
     text = describe(tab, today)
     if text is None:
         return
