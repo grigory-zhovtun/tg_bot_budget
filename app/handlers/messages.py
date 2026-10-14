@@ -29,6 +29,7 @@ from app.domain import (
 )
 from app.errors import user_message
 from app.handlers import balances, fix, icons, live, statement_import
+from app.handlers import sms as sms_chat
 from app.handlers.common import (
     CHOOSE_SOURCE,
     LAST_WRITE,
@@ -196,19 +197,29 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await save_rows(context, update.effective_chat, [row], [])
             return
 
-    # 4. AI Parsing (Fallthrough)
-    ai_service = context.bot_data.get("ai_service")
-    if not ai_service or not config.GEMINI_API_KEY:
-        await update.message.reply_text(
-            "AI сервис не настроен. Пожалуйста, используйте кнопки для ручного ввода."
-        )
-        return
-
+    # 4. Уже записанные SMS или скрин второй раз не пишем
     fingerprint = input_fingerprint(
         msg_text, update.message.photo[-1].file_unique_id if is_photo else None
     )
     if entry := seen_input(context, fingerprint):
         await _report_duplicate(update, context, entry)
+        return
+
+    # 5. SMS знакомых видов — правилами; ИИ только подсказывает новые магазины
+    if not is_photo:
+        prepared = await sms_chat.prepare(
+            context, update.effective_chat.id, update.message, msg_text
+        )
+        if prepared is not None:
+            await _save_sms(update, context, prepared, fingerprint)
+            return
+
+    # 6. AI Parsing (Fallthrough)
+    ai_service = context.bot_data.get("ai_service")
+    if not ai_service or not config.GEMINI_API_KEY:
+        await update.message.reply_text(
+            "AI сервис не настроен. Пожалуйста, используйте кнопки для ручного ввода."
+        )
         return
 
     # Photo: Telegram always sends JPEG; read it into memory and drop the file
@@ -263,6 +274,33 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("AI parsing failed")
         await live.react(message, ReactionEmoji.THINKING_FACE)
         await update.effective_chat.send_message(f"Ошибка AI: {user_message(e)}")
+
+
+async def _save_sms(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    prepared: sms_chat.PreparedSms,
+    fingerprint: str | None,
+) -> None:
+    """Запись сообщения из SMS: сводка с пометками и реакция на сообщение."""
+    result = await save_rows(
+        context,
+        update.effective_chat,
+        prepared.rows,
+        prepared.skipped,
+        fingerprint,
+        flags=prepared.flags,
+        prints=prepared.prints,
+        notes=prepared.notes,
+    )
+    ai_service = context.bot_data.get("ai_service")
+    if result.written and any(prepared.flags) and ai_service is not None:
+        ai_service.forget_history()  # новые магазины и суммы — в историю сразу
+    done = result.written or prepared.quiet
+    await live.react(
+        update.message,
+        ReactionEmoji.THUMBS_UP if done else ReactionEmoji.THINKING_FACE,
+    )
 
 
 async def _to_rows(

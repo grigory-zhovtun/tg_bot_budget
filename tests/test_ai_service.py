@@ -597,3 +597,12 @@ async def test_plan_advice_without_a_usable_answer_is_an_error() -> None:
     service, _, _ = make_service('{"points": "нет"}')
     with pytest.raises(ValidationError):
         await service.plan_advice("…")
+
+
+def test_merchant_history_shares_the_cache_with_hints() -> None:
+    service, _, sheets = make_service("[]")
+    book, rows = service.merchant_history()
+    assert book.find("SHAVI") == ("🍔 ЕДА", "кофе")
+    assert rows[1][5] == "AI: Shavi"
+    service.merchant_history()
+    assert sheets.reads == 1

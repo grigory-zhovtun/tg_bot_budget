@@ -320,7 +320,10 @@ class GeminiService:
             if config.GEMINI_API_KEY
             else None
         )
-        self._hints: tuple[float, list[str], MerchantBook] | None = None
+        # время чтения, подсказки, книга магазинов и строки fact — общий кэш
+        self._hints: tuple[float, list[str], MerchantBook, list[list[Any]]] | None = (
+            None
+        )
         # модель → time.monotonic(), до которого она без квоты (ответила 429)
         self._paused: dict[str, float] = {}
         if self.client is None:
@@ -340,9 +343,14 @@ class GeminiService:
             hints, book = merchant_hints(rows), MerchantBook.from_sheet(rows)
         except Exception:
             logger.exception("Could not read merchant history, parsing without it")
-            hints, book = [], MerchantBook([])
-        self._hints = (now, hints, book)
+            rows, hints, book = [], [], MerchantBook([])
+        self._hints = (now, hints, book, rows)
         return hints, book
+
+    def merchant_history(self) -> tuple[MerchantBook, list[list[Any]]]:
+        """Книга магазинов и строки fact из того же кэша — для разбора SMS правилами."""
+        _, book = self._history()
+        return book, self._hints[3] if self._hints else []
 
     def forget_history(self) -> None:
         """Сбросить кэш подсказок: владелец поправил категорию — учесть сразу."""
