@@ -563,6 +563,12 @@ class AnalyticsService:
             return None
         rates = self.gs_service.get_rates()
         fact = self.gs_service.get_values(config.FACT_SHEET_NAME)
+        try:
+            cards = card_balances(fact, rates)  # блок остатков — из того же чтения
+        except Exception:
+            # блок правят руками: его поломка не должна убрать всю «Сводку»
+            logger.exception("Could not read the card balance block")
+            cards = ()
         return build_dashboard(
             transactions_frame(fact, rates),
             rows,
@@ -570,7 +576,7 @@ class AnalyticsService:
             rates,
             config.FROZEN_CURRENCY,
             self._records(),
-            card_balances(fact, rates),  # блок остатков — из того же чтения fact
+            cards,
         )
 
     def forecast(

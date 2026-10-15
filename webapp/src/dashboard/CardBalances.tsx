@@ -8,13 +8,19 @@ function amount(value: number, currency: string): string {
     : withCurrency(value, currency);
 }
 
-/** ✓ — остаток таблицы сходится с банком; рядом — сколько дней назад сверяли. */
+/** ✓ — остаток таблицы сходится с банком; рядом — когда сверяли. */
 function Mark({ card, today }: { card: CardBalance; today: string }) {
   if (card.matches !== true) return null;
-  const days = card.checked === null ? 0 : daysBetween(card.checked, today);
+  let label = "✓";
+  if (card.checked === null) {
+    label = "✓ давно"; // без времени сверки: остаток банка вписан руками раньше
+  } else {
+    const days = daysBetween(card.checked, today);
+    if (days > 0) label = `✓ ${days} дн.`;
+  }
   return (
     <span className={card.stale ? "font-medium text-warn" : "text-ok"}>
-      {days > 0 ? `✓ ${days} дн.` : "✓"}
+      {label}
     </span>
   );
 }
@@ -28,6 +34,15 @@ interface Props {
 export default function CardBalances({ cards, today }: Props) {
   const known = cards.filter((card) => card.uzs !== null);
   const total = known.reduce((sum, card) => sum + (card.uzs ?? 0), 0);
+  // карты с остатком, но без курса в итог не входят — называем их валюты
+  const unrated = [
+    ...new Set(
+      cards
+        .filter((card) => card.balance !== null && card.uzs === null)
+        .map((card) => card.currency),
+    ),
+  ];
+  const without = unrated.length > 0 ? ` (без ${unrated.join(", ")})` : "";
   return (
     <section className="flex flex-col gap-2" aria-label="Остатки на картах">
       <h2 className="font-semibold">Остатки на картах</h2>
@@ -56,7 +71,9 @@ export default function CardBalances({ cards, today }: Props) {
         ))}
       </ul>
       {known.length > 0 && (
-        <p className="text-sm text-hint">{`Всего ≈ ${short(total)} сум`}</p>
+        <p className="text-sm text-hint">
+          {`Всего ≈ ${short(total)} сум${without}`}
+        </p>
       )}
     </section>
   );

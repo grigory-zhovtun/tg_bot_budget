@@ -27,7 +27,7 @@ from app.services.day_budget import (
     read_daily,
     read_forecast,
 )
-from app.services.plan import article_key, read_plan
+from app.services.plan import read_plan
 from app.services.recurring import Series, find_series
 
 HALF_SUM = 0.5  # меньше полсума — ноль: остаток возвратов и пересчёта по курсу
@@ -132,17 +132,22 @@ def spent_groups(frame: pd.DataFrame, today: date) -> tuple[SpentGroup, ...]:
 def untracked(
     frame: pd.DataFrame, rows: list[list[Any]], today: date
 ) -> tuple[Untracked, ...]:
-    """Траты месяца по статьям, у которых нет строки во вкладке месяца.
+    """Траты месяца по статьям, у которых нет строки расходов во вкладке месяца.
 
-    Вкладка считает факт формулами своих строк по паре (подкатегория, валюта):
-    траты статьи без строки в её план-факт не попадают.
+    Вкладка считает факт формулами своих строк по паре (подкатегория, валюта),
+    подкатегорию — без учёта регистра, как SUMIFS: траты статьи без строки в её
+    план-факт не попадают, а с подкатегорией строки доходов — уходят в доходы.
     """
-    keys = {article.key for article in read_plan(rows).articles}
+    keys = {
+        (article.subcategory.casefold(), article.currency)
+        for article in read_plan(rows).articles
+        if article.kind == "spend"
+    }
     found = []
     columns = ["group", "subcategory", "currency"]
     for (group, sub, currency), part in month_spending(frame, today).groupby(columns):
         amount = float(part["amount_uzs"].sum())
-        if article_key(str(sub), str(currency)) in keys or abs(amount) < HALF_SUM:
+        if (str(sub).casefold(), str(currency)) in keys or abs(amount) < HALF_SUM:
             continue
         found.append(Untracked(str(group), str(sub), str(currency), amount))
     return tuple(sorted(found, key=lambda item: item.amount, reverse=True))

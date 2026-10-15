@@ -36,9 +36,15 @@ class CardBalance:
         return same_balance(self.bank - self.balance, self.name)
 
     def stale(self, today: date) -> bool:
-        """Сверке больше недели — как в напоминании воскресной сводки."""
-        if self.checked is None:
+        """Сверке больше недели — как в напоминании воскресной сводки.
+
+        Остаток банка без времени сверки — тоже давно: бот всегда ставит время,
+        такой остаток вписан руками раньше. Без остатка банка сверки нет вовсе.
+        """
+        if self.bank is None:
             return False
+        if self.checked is None:
+            return True
         return (today - self.checked.date()).days > STALE_CHECK_DAYS
 
 
@@ -49,12 +55,18 @@ def _number(value: Any) -> float | None:
 
 
 def _moment(value: Any) -> datetime | None:
-    """Серийный номер таблицы с долей суток → время с точностью до минуты."""
+    """Серийный номер таблицы с долей суток → время с точностью до минуты.
+
+    Число вне дат — скажем, остаток, вставленный не в ту колонку, — не время.
+    """
     number = _number(value)
     if number is None:
         return None
     start = datetime.combine(SERIAL_ZERO, datetime.min.time())
-    return start + timedelta(minutes=round(number * 24 * 60))
+    try:
+        return start + timedelta(minutes=round(number * 24 * 60))
+    except (OverflowError, ValueError):  # позже 9999 года или раньше 1-го
+        return None
 
 
 def card_balances(

@@ -69,13 +69,23 @@ def test_the_check_time_is_read_from_the_serial_number() -> None:
             card("VISA 6666 RUB", 100, 100, stamp(datetime(2026, 10, 9, 12, 12))),
             card("HUMO 4444 UZS", 100, 100, stamp(datetime(2026, 10, 7, 9, 0))),
             card("МИР 3333 RUB", 100, 100, "давно"),
+            card("UZCARD 5555 UZS", 100),
         ),
         RATES,
     )
     assert found[0].checked == evening
     assert found[3].checked is None
-    # как напоминание в воскресной сводке: сверке больше недели — давно
-    assert [c.stale(TODAY) for c in found] == [False, False, True, False]
+    # как напоминание в воскресной сводке: сверке больше недели — давно;
+    # остаток банка без времени сверки — тоже давно: бот всегда ставит время,
+    # без него остаток вписан руками до этого. Без остатка банка сверки нет
+    assert [c.stale(TODAY) for c in found] == [False, False, True, True, False]
+
+
+@pytest.mark.parametrize("stray", [3_500_000, 2_958_466, -800_000, 1e12])
+def test_a_stray_number_in_the_check_column_is_no_time(stray: float) -> None:
+    """Остаток, вставленный в «Сверено» вместо «Проверки», не роняет «Сводку»."""
+    found = card_balances(fact(card("VISA 1111 UZS", 100, 100, stray)), RATES)
+    assert (found[0].balance, found[0].checked) == (100, None)
 
 
 def test_an_error_in_the_balance_cell_gives_no_number() -> None:

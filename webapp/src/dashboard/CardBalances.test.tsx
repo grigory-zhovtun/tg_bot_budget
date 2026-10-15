@@ -60,14 +60,16 @@ describe("CardBalances", () => {
       card(),
       card({ name: "VISA 6666", checked: "2026-10-09" }),
       card({ name: "HUMO 4444", checked: "2026-10-07", stale: true }),
-      card({ name: "МИР 3333", checked: null }),
+      card({ name: "МИР 3333", checked: null, stale: true }),
     ]);
     expect(within(row("VISA 1111")).getByText("✓")).toBeTruthy();
     expect(within(row("VISA 6666")).getByText("✓ 6 дн.")).toBeTruthy();
     // сверке больше недели — отметка жёлтая
     const old = within(row("HUMO 4444")).getByText("✓ 8 дн.");
     expect(old.className).toContain("text-warn");
-    expect(within(row("МИР 3333")).getByText("✓")).toBeTruthy();
+    // остаток банка без времени сверки — вписан давно, тоже жёлтым
+    const unknown = within(row("МИР 3333")).getByText("✓ давно");
+    expect(unknown.className).toContain("text-warn");
   });
 
   it("shows the bank balance when the table differs from it", () => {
@@ -107,5 +109,19 @@ describe("CardBalances", () => {
     ]);
     expect(within(row("VISA 7777")).getByText("—")).toBeTruthy();
     expect(screen.getByText("Всего ≈ 5,25 млн сум")).toBeTruthy();
+  });
+
+  it("says which currency is missing from the total without a rate", () => {
+    show([
+      card(),
+      card({
+        name: "VISA 2222",
+        currency: "USD",
+        balance: 1500.25,
+        uzs: null,
+        bank: 1500.25,
+      }),
+    ]);
+    expect(screen.getByText("Всего ≈ 5,25 млн сум (без USD)")).toBeTruthy();
   });
 });

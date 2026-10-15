@@ -173,3 +173,37 @@ def test_service_takes_card_balances_from_the_same_fact_read() -> None:
         ("VISA 1111 UZS", 4_600_000, 4_600_000),
         ("VISA 2222 USD", 1000, 12_000_000),
     ]
+
+
+def test_month_tab_articles_match_like_the_sheet_formula() -> None:
+    """Вкладка ищет подкатегорию без учёта регистра и только среди своих строк.
+
+    «Кафе» с большой буквы вкладка засчитывает строке «кафе» — не пропуск;
+    трату с подкатегорией строки доходов в расходы вкладка не возьмёт — пропуск.
+    """
+    rows = tab()
+    rows.append(["Доходы", "💰 ДОХОДЫ", "премия", -100, 0, 100, "UZS", -100, 0])
+    found = build_dashboard(
+        frame(
+            fact_row(date(2026, 10, 1), "🍔 ЕДА", "Кафе", 120_000),
+            fact_row(date(2026, 10, 1), "🚧 РАЗНОЕ", "премия", 70_000),
+        ),
+        rows,
+        TODAY,
+        RATES,
+        "USD",
+    )
+    assert [(u.subcategory, u.amount) for u in found.untracked] == [("премия", 70_000)]
+
+
+def test_broken_card_block_does_not_take_the_dashboard_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(*_: object) -> None:
+        raise ValueError("strange block")
+
+    monkeypatch.setattr("app.services.cards.card_balances", broken)
+    fact = [FACT_HEADER, *OPENING, CAFE]
+    found = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab()})).dashboard(TODAY)
+    assert found is not None
+    assert (found.status, found.cards) == ("ok", ())
