@@ -23,6 +23,10 @@ export const mockApi: Api = {
   undo: () => later({ message: "↩️ Удалил из таблицы: строка 4169." }),
   dashboard: () => later(dashboardFixture),
   forecast: () => later(forecastFixture),
+  // мок-режим: запись не сохраняется, приходит тот же прогноз
+  addRecord: () => later(forecastFixture),
+  updateRecord: () => later(forecastFixture),
+  deleteRecord: () => later(forecastFixture),
   plan: (month: string) => {
     if (month !== nextPlanFixture.month) return later(planFixture);
     return later(nextCreated ? nextPlanFixture : notCreatedFixture);

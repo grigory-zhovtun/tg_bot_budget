@@ -145,7 +145,7 @@ export default function App({ api }: { api: Api }) {
           onRestoredSeen={restoredSeen}
         />
       )}
-      {tab === "forecast" && <ForecastScreen api={api} />}
+      {tab === "forecast" && <ForecastScreen api={api} boot={boot} />}
     </main>
   );
 }

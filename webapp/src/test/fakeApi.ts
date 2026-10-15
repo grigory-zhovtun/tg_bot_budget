@@ -21,6 +21,13 @@ export function fakeApi(overrides: Partial<Api> = {}): Api {
       .mockResolvedValue({ message: "↩️ Удалил из таблицы: строка 4169." }),
     dashboard: vi.fn<Api["dashboard"]>().mockResolvedValue(dashboardFixture),
     forecast: vi.fn<Api["forecast"]>().mockResolvedValue(forecastFixture),
+    addRecord: vi.fn<Api["addRecord"]>().mockResolvedValue(forecastFixture),
+    updateRecord: vi
+      .fn<Api["updateRecord"]>()
+      .mockResolvedValue(forecastFixture),
+    deleteRecord: vi
+      .fn<Api["deleteRecord"]>()
+      .mockResolvedValue(forecastFixture),
     plan: vi
       .fn<Api["plan"]>()
       .mockImplementation((month) =>

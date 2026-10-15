@@ -11,6 +11,7 @@ from gspread.exceptions import WorksheetNotFound
 from app.domain import Rates
 from app.handlers import analytics
 from app.services.analytics_service import AnalyticsService, transactions_frame
+from app.services.calendar import HEADER as CALENDAR_HEADER
 from app.services.day_budget import (
     ForecastItem,
     day_budget,
@@ -267,6 +268,9 @@ class Sheets:
     def get_rates(self) -> Rates:
         return RATES
 
+    def get_calendar(self) -> list[list[Any]]:
+        return self.tabs.get("Календарь", [])
+
 
 def test_service_builds_the_message_from_the_sheet() -> None:
     fact = [FACT_HEADER, *OPENING, OVERSPENT]
@@ -283,6 +287,24 @@ def test_service_builds_the_message_from_the_sheet() -> None:
     assert "📋 План-факт: октябрь 2026" in text
     assert AnalyticsService(Sheets({})).morning_brief(date(2026, 11, 1)) == (
         "Вкладки «Nov 26» с планом нет — бот создаёт её 1-го числа."
+    )
+
+
+def test_a_one_off_record_in_sums_moves_the_sums_card() -> None:
+    fact = [FACT_HEADER, *OPENING]
+    camp = ["k7f2qa", "05.10.2026", "нет", "", "👶 ДЕТИ", "лагерь", "UZS", 6_000_000,
+            "Лагерь", "Тест"]  # fmt: skip
+    plain = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab()}))
+    planned = AnalyticsService(
+        Sheets({"fact": fact, "Oct 26": tab(), "Календарь": [CALENDAR_HEADER, camp]})
+    )
+    day = date(2026, 10, 2)
+    assert "💳 Сумы 5,00 млн — до конца месяца хватит" in (
+        plain.morning_brief(day).splitlines()
+    )
+    # 5 млн − лагерь 6 млн 5-го: хватит до 04.10, аванс 15-го закрывает минус
+    assert "💳 Сумы 5,00 млн — хватит до 04.10 · до 15.10 обменять ≈ $90" in (
+        planned.morning_brief(day).splitlines()
     )
 
 

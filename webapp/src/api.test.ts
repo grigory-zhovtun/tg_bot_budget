@@ -136,6 +136,36 @@ describe("request", () => {
     vi.useRealTimers();
   });
 
+  it("sends calendar records to their addresses", async () => {
+    const fetch = vi
+      .fn<(path: string, init: RequestInit) => Promise<Response>>()
+      .mockImplementation(() =>
+        Promise.resolve(new Response("{}", { status: 200 })),
+      );
+    vi.stubGlobal("fetch", fetch);
+    const input = {
+      date: "2026-10-16",
+      repeat: "once" as const,
+      weekdays: [],
+      group: "🍔 ЕДА",
+      subcategory: "кафе",
+      currency: "UZS",
+      amount: "150000",
+      name: "",
+    };
+    await api.addRecord({ ...input, entry_id: "e1" });
+    await api.updateRecord("k4f3pt", input);
+    await api.deleteRecord("k4f3pt");
+    expect(fetch.mock.calls.map(([path, init]) => [path, init.method])).toEqual(
+      [
+        ["/api/calendar", "POST"],
+        ["/api/calendar/k4f3pt", "PUT"],
+        ["/api/calendar/k4f3pt", "DELETE"],
+      ],
+    );
+    expect(JSON.parse(String(fetch.mock.calls[1]?.[1].body))).toEqual(input);
+  });
+
   it("keeps the body of a conflict with the fresh plan", async () => {
     const body = {
       error: {

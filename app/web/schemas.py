@@ -67,6 +67,22 @@ class ExpenseIn(ApiModel):
     day: date | None = None  # нет — сегодня по часам бота, а не телефона
 
 
+class CalendarIn(ApiModel):
+    """Запись календаря из окна: сумма строкой, как у траты."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    entry_id: UUID | None = None  # у новой записи: повтор с тем же — без второй строки
+    date: date
+    repeat: Literal["once", "daily", "weekdays", "monthly"]
+    weekdays: list[int] = []
+    group: str = Field(min_length=1, max_length=100)
+    subcategory: str = Field(min_length=1, max_length=100)
+    currency: str = Field(min_length=3, max_length=3)
+    amount: Decimal = Field(gt=0, le=Decimal(10) ** 12, decimal_places=2)
+    name: str = Field(default="", max_length=60)
+
+
 class RowsOut(ApiModel):
     first: int
     last: int
@@ -188,6 +204,21 @@ class ForecastDipsOut(ApiModel):
     pace: ForecastDipOut | None
 
 
+class ForecastRecordOut(ApiModel):
+    """Вхождение записи календаря в день: open — что ещё впереди, в валюте записи."""
+
+    id: str
+    day: int
+    name: str
+    group: str
+    subcategory: str
+    repeat: Literal["once", "daily", "weekdays", "monthly"]
+    amount: float
+    open: float
+    done: bool
+    over: bool  # записей статьи больше её остатка
+
+
 class ForecastCurrencyOut(ApiModel):
     code: str
     now: float
@@ -198,12 +229,48 @@ class ForecastCurrencyOut(ApiModel):
     events: list[ForecastEventOut]
     days: list[ForecastDayOut]
     below_zero: ForecastDipsOut
+    records: list[ForecastRecordOut] = []
 
 
 class ForecastTotalOut(ApiModel):
     uzs: list[ForecastDayOut]
     usd: list[ForecastDayOut]  # пусто — нет курса доллара
     below_zero: ForecastDipsOut
+
+
+class CalendarRecordOut(ApiModel):
+    """Запись для списка экрана: повтор или разовая с сегодня."""
+
+    id: str
+    date: date
+    repeat: Literal["once", "daily", "weekdays", "monthly"]
+    weekdays: list[int]  # ISO: пн = 1 … вс = 7
+    group: str
+    subcategory: str
+    currency: str
+    amount: float
+    name: str
+    author: str
+    month_total: float  # открыто с сегодня до конца месяца
+    booked: float  # её доля в booked статьи — для предупреждения окна
+    over: bool
+
+
+class ForecastArticleOut(ApiModel):
+    """Статья трат для окна записи: rest — план минус факт по вчера."""
+
+    group: str
+    subcategory: str
+    currency: str
+    plan: float
+    rest: float
+    booked: float  # записи статьи с сегодня, на утро
+
+
+class HintOut(ApiModel):
+    typical: float | None
+    last: float | None
+    per_day: float | None
 
 
 class ForecastOut(ApiModel):
@@ -215,6 +282,10 @@ class ForecastOut(ApiModel):
     end: date | None = None
     currencies: list[ForecastCurrencyOut] = []
     total: ForecastTotalOut | None = None
+    rates: dict[str, float] = {}  # к суму, без UZS
+    calendar: list[CalendarRecordOut] = []
+    articles: list[ForecastArticleOut] = []
+    hints: dict[str, HintOut] = {}  # «подкатегория|валюта»
 
 
 class PlanHistoryOut(ApiModel):

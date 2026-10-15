@@ -38,7 +38,7 @@ app/
 ├── web/
 │   ├── server.py        # Starlette: POST /telegram (webhook → PTB update_queue), GET /health, security headers, PTB lifespan
 │   ├── auth.py          # Mini App auth: initData (HMAC with the bot token), signed launch links for the keyboard button, webhook secret
-│   ├── api.py           # /api/bootstrap, /api/expenses (entry_row → save_rows, idempotent by entry_id), /api/expenses/undo, /api/dashboard, /api/forecast
+│   ├── api.py           # /api/bootstrap, /api/expenses (entry_row → save_rows, idempotent by entry_id), /api/expenses/undo, /api/dashboard, /api/forecast, /api/calendar (POST, PUT/DELETE by ID)
 │   └── schemas.py       # Pydantic models of the API
 ├── handlers/
 │   ├── common.py        # /start, keyboard helpers, message tracking
@@ -60,7 +60,8 @@ app/
 │   ├── analytics_service.py # AnalyticsService - reports with matplotlib charts
 │   ├── recurring.py     # Monthly payments from fact: recurring_key, amount clusters, day ±4, /subs text and morning lines
 │   ├── dashboard.py     # Mini App «Сводка»: build_dashboard — DayBudget, plan_lines by group, read_daily (O:R under «Дата»), subscription states
-│   ├── forecast.py      # Mini App «Прогноз»: money until the month end per currency and in total, plan and pace lines, list rows as events
+│   ├── forecast.py      # Mini App «Прогноз»: money until the month end per currency and in total, plan and pace lines, list rows and calendar records as events
+│   ├── calendar.py      # «Календарь» sheet: records (once, every day, days of the week, once a month), their days, closing by fact, sum hints
 │   ├── runway.py        # «💳 Сумы» card: the forecast's pace line in sums → last day, gap, dollars to exchange
 │   └── day_budget.py    # Daily limit from the month tab forecast block, frozen money, morning text
 └── utils/
@@ -79,6 +80,8 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 
 **Mini App forecast**: `GET /api/forecast` → `AnalyticsService.forecast(today, card currencies)` → `month_forecast` (`fact` with `keep_unknown`, `read_plan(...).articles`, `read_forecast(...).items`; per currency `currency_forecast`: money now, plan per day by the morning reconciliation, pace of 14 days without list payments, events by the reconciliation now; total at today's rates) → `api.forecast_out`
 
+**Calendar records**: the record window → `POST /api/calendar` (idempotent by `entry_id`), `PUT|DELETE /api/calendar/{id}` → `check_record` → `GoogleSheetsService.add_calendar_row|update_calendar_row|delete_calendar_row` (row A:J RAW, found by ID in column A) → a fresh `forecast_out` and a note to the other user. Reading: `get_calendar()` (a copy for 60 s, reset by the bot's writes) → `read_calendar` → `AnalyticsService._records()` → `month_forecast(..., records)` and `day_budget(..., records)`: `calendar_state` closes records by fact in the morning and now, `_book` reserves them in their articles, the open part goes out on its day (one-offs in both lines, repeats by plan only)
+
 **AI Parsing**: text/photo/document → `GeminiService.parse_transaction()` → each item validated by `domain.ParsedTransaction` → `domain.build_row` (source by card digits, currency conversion with rates from `system!H2:I10`, category/subcategory must exist in `system`, otherwise "🚧 РАЗНОЕ / неучтенка") → one `append_transactions` call → one summary message
 
 **Statement import**: PDF → `statements.pdf_text` → `is_kapitalbank_statement` → `parse_statement` (card by `******NNNN`, period, generation date) → basket in `user_data`, preview job after 4 s → `plan_import` (skip operations booked up to `system!G`, pair own transfers, categories from `MerchantBook` over fact, new shops → `GeminiService.categorize_merchants`, `reconcile`: exact duplicates skipped, `≈` rows corrected, `ВРЕМЕННАЯ` rows removed) → buttons `import:ok|no:<version>` → `apply_plan` (amount fixes → row deletions → append → marks)
@@ -96,6 +99,7 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
   - Balance formula: `google_sheets.BALANCE_FORMULA` uses `INDEX(...;ROW())`, no row numbers.
   - Balance block `I2:Q…`: I = source name, J = balance by the sheet, N = bank balance («Проверка», from SMS or a screenshot), O = N − J, P = −O, Q = «Сверено» (when N was written). The bot finds the row by source name.
 - **`system` sheet**: Column A: Categories, Column B: Subcategories, Column F: Sources (last 3 chars = currency code), G: statements loaded up to this day (written by the bot), H:I currency rates to UZS.
+- **`Календарь` sheet** (created by the bot with the first record): A ID (6 chars `a–z0–9`, a letter first), B date (`ДД.ММ.ГГГГ` text — the day of a one-off or the first day of a repeat), C repeat (`нет`, `каждый день`, `по дням недели`, `раз в месяц`), D days (`пн ср`), E group, F subcategory, G currency, H sum (> 0), I name, J who. Written RAW; can be edited by hand — the bot re-reads it at least once a minute, broken rows (and a row repeating an ID above it, e.g. a copied row) are skipped with a warning in the log.
 - **Monthly sheets** ("Oct 26", `domain.month_title`): plan vs fact by Subcategory + Currency (`SUMIFS` on `fact` between the dates in `M1:M2`), used by `/advice`. Created by `GoogleSheetsService.ensure_month_tab` (duplicate of the latest month, new `M1:M2`, past months hidden).
 
 ## Environment Variables

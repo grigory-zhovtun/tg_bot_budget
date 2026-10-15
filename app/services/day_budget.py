@@ -13,7 +13,7 @@
 """
 
 import calendar
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Any
@@ -28,6 +28,7 @@ from app.services.analytics_service import (
     money,
     plan_lines,
 )
+from app.services.calendar import CalendarRecord
 from app.services.forecast import currency_forecast
 from app.services.receipts import NOTHING, Receipt, match_receipts, remaining
 from app.services.runway import Runway, uzs_runway
@@ -203,12 +204,14 @@ def day_budget(
     today: date,
     rates: Rates,
     frozen_currency: str | None,
+    records: Sequence[CalendarRecord] = (),
 ) -> DayBudget | None:
     """Лимит на сегодня по листу fact и вкладке месяца; None — во вкладке нет списка.
 
     Строки списка — по сверке с fact (services.receipts): к утру дня — для лимита и
     заморозки; на сейчас — для «Впереди» и трат дня. Прогноз по сумам — линия «по
-    темпу» модели прогноза (services.forecast), как во вкладке «Прогноз».
+    темпу» модели прогноза (services.forecast) с записями календаря records, как во
+    вкладке «Прогноз».
     """
     forecast = read_forecast(rows)
     if forecast is None:
@@ -287,7 +290,9 @@ def day_budget(
         upcoming=left_now[:2],
         over_plan=tuple(over[:3]),
         runway=uzs_runway(
-            currency_forecast(frame, (), items, today, "UZS"), today, rates
+            currency_forecast(frame, (), items, today, "UZS", records=records),
+            today,
+            rates,
         ),
         history=tuple(
             DaySpend(day, _spent_on(frame, day, paid), limit_on(day))

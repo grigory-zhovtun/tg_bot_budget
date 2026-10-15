@@ -33,7 +33,6 @@ const IN_CURRENCY: Record<string, string> = {
   USD: "в долларах",
   RUB: "в рублях",
 };
-const WEEKDAYS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
 const WEEKDAYS_LONG = [
   "Воскресенье",
   "Понедельник",
@@ -63,11 +62,6 @@ function weekday(iso: string): number {
   return new Date(`${iso}T00:00:00Z`).getUTCDay();
 }
 
-/** «сб». */
-export function weekdayShort(iso: string): string {
-  return WEEKDAYS[weekday(iso)] ?? "";
-}
-
 /** «Суббота, 17 октября». */
 export function dayTitle(iso: string): string {
   return `${WEEKDAYS_LONG[weekday(iso)] ?? ""}, ${longDay(iso)}`;
@@ -90,7 +84,7 @@ export function viewCode(view: View): string {
 }
 
 /** Валюты вида: во «Всего» — все, иначе одна. */
-function viewCurrencies(data: Forecast, view: View): ForecastCurrency[] {
+export function viewCurrencies(data: Forecast, view: View): ForecastCurrency[] {
   return view.scope === TOTAL
     ? data.currencies
     : data.currencies.filter((line) => line.code === view.scope);
@@ -122,18 +116,21 @@ export function dayEvents(data: Forecast, view: View, day: number): DayEvent[] {
   );
 }
 
-/** Отметки графика: ▲ в дни поступлений, ▼ в дни платежей. */
+/** Отметки графика: ▲ в дни поступлений, ▼ в дни платежей и открытых разовых записей. */
 export function marks(
   data: Forecast,
   view: View,
 ): { day: number; up: boolean }[] {
   const found: { day: number; up: boolean }[] = [];
+  const add = (day: number, up: boolean) => {
+    if (!found.some((mark) => mark.day === day && mark.up === up)) {
+      found.push({ day, up });
+    }
+  };
   for (const line of viewCurrencies(data, view)) {
-    for (const event of line.events) {
-      const up = event.amount > 0;
-      if (!found.some((mark) => mark.day === event.day && mark.up === up)) {
-        found.push({ day: event.day, up });
-      }
+    for (const event of line.events) add(event.day, event.amount > 0);
+    for (const record of line.records) {
+      if (record.repeat === "once" && record.open > 0) add(record.day, false);
     }
   }
   return found.sort((a, b) => a.day - b.day);
@@ -170,11 +167,6 @@ export function chartNote(view: View): string {
   const code = viewCode(view);
   const unit = IN_CURRENCY[code] ?? `в ${code}`;
   return view.scope === TOTAL ? `${unit}, по курсу таблицы` : unit;
-}
-
-/** Первый день недели ленты, в которой день day: недели идут с сегодня по семь дней. */
-export function weekOf(day: number, today: number): number {
-  return today + Math.floor((day - today) / 7) * 7;
 }
 
 /** «⚠️ По темпу сумы уйдут в минус 25.10, вернутся 30.10» — по линии в минусе. */

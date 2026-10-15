@@ -8,8 +8,10 @@ import pytest
 
 from app.domain import Rates
 from app.services.analytics_service import transactions_frame
+from app.services.calendar import CalendarRecord
 from app.services.day_budget import ForecastItem
 from app.services.forecast import (
+    ArticleState,
     CurrencyForecast,
     Dip,
     Evening,
@@ -326,3 +328,136 @@ def test_a_payment_only_partly_planned_in_its_currency_takes_the_rest_from_sums(
     # $300 плана в долларах покрывают часть, $350 × 12 000 = 4,2 млн — из сумов
     assert dollars.per_day_plan == 0
     assert sums.per_day_plan == pytest.approx(3_400_000 / 17)
+
+
+def booked(
+    repeat: str,
+    start: date,
+    amount: float,
+    sub: str = "развитие",
+    record_id: str = "k7f2qa",
+    weekdays: frozenset[int] = frozenset(),
+) -> CalendarRecord:
+    return CalendarRecord(
+        record_id, start, repeat, weekdays, "👶 ДЕТИ", sub, "UZS", amount, "", "Тест"
+    )
+
+
+def planned(
+    rows: Sequence[list[Any]] = (),
+    articles: Sequence[Article] = (),
+    records: Sequence[CalendarRecord] = (),
+) -> CurrencyForecast:
+    return currency_forecast(facts(*rows), articles, (), TODAY, "UZS", records=records)
+
+
+def test_records_are_reserved_in_their_article_and_fall_on_their_days() -> None:
+    rows = [fact_row(date(2026, 10, 3), "👶 ДЕТИ", "развитие", 400_000)]
+    records = [
+        booked("once", date(2026, 10, 17), 320_000),
+        booked("weekdays", date(2026, 10, 6), 80_000, record_id="p1c4xy",
+               weekdays=frozenset({1, 3})),
+    ]  # fmt: skip
+    line = planned(rows, [article("развитие", 1_200_000)], records)
+    # остаток 800 000: 640 000 в резерве записей, 160 000 — по дням
+    per_day = 160_000 / 17
+    assert line.per_day_plan == pytest.approx(per_day)
+    evenings = {point.day: point for point in line.days}
+    assert evenings[17].plan - evenings[16].plan == pytest.approx(-320_000 - per_day)
+    assert evenings[19].plan - evenings[18].plan == pytest.approx(-80_000 - per_day)
+    # «по темпу»: разовая запись — да, кружок — нет
+    pace = line.per_day_pace
+    assert evenings[17].pace - evenings[16].pace == pytest.approx(-320_000 - pace)
+    assert evenings[19].pace - evenings[18].pace == pytest.approx(-pace)
+    assert [(r.day, r.open, r.over) for r in line.records] == [
+        (17, 320_000, False),
+        (19, 80_000, False),
+        (21, 80_000, False),
+        (26, 80_000, False),
+        (28, 80_000, False),
+    ]
+    assert line.articles == (
+        ArticleState("🍔 ЕДА", "развитие", "UZS", 1_200_000, 800_000, 640_000),
+    )
+
+
+def test_records_beyond_the_rest_count_in_full_and_are_marked() -> None:
+    coffee = booked("daily", date(2026, 10, 1), 30_000, "кофе", "m3a9zt")
+    line = planned(articles=[article("кофе", 480_000)], records=[coffee])
+    assert line.per_day_plan == 0  # весь остаток под записями
+    assert line.days[-1].plan == pytest.approx(10_000_000 - 30_000 * 17)
+    assert all(day.over for day in line.records)
+    assert (line.articles[0].rest, line.articles[0].booked) == (480_000, 510_000)
+
+
+def test_a_record_of_an_article_without_a_row_is_all_over_plan() -> None:
+    theatre = booked("once", date(2026, 10, 20), 100_000, "театр", "t1t2t3")
+    line = planned(records=[theatre])
+    assert line.articles == (ArticleState("👶 ДЕТИ", "театр", "UZS", 0, 0, 100_000),)
+    assert line.records[0].over
+
+
+def test_todays_spending_on_a_record_is_not_counted_twice() -> None:
+    coffee = booked("daily", date(2026, 10, 1), 30_000, "кофе", "m3a9zt")
+    articles = [article("кофе", 510_000), article("кафе", 1_700_000)]
+    morning = planned(articles=articles, records=[coffee])
+    evening = planned([fact_row(TODAY, "🍔 ЕДА", "кофе", 25_000)], articles, [coffee])
+    assert evening.per_day_plan == morning.per_day_plan == pytest.approx(100_000)
+    assert evening.spent_today == 0  # кофе засчитан в запись
+    # 25 000 уже в деньгах, по записи сегодня ещё 5 000, по плану дня — 100 000
+    assert evening.days[0].plan == pytest.approx(10_000_000 - 25_000 - 5_000 - 100_000)
+    assert evening.days[0].plan == pytest.approx(morning.days[0].plan)
+
+
+def test_paying_a_one_off_today_does_not_lift_the_plan_per_day() -> None:
+    kids = booked("once", TODAY, 320_000)
+    articles = [article("развитие", 657_000)]
+    morning = planned(articles=articles, records=[kids])
+    paid = fact_row(TODAY, "👶 ДЕТИ", "развитие", 320_000)
+    evening = planned([paid], articles, [kids])
+    assert evening.per_day_plan == morning.per_day_plan == pytest.approx(337_000 / 17)
+    assert (evening.records[0].open, evening.spent_today) == (0, 0)
+    assert evening.days[0].plan == pytest.approx(morning.days[0].plan)
+
+
+def test_a_paid_one_off_stays_out_of_the_pace() -> None:
+    camp = booked("once", date(2026, 10, 8), 700_000)
+    rows = [
+        fact_row(date(2026, 10, 8), "👶 ДЕТИ", "развитие", 700_000),
+        fact_row(date(2026, 10, 9), "🍔 ЕДА", "кафе", 1_400_000),
+    ]
+    assert planned(rows, records=[camp]).per_day_pace == pytest.approx(100_000)
+
+
+def test_the_month_lists_records_with_totals_hints_and_rates() -> None:
+    coffee = booked("daily", date(2026, 10, 1), 30_000, "кофе", "m3a9zt")
+    kids = booked("once", date(2026, 10, 17), 320_000)
+    gone = booked("once", date(2026, 10, 2), 50_000, record_id="o1d000")
+    rows = [fact_row(date(2026, 10, 10), "🍔 ЕДА", "кофе", 28_000)]
+    found = month_forecast(facts(*rows), [article("кофе", 900_000)], (), TODAY, RATES,
+                           ["UZS", "USD"], [kids, coffee, gone])  # fmt: skip
+    assert [(m.record.id, m.month_total, m.booked, m.over) for m in found.calendar] == [
+        ("m3a9zt", 510_000, 510_000, False),
+        ("k7f2qa", 320_000, 320_000, True),  # статьи «развитие» во вкладке нет
+    ]
+    assert found.hints["кофе|UZS"].last == 28_000
+    assert found.rates == {"USD": 12_000.0, "RUB": 150.0}
+
+
+def test_the_list_keeps_every_repeat_and_one_offs_ahead() -> None:
+    internet = booked("monthly", date(2026, 10, 5), 150_000, "интернет", "i5n0et")
+    camp = booked("once", date(2026, 11, 3), 700_000, record_id="c4mp00")
+    kids = booked("once", TODAY, 320_000)
+    euro = CalendarRecord("e1u2r0", date(2026, 9, 10), "monthly", frozenset(),
+                          "👶 ДЕТИ", "развитие", "EUR", 50, "", "Тест")  # fmt: skip
+    paid = fact_row(TODAY, "👶 ДЕТИ", "развитие", 320_000)
+    found = month_forecast(facts(paid), (), (), TODAY, RATES, ["UZS"],
+                           [camp, kids, internet, euro])  # fmt: skip
+    # 5-е прошло, лагерь — в ноябре, центр оплачен сегодня, евро без карты:
+    # всё видно в списке и правится
+    assert [(m.record.id, m.month_total, m.booked, m.over) for m in found.calendar] == [
+        ("e1u2r0", 0, 0, False),
+        ("i5n0et", 0, 0, False),
+        ("k7f2qa", 0, 320_000, True),
+        ("c4mp00", 0, 0, False),
+    ]

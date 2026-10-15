@@ -146,6 +146,22 @@ export interface ForecastDips {
   pace: ForecastDip | null;
 }
 
+export type Repeat = "once" | "daily" | "weekdays" | "monthly";
+
+/** Вхождение записи календаря в день: open — что ещё впереди, в валюте записи. */
+export interface ForecastRecord {
+  id: string;
+  day: number;
+  name: string; // название записи или подкатегория
+  group: string;
+  subcategory: string;
+  repeat: Repeat;
+  amount: number;
+  open: number;
+  done: boolean; // закрыта фактом: open 0
+  over: boolean; // записей статьи больше её остатка
+}
+
 export interface ForecastCurrency {
   code: string;
   now: number;
@@ -156,6 +172,41 @@ export interface ForecastCurrency {
   events: ForecastEvent[];
   days: ForecastDay[]; // с сегодня по последний день месяца
   below_zero: ForecastDips;
+  records: ForecastRecord[];
+}
+
+/** Запись для списка и окна: повтор или разовая с сегодня. */
+export interface CalendarRecord {
+  id: string;
+  date: string; // день разовой записи или первый день повтора
+  repeat: Repeat;
+  weekdays: number[]; // ISO: пн = 1 … вс = 7
+  group: string;
+  subcategory: string;
+  currency: string;
+  amount: number;
+  name: string; // пусто — показывается подкатегория
+  author: string;
+  month_total: number; // открыто с сегодня до конца месяца
+  booked: number; // её доля в booked статьи
+  over: boolean;
+}
+
+/** Статья трат: rest — план минус факт по вчера, booked — записи на утро. */
+export interface ForecastArticle {
+  group: string;
+  subcategory: string;
+  currency: string;
+  plan: number;
+  rest: number;
+  booked: number;
+}
+
+/** Подсказка суммы из истории статьи; null — операций нет. */
+export interface AmountHint {
+  typical: number | null;
+  last: number | null;
+  per_day: number | null;
 }
 
 export interface Forecast {
@@ -169,6 +220,23 @@ export interface Forecast {
     usd: ForecastDay[]; // пусто — нет курса доллара
     below_zero: ForecastDips;
   } | null;
+  rates: Record<string, number>; // к суму, без UZS
+  calendar: CalendarRecord[];
+  articles: ForecastArticle[];
+  hints: Record<string, AmountHint>; // «подкатегория|валюта»
+}
+
+/** Запись из окна: сумма строкой, как у траты; entry_id — только у новой. */
+export interface RecordInput {
+  entry_id?: string;
+  date: string;
+  repeat: Repeat;
+  weekdays: number[];
+  group: string;
+  subcategory: string;
+  currency: string;
+  amount: string;
+  name: string;
 }
 
 export interface PlanArticle {
@@ -408,6 +476,20 @@ export const api = {
   undo: () => request<UndoResult>("/expenses/undo", { method: "POST" }),
   dashboard: () => request<Dashboard>("/dashboard"),
   forecast: () => request<Forecast>("/forecast"),
+  addRecord: (input: RecordInput) =>
+    request<Forecast>("/calendar", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updateRecord: (id: string, input: RecordInput) =>
+    request<Forecast>(`/calendar/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  deleteRecord: (id: string) =>
+    request<Forecast>(`/calendar/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
   plan: (month: string) =>
     request<MonthPlan>(`/plan?month=${encodeURIComponent(month)}`),
   savePlan: (input: PlanSave) =>

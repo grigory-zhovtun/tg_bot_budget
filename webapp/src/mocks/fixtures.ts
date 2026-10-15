@@ -1,10 +1,12 @@
 import type {
   AdvicePoint,
   Bootstrap,
+  CalendarRecord,
   Dashboard,
   ExpenseResult,
   Forecast,
   ForecastDay,
+  ForecastRecord,
   MonthPlan,
 } from "../api";
 
@@ -331,6 +333,84 @@ const totalUzs: ForecastDay[] = uzsDays.map((point, index) => ({
     (rubDays[index]?.pace ?? 0) * 150,
 }));
 
+// записи календаря: кофе каждый день (сверх плана статьи), кафе по пятницам,
+// продукты 24-го разово и доставка в долларах 18-го каждого месяца
+const coffee: CalendarRecord = {
+  id: "m3a9zt",
+  date: "2026-10-01",
+  repeat: "daily",
+  weekdays: [],
+  group: "🍔 ЕДА",
+  subcategory: "кофе",
+  currency: "UZS",
+  amount: 30_000,
+  name: "Кофе",
+  author: "Тест",
+  month_total: 510_000,
+  booked: 510_000,
+  over: true,
+};
+const cafe: CalendarRecord = {
+  ...coffee,
+  id: "k4f3pt",
+  date: "2026-10-02",
+  repeat: "weekdays",
+  weekdays: [5],
+  subcategory: "кафе",
+  amount: 150_000,
+  name: "Кафе с друзьями",
+  month_total: 450_000,
+  booked: 450_000,
+  over: false,
+};
+const groceries: CalendarRecord = {
+  ...coffee,
+  id: "p7r0dk",
+  date: "2026-10-24",
+  repeat: "once",
+  group: "🏚️ ДОМ",
+  subcategory: "продукты",
+  amount: 400_000,
+  name: "Продукты на неделю",
+  month_total: 400_000,
+  booked: 400_000,
+  over: false,
+};
+const delivery: CalendarRecord = {
+  ...groceries,
+  id: "d2l1vr",
+  date: "2026-09-18",
+  repeat: "monthly",
+  currency: "USD",
+  amount: 20,
+  name: "Доставка",
+  month_total: 20,
+  booked: 20,
+};
+
+/** Вхождения записи в дни days — открыты целиком, как утром без трат. */
+function occurrences(record: CalendarRecord, days: number[]): ForecastRecord[] {
+  return days.map((day) => ({
+    id: record.id,
+    day,
+    name: record.name,
+    group: record.group,
+    subcategory: record.subcategory,
+    repeat: record.repeat,
+    amount: record.amount,
+    open: record.amount,
+    done: false,
+    over: record.over,
+  }));
+}
+
+const everyDay = Array.from({ length: 17 }, (_, index) => 15 + index);
+const uzsRecords = [
+  ...occurrences(coffee, everyDay),
+  ...occurrences(cafe, [16, 23, 30]),
+  ...occurrences(groceries, [24]),
+].sort((a, b) => a.day - b.day);
+
 export const forecastFixture: Forecast = {
   status: "ok",
   month: "Oct 26",
@@ -351,6 +431,7 @@ export const forecastFixture: Forecast = {
       ],
       days: uzsDays,
       below_zero: { plan: null, pace: { start: 25, until: 30 } },
+      records: uzsRecords,
     },
     {
       code: "USD",
@@ -362,6 +443,7 @@ export const forecastFixture: Forecast = {
       events: [{ day: 18, name: "Квартплата", amount: -500, late: false }],
       days: usdDays,
       below_zero: { plan: null, pace: null },
+      records: occurrences(delivery, [18]),
     },
     {
       code: "RUB",
@@ -373,6 +455,7 @@ export const forecastFixture: Forecast = {
       events: [],
       days: rubDays,
       below_zero: { plan: null, pace: null },
+      records: [],
     },
   ],
   total: {
@@ -383,5 +466,46 @@ export const forecastFixture: Forecast = {
       pace: point.pace / 12_000,
     })),
     below_zero: { plan: null, pace: null },
+  },
+  rates: { USD: 12_000, RUB: 150 },
+  calendar: [delivery, coffee, cafe, groceries],
+  articles: [
+    {
+      group: "🍔 ЕДА",
+      subcategory: "кофе",
+      currency: "UZS",
+      plan: 900_000,
+      rest: 480_000,
+      booked: 510_000,
+    },
+    {
+      group: "🍔 ЕДА",
+      subcategory: "кафе",
+      currency: "UZS",
+      plan: 1_700_000,
+      rest: 1_200_000,
+      booked: 450_000,
+    },
+    {
+      group: "🏚️ ДОМ",
+      subcategory: "продукты",
+      currency: "UZS",
+      plan: 3_000_000,
+      rest: 1_500_000,
+      booked: 400_000,
+    },
+    {
+      group: "🏚️ ДОМ",
+      subcategory: "продукты",
+      currency: "USD",
+      plan: 100,
+      rest: 60,
+      booked: 20,
+    },
+  ],
+  hints: {
+    "кофе|UZS": { typical: 28_000, last: 30_000, per_day: 27_000 },
+    "кафе|UZS": { typical: 160_000, last: 145_000, per_day: 21_000 },
+    "продукты|UZS": { typical: 380_000, last: 420_000, per_day: 95_000 },
   },
 };

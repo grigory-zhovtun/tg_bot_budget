@@ -19,8 +19,6 @@ import {
   storeView,
   viewDays,
   warnings,
-  weekOf,
-  weekdayShort,
   type View,
 } from "./view";
 
@@ -43,14 +41,7 @@ describe("forecast view", () => {
     localStorage.clear();
   });
 
-  it("finds the strip week of a day", () => {
-    expect(weekOf(15, 15)).toBe(15);
-    expect(weekOf(25, 15)).toBe(22);
-    expect(weekOf(31, 15)).toBe(29);
-  });
-
   it("names the days", () => {
-    expect(weekdayShort("2026-10-15")).toBe("чт");
     expect(dayTitle("2026-10-17")).toBe("Суббота, 17 октября");
   });
 
@@ -91,9 +82,11 @@ describe("forecast view", () => {
       },
     ]);
     expect(dayEvents(forecastFixture, UZS, 18)).toEqual([]);
+    // ▼ 24-го — разовая запись «Продукты на неделю»; кофе каждый день не отмечаем
     expect(marks(forecastFixture, UZS)).toEqual([
       { day: 15, up: true },
       { day: 17, up: false },
+      { day: 24, up: false },
       { day: 30, up: true },
     ]);
   });

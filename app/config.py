@@ -39,6 +39,7 @@ if GOOGLE_PRIVATE_KEY:
 # Sheet Names
 FACT_SHEET_NAME = "fact"
 SYSTEM_SHEET_NAME = "system"
+CALENDAR_SHEET_NAME = "Календарь"
 
 # Defaults
 DEFAULT_CURRENCY = "UZS"

@@ -20,6 +20,7 @@ from gspread.exceptions import WorksheetNotFound
 from app import config
 from app.domain import Rates, merchant_key, month_title
 from app.services.analytics_service import MONTHS_RU, expenses, transactions_frame
+from app.services.calendar import read_calendar
 from app.services.day_budget import DayBudget, day_budget
 from app.services.google_sheets import GoogleSheetsService
 from app.services.plan import (
@@ -381,7 +382,10 @@ def gather_advice(
             old_plans[month] = {a.key: a.plan for a in read_plan(old).articles}
     budget = None
     if current_rows is not None:
-        budget = day_budget(frame, current_rows, today, rates, config.FROZEN_CURRENCY)
+        records = read_calendar(gs.get_calendar())
+        budget = day_budget(
+            frame, current_rows, today, rates, config.FROZEN_CURRENCY, records
+        )
     draft = applied(plan, changes)
     recent = months[-PURCHASE_MONTHS:]
     context = AdviceContext(

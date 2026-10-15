@@ -9,11 +9,15 @@
 План и темп в день считаются на утро (сверка списка по вчера) и за день не
 меняются. Сегодняшние траты уже в деньгах «сейчас», поэтому за сегодня вычитается
 только то, что от дня ещё осталось.
+
+Записи календаря (services.calendar) — часть плана своей статьи на день: остаток
+статьи сначала покрывает её записи, по дням идёт то, что осталось; записи — события
+в свой день, разовые — в обеих линиях, повторы — только «по плану».
 """
 
 import calendar
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Protocol
 
@@ -21,6 +25,14 @@ import pandas as pd
 
 from app.domain import INCOME_GROUP, Rates
 from app.services.analytics_service import expenses
+from app.services.calendar import (
+    CalendarRecord,
+    CalendarState,
+    Hint,
+    Occurrence,
+    calendar_state,
+    hints,
+)
 from app.services.receipts import NOTHING, Receipt, match_receipts, remaining
 
 PACE_DAYS = 14
@@ -32,6 +44,7 @@ class PlanArticle(Protocol):
     """Статья вкладки месяца: план положительный, в валюте статьи."""
 
     kind: str  # spend | income
+    group: str
     subcategory: str
     currency: str
     plan: float
@@ -75,16 +88,55 @@ class Dip:
 
 
 @dataclass(frozen=True)
+class RecordDay:
+    """Вхождение записи календаря в день прогноза."""
+
+    id: str
+    day: int
+    name: str  # название записи или подкатегория
+    group: str
+    subcategory: str
+    repeat: str  # once | daily | weekdays | monthly
+    amount: float  # сумма записи
+    open: float  # открыто на сейчас; 0 — закрыта фактом
+    over: bool  # записей статьи больше её остатка
+
+
+@dataclass(frozen=True)
+class ArticleState:
+    """Статья трат: план, остаток (план − факт по вчера) и записи на утро."""
+
+    group: str
+    subcategory: str
+    currency: str
+    plan: float
+    rest: float
+    booked: float
+
+
+@dataclass(frozen=True)
+class RecordMonth:
+    """Запись для списка экрана: повтор или разовая с сегодня."""
+
+    record: CalendarRecord
+    month_total: float  # открыто на сейчас с сегодня до конца месяца
+    booked: float  # её доля в записях статьи на утро
+    over: bool
+
+
+@dataclass(frozen=True)
 class CurrencyForecast:
     code: str
     now: float  # деньги сейчас, с сегодняшними операциями
     per_day_plan: float
     per_day_pace: float
-    spent_today: float  # без платежей списка; не меньше нуля
+    spent_today: float  # обычные траты сегодня: без платежей списка и записей
     events: tuple[Event, ...]
     days: tuple[Evening, ...]  # с сегодня по последний день месяца
     plan_dip: Dip | None
     pace_dip: Dip | None
+    records: tuple[RecordDay, ...] = ()
+    articles: tuple[ArticleState, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -97,6 +149,9 @@ class MonthForecast:
     total_usd: tuple[Evening, ...]  # пусто — нет курса доллара
     plan_dip: Dip | None  # у «Всего»
     pace_dip: Dip | None
+    calendar: tuple[RecordMonth, ...] = ()
+    hints: Mapping[str, Hint] = field(default_factory=dict)
+    rates: Mapping[str, float] = field(default_factory=dict)  # к суму, без UZS
 
 
 def below_zero(value: float) -> bool:
@@ -144,25 +199,46 @@ def _spent(
     return float(spent.loc[mask, "amount"].sum())
 
 
-def _plan_rest(
-    frame: pd.DataFrame, articles: Sequence[PlanArticle], code: str, today: date
-) -> float:
-    """Остаток плана статей расходов валюты: план минус факт с 1-го по вчера."""
-    plans: dict[str, float] = {}
+def _book(
+    frame: pd.DataFrame,
+    articles: Sequence[PlanArticle],
+    state: CalendarState,
+    code: str,
+    today: date,
+) -> tuple[ArticleState, ...]:
+    """Статьи трат валюты: план, остаток (план − факт с 1-го по вчера), записи на утро.
+
+    Строки одной подкатегории складываются; у статьи записи без строки во вкладке
+    план 0 — её записи целиком сверх плана.
+    """
+    plans: dict[str, tuple[str, float]] = {}
     for article in articles:
         if article.kind == "spend" and article.currency == code:
-            plans[article.subcategory] = (
-                plans.get(article.subcategory, 0.0) + article.plan
-            )
+            group, plan = plans.get(article.subcategory, (article.group, 0.0))
+            plans[article.subcategory] = (group, plan + article.plan)
+    booked: dict[str, float] = {}
+    groups: dict[str, str] = {}
+    for occurrence in state.occurrences:
+        sub = occurrence.record.subcategory
+        booked[sub] = booked.get(sub, 0.0) + occurrence.morning
+        groups.setdefault(sub, occurrence.record.group)
     month = frame[
         (frame["currency"] == code)
         & (frame["day"] >= today.replace(day=1))
         & (frame["day"] < today)
     ]
     facts = month.groupby("subcategory")["amount"].sum()
-    return sum(
-        max(plan - float(facts.get(sub, 0.0)), 0.0) for sub, plan in plans.items()
-    )
+    found: list[ArticleState] = []
+    for sub in [*plans, *(name for name in booked if name not in plans)]:
+        group, plan = plans.get(sub, (groups.get(sub, ""), 0.0))
+        rest = max(plan - float(facts.get(sub, 0.0)), 0.0)
+        found.append(ArticleState(group, sub, code, plan, rest, booked.get(sub, 0.0)))
+    return tuple(found)
+
+
+def _spread(book: Sequence[ArticleState]) -> float:
+    """Остаток статей после резерва записей — его план раскладывает по дням."""
+    return sum(article.rest - min(article.booked, article.rest) for article in book)
 
 
 def _unpaid(
@@ -176,11 +252,29 @@ def _unpaid(
     )
 
 
-def _plan_left(
+def _calendar(
     frame: pd.DataFrame,
-    articles: Sequence[PlanArticle],
-    items: Sequence[ListItem],
+    records: Sequence[CalendarRecord],
+    morning: Mapping[int, Receipt],
+    now: Mapping[int, Receipt],
     today: date,
+    code: str,
+) -> CalendarState:
+    """Вхождения записей валюты; операции платежей списка записям не достаются."""
+    return calendar_state(
+        frame,
+        [record for record in records if record.currency == code],
+        today,
+        month_end(today),
+        today - timedelta(days=PACE_DAYS),
+        _paid(morning),
+        _paid(now),
+    )
+
+
+def _share(
+    spreads: Mapping[str, float],
+    unpaid: Mapping[str, float],
     rates: Rates,
     codes: Sequence[str],
 ) -> dict[str, float]:
@@ -191,16 +285,11 @@ def _plan_left(
     снимается со статей других валют, сначала сумов: как и вкладка, прогноз не
     считает платёж дважды — днями в одной валюте и событием в другой.
     """
-    morning = match_receipts(
-        frame, items, today.replace(day=1), today - timedelta(days=1)
-    )
     left: dict[str, float] = {}
     extra = 0.0  # в сумах: платежи, которым не хватило статей своей валюты
     for code in codes:
-        rest = _plan_rest(frame, articles, code, today)
-        unpaid = _unpaid(items, morning, code)
-        left[code] = max(rest - unpaid, 0.0)
-        extra += max(unpaid - rest, 0.0) * rates.to_uzs.get(code, 0.0)
+        left[code] = max(spreads[code] - unpaid[code], 0.0)
+        extra += max(unpaid[code] - spreads[code], 0.0) * rates.to_uzs.get(code, 0.0)
     for code in codes:
         rate = rates.to_uzs.get(code)
         if not rate or extra <= 0:
@@ -229,17 +318,28 @@ def _events(
     return tuple(sorted(found, key=lambda event: event.day))
 
 
+def _moves(
+    events: Sequence[Event], occurrences: Sequence[Occurrence], once_only: bool
+) -> dict[int, float]:
+    """Движения денег по дням: строки списка и открытое на сейчас у записей."""
+    moves: dict[int, float] = {}
+    for event in events:
+        moves[event.day] = moves.get(event.day, 0.0) + event.amount
+    for occurrence in occurrences:
+        if occurrence.now and (not once_only or occurrence.record.repeat == "once"):
+            day = occurrence.day.day
+            moves[day] = moves.get(day, 0.0) - occurrence.now
+    return moves
+
+
 def _line(
     now: float,
-    events: Sequence[Event],
+    moves: Mapping[int, float],
     per_day: float,
     spent_today: float,
     today: date,
 ) -> list[float]:
     """Остаток на вечер каждого дня: за сегодня — только то, что от дня осталось."""
-    moves: dict[int, float] = {}
-    for event in events:
-        moves[event.day] = moves.get(event.day, 0.0) + event.amount
     left = now + moves.get(today.day, 0.0) - max(per_day - spent_today, 0.0)
     values = [left]
     for number in range(today.day + 1, month_end(today).day + 1):
@@ -255,35 +355,51 @@ def currency_forecast(
     today: date,
     code: str,
     plan_left: float | None = None,
+    records: Sequence[CalendarRecord] = (),
 ) -> CurrencyForecast:
     """Прогноз одной валюты с сегодня по последний день месяца.
 
     plan_left — сколько плана статей разложить по дням (month_forecast делит его
-    между валютами); None — статьи своей валюты без её неоплаченных платежей.
+    между валютами); None — статьи своей валюты без резерва записей и без её
+    неоплаченных платежей. records — записи календаря всех валют.
     """
     first = today.replace(day=1)
     yesterday = today - timedelta(days=1)
     morning = match_receipts(frame, items, first, yesterday)
     now = match_receipts(frame, items, first, today)
+    state = _calendar(frame, records, morning, now, today, code)
     start = today - timedelta(days=PACE_DAYS)
-    window = _spent(frame, code, start, yesterday, _paid(morning))
-    pace = max(window / PACE_DAYS, 0.0)
-    spent = max(_spent(frame, code, today, today, _paid(now)), 0.0)
+    paid_morning = _paid(morning) | state.closed_morning
+    pace = max(_spent(frame, code, start, yesterday, paid_morning) / PACE_DAYS, 0.0)
+    spent = _spent(frame, code, today, today, _paid(now) | state.closed_now)
+    covered = sum(item.covered for item in state.occurrences)
+    covered_once = sum(
+        item.covered for item in state.occurrences if item.record.repeat == "once"
+    )
+    book = _book(frame, articles, state, code, today)
     if plan_left is None:
-        rest = _plan_rest(frame, articles, code, today)
-        plan_left = max(rest - _unpaid(items, morning, code), 0.0)
+        plan_left = max(_spread(book) - _unpaid(items, morning, code), 0.0)
     per_day = plan_left / ((month_end(today) - today).days + 1)
     events = _events(items, now, code, today)
     money = _money_now(frame, code, today)
-    plan = _line(money, events, per_day, spent, today)
-    paced = _line(money, events, pace, spent, today)
+    spent_plan = max(spent - covered, 0.0)
+    plan = _line(
+        money, _moves(events, state.occurrences, False), per_day, spent_plan, today
+    )
+    spent_pace = max(spent - covered_once, 0.0)
+    paced = _line(
+        money, _moves(events, state.occurrences, True), pace, spent_pace, today
+    )
+    over = {
+        article.subcategory for article in book if article.booked > article.rest + CENT
+    }
     numbers = list(range(today.day, month_end(today).day + 1))
     return CurrencyForecast(
         code,
         money,
         per_day,
         pace,
-        spent,
+        spent_plan,
         events,
         tuple(
             Evening(number, by_plan, by_pace)
@@ -291,6 +407,21 @@ def currency_forecast(
         ),
         dip(numbers, plan),
         dip(numbers, paced),
+        tuple(
+            RecordDay(
+                item.record.id,
+                item.day.day,
+                item.record.title,
+                item.record.group,
+                item.record.subcategory,
+                item.record.repeat,
+                item.record.amount,
+                item.now,
+                item.record.subcategory in over,
+            )
+            for item in state.occurrences
+        ),
+        book,
     )
 
 
@@ -300,6 +431,35 @@ def currency_order(codes: Iterable[str]) -> list[str]:
     return [code for code in ORDER if code in unique] + sorted(unique - set(ORDER))
 
 
+def _month_records(
+    lines: Sequence[CurrencyForecast],
+    records: Sequence[CalendarRecord],
+    booked: Mapping[str, float],
+    today: date,
+) -> tuple[RecordMonth, ...]:
+    """Записи для списка: все повторы и разовые с сегодня (и в следующих месяцах) —
+    чтобы любую можно было открыть и поправить; сначала повторы, потом разовые."""
+    totals: dict[str, float] = {}
+    over: dict[str, bool] = {}
+    for line in lines:
+        for day in line.records:
+            totals[day.id] = totals.get(day.id, 0.0) + day.open
+            over[day.id] = over.get(day.id, False) or day.over
+    shown = sorted(
+        (r for r in records if r.repeat != "once" or r.start >= today),
+        key=lambda record: (record.repeat == "once", record.start, record.id),
+    )
+    return tuple(
+        RecordMonth(
+            record,
+            totals.get(record.id, 0.0),
+            booked.get(record.id, 0.0),
+            over.get(record.id, False),
+        )
+        for record in shown
+    )
+
+
 def month_forecast(
     frame: pd.DataFrame,
     articles: Sequence[PlanArticle],
@@ -307,12 +467,26 @@ def month_forecast(
     today: date,
     rates: Rates,
     currencies: Iterable[str],
+    records: Sequence[CalendarRecord] = (),
 ) -> MonthForecast:
     """Прогноз по валютам карт и всего — по сегодняшним курсам таблицы."""
     codes = currency_order(currencies)
-    left = _plan_left(frame, articles, items, today, rates, codes)
+    first = today.replace(day=1)
+    morning = match_receipts(frame, items, first, today - timedelta(days=1))
+    now = match_receipts(frame, items, first, today)
+    spreads: dict[str, float] = {}
+    unpaid: dict[str, float] = {}
+    booked: dict[str, float] = {}  # ID записи → её открытое на утро с сегодня
+    for code in codes:
+        state = _calendar(frame, records, morning, now, today, code)
+        spreads[code] = _spread(_book(frame, articles, state, code, today))
+        unpaid[code] = _unpaid(items, morning, code)
+        for occurrence in state.occurrences:
+            key = occurrence.record.id
+            booked[key] = booked.get(key, 0.0) + occurrence.morning
+    left = _share(spreads, unpaid, rates, codes)
     lines = tuple(
-        currency_forecast(frame, articles, items, today, code, left[code])
+        currency_forecast(frame, articles, items, today, code, left[code], records)
         for code in codes
     )
     rated = [(line, rate) for line in lines if (rate := rates.to_uzs.get(line.code))]
@@ -342,4 +516,7 @@ def month_forecast(
         usd,
         dip(numbers, [point.plan for point in uzs]),
         dip(numbers, [point.pace for point in uzs]),
+        _month_records(lines, records, booked, today),
+        hints(frame, today),
+        {code: rate for code, rate in rates.to_uzs.items() if code != "UZS"},
     )

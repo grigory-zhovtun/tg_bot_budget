@@ -461,6 +461,9 @@ class PlanSheets:
     def get_advisor_profile(self) -> str:
         return self.profile
 
+    def get_calendar(self) -> list[list[Any]]:
+        return []
+
     def get_rates(self) -> Rates:
         time.sleep(
             self.delay

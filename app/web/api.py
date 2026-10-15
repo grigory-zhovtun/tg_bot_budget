@@ -21,11 +21,13 @@ from telegram.ext import Application, CallbackContext
 
 from app import config
 from app.custom_icons import leading_emoji
-from app.domain import currency_of, entry_row, local_today, month_title
+from app.domain import INCOME_GROUP, currency_of, entry_row, local_today, month_title
 from app.handlers.messages import save_rows, seen_input
 from app.handlers.month import describe, tell_owner
 from app.handlers.receipts import mark_dirty
 from app.handlers.undo import undo_last
+from app.services.analytics_service import TRANSFERS_GROUP, money
+from app.services.calendar import CalendarRecord, new_id, read_calendar, record_row
 from app.services.dashboard import Dashboard
 from app.services.forecast import Dip, Evening, MonthForecast
 from app.services.plan import (
@@ -53,6 +55,8 @@ from app.web.schemas import (
     AdviceApplyOut,
     AdvicePointOut,
     BootstrapOut,
+    CalendarIn,
+    CalendarRecordOut,
     DashboardOut,
     DayPointOut,
     DaySpendOut,
@@ -60,6 +64,7 @@ from app.web.schemas import (
     ErrorOut,
     ExpenseIn,
     ExpenseOut,
+    ForecastArticleOut,
     ForecastCurrencyOut,
     ForecastDayOut,
     ForecastDipOut,
@@ -67,10 +72,12 @@ from app.web.schemas import (
     ForecastEventOut,
     ForecastItemOut,
     ForecastOut,
+    ForecastRecordOut,
     ForecastTotalOut,
     FrozenOut,
     GroupOut,
     GroupPlanOut,
+    HintOut,
     MessageOut,
     PlanAddableOut,
     PlanAdviceIn,
@@ -108,12 +115,23 @@ FIELD_MESSAGES = {
     "goal": "Цель не подходит — проверьте сумму и валюту",
     "new_rows": "Новую статью не добавить — обновите план",
     "changes": "Нет изменений — нечего сохранять",
+    "date": "Дата — не раньше сегодня и не дальше чем через год",
+    "group": "Такой статьи нет — обновите приложение",
+    "currency": "Такой валюты нет у карт",
+    "weekdays": "Выберите дни недели",
+    "name": "Название — до 60 символов",
+    "repeat": "Такого повтора нет — обновите приложение",
 }
 SHEETS_DOWN = "Таблица не ответила — попробуйте ещё раз"
 PLAN_LOCK = "plan_lock"  # bot_data: одно сохранение плана за раз — проверка и запись
 CONFLICT = "Пока вы правили, план поменяли — проверьте подсвеченные строки"
 NO_SPACE = "Во вкладке нет места для новых статей"
 ADVISOR_DOWN = "Советник сейчас недоступен"
+RECORD_GONE = "Запись уже удалили — обновите прогноз"
+CLOSED_GROUPS = frozenset({INCOME_GROUP, TRANSFERS_GROUP})  # в календаре только траты
+MAX_AHEAD_DAYS = 366  # запись — не дальше чем через год
+CALENDAR_ENTRIES = "calendar_entries"  # user_data: entry_id уже записанных записей
+ENTRY_LIMIT = 200
 # Обе модели с повторами — до двух минут; приложение ждёт советника 100 с
 ADVICE_SECONDS = 60
 
@@ -332,6 +350,7 @@ def forecast_out(found: MonthForecast | None, today: date) -> ForecastOut:
             ],
             days=_days_out(line.days, line.code),
             below_zero=_dips_out(line.plan_dip, line.pace_dip),
+            records=_records_out(line.records, line.code),
         )
         for line in found.currencies
     ]
@@ -346,6 +365,149 @@ def forecast_out(found: MonthForecast | None, today: date) -> ForecastOut:
             usd=_days_out(found.total_usd, "USD"),
             below_zero=_dips_out(found.plan_dip, found.pace_dip),
         ),
+        rates=dict(found.rates),
+        calendar=[
+            CalendarRecordOut(
+                id=item.record.id,
+                date=item.record.start,
+                repeat=item.record.repeat,
+                weekdays=sorted(item.record.weekdays),
+                group=item.record.group,
+                subcategory=item.record.subcategory,
+                currency=item.record.currency,
+                amount=_rounded(item.record.amount, item.record.currency),
+                name=item.record.name,
+                author=item.record.author,
+                month_total=_rounded(item.month_total, item.record.currency),
+                booked=_rounded(item.booked, item.record.currency),
+                over=item.over,
+            )
+            for item in found.calendar
+        ],
+        articles=[
+            ForecastArticleOut(
+                group=article.group,
+                subcategory=article.subcategory,
+                currency=article.currency,
+                plan=_rounded(article.plan, article.currency),
+                rest=_rounded(article.rest, article.currency),
+                booked=_rounded(article.booked, article.currency),
+            )
+            for line in found.currencies
+            for article in line.articles
+        ],
+        hints={
+            key: HintOut(typical=hint.typical, last=hint.last, per_day=hint.per_day)
+            for key, hint in found.hints.items()
+        },
+    )
+
+
+def _records_out(records: Sequence[Any], code: str) -> list[ForecastRecordOut]:
+    found = []
+    for day in records:
+        left = _rounded(day.open, code)
+        found.append(
+            ForecastRecordOut(
+                id=day.id,
+                day=day.day,
+                name=day.name,
+                group=day.group,
+                subcategory=day.subcategory,
+                repeat=day.repeat,
+                amount=_rounded(day.amount, code),
+                open=left,
+                done=left == 0,
+                over=day.over,
+            )
+        )
+    return found
+
+
+def check_record(
+    body: CalendarIn,
+    bot_data: Mapping[str, Any],
+    today: date,
+    current: CalendarRecord | None,
+) -> set[str]:
+    """Поля записи, которые не подходят: статья трат справочника, валюта карт,
+    дата с сегодня и не дальше года (у правки повтора — можно прежнюю), дни недели."""
+    bad: set[str] = set()
+    groups: list[str] = bot_data.get("categories", [])
+    subcategories: dict[str, list[str]] = bot_data.get("subcategories", {})
+    if body.group not in groups or body.group in CLOSED_GROUPS:
+        bad.add("group")
+    elif body.subcategory not in subcategories.get(body.group, []):
+        bad.add("subcategory")
+    cards = {currency_of(source) for source in bot_data.get("sources", [])}
+    if body.currency not in cards:
+        bad.add("currency")
+    kept = current is not None and body.repeat != "once" and body.date == current.start
+    latest = today + timedelta(days=MAX_AHEAD_DAYS)
+    if not kept and not today <= body.date <= latest:
+        bad.add("date")
+    if body.repeat == "weekdays":
+        if not body.weekdays or any(day not in range(1, 8) for day in body.weekdays):
+            bad.add("weekdays")
+    elif body.weekdays:
+        bad.add("weekdays")
+    return bad
+
+
+def record_from(body: CalendarIn, record_id: str, author: str) -> CalendarRecord:
+    return CalendarRecord(
+        id=record_id,
+        start=body.date,
+        repeat=body.repeat,
+        weekdays=frozenset(body.weekdays),
+        group=body.group,
+        subcategory=body.subcategory,
+        currency=body.currency,
+        amount=float(body.amount),
+        name=body.name,
+        author=author,
+    )
+
+
+def find_record(gs: Any, record_id: str) -> CalendarRecord | None:
+    return next(
+        (r for r in read_calendar(gs.get_calendar()) if r.id == record_id), None
+    )
+
+
+def add_record_row(gs: Any, body: CalendarIn, author: str) -> CalendarRecord:
+    """Новая запись с кодом, которого ещё нет на листе."""
+    taken = {record.id for record in read_calendar(gs.get_calendar())}
+    record = record_from(body, new_id(taken), author)
+    gs.add_calendar_row(record_row(record))
+    return record
+
+
+def record_note(action: str, author: str, record: CalendarRecord) -> str:
+    """«📅 Иван — новая запись: 17.10 Детский центр 320 000 UZS (ДЕТИ / развитие)»;
+    без имени — «📅 Новая запись: …». Как у плана: имя через тире, без рода."""
+    if record.repeat == "daily":
+        when = f"каждый день с {record.start:%d.%m}"
+    elif record.repeat == "weekdays":
+        days = " ".join(
+            ("пн", "вт", "ср", "чт", "пт", "сб", "вс")[day - 1]
+            for day in sorted(record.weekdays)
+        )
+        when = f"{days} с {record.start:%d.%m}"
+    elif record.repeat == "monthly":
+        when = f"{record.start.day}-го каждого месяца"
+    else:
+        when = f"{record.start:%d.%m}"
+    value = (
+        money(record.amount)
+        if record.amount == int(record.amount)
+        else f"{record.amount:.2f}".replace(".", ",")
+    )
+    _, group = leading_emoji(record.group)
+    head = f"{author} — {action}" if author else action[:1].upper() + action[1:]
+    return (
+        f"📅 {head}: {when} {record.title} {value} "
+        f"{record.currency} ({group} / {record.subcategory})"
     )
 
 
@@ -634,8 +796,7 @@ def routes(application: Application) -> list[Route]:
         icons: dict[str, str] = application.bot_data.get("icons", {})
         return JSONResponse(dashboard_out(found, today, icons).model_dump(mode="json"))
 
-    async def forecast(request: Request) -> JSONResponse:
-        user = current_user(request)
+    async def fresh_forecast(user_id: int) -> JSONResponse:
         today = local_today(config.ANALYTICS_TIMEZONE)
         analytics = application.bot_data["analytics_service"]
         sources: list[str] = application.bot_data.get("sources", [])
@@ -644,9 +805,107 @@ def routes(application: Application) -> list[Route]:
         try:
             found = await asyncio.to_thread(analytics.forecast, today, codes)
         except Exception:
-            logger.exception("Forecast failed for user_id=%s", user.id)
+            logger.exception("Forecast failed for user_id=%s", user_id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
         return JSONResponse(forecast_out(found, today).model_dump(mode="json"))
+
+    async def forecast(request: Request) -> JSONResponse:
+        user = current_user(request)
+        return await fresh_forecast(user.id)
+
+    async def calendar_body(request: Request) -> CalendarIn | JSONResponse:
+        try:
+            return CalendarIn.model_validate_json(await request.body())
+        except ValidationError as error:
+            return validation_error(
+                {str(e["loc"][0]) if e["loc"] else "body" for e in error.errors()}
+            )
+
+    async def add_record(request: Request) -> JSONResponse:
+        user = current_user(request)
+        body = await calendar_body(request)
+        if isinstance(body, JSONResponse):
+            return body
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        if bad := check_record(body, application.bot_data, today, None):
+            return validation_error(bad)
+        entries: dict[str, None] = user_context(
+            application, user.id
+        ).user_data.setdefault(CALENDAR_ENTRIES, {})
+        key = str(body.entry_id) if body.entry_id else None
+        if key is not None and key in entries:
+            return await fresh_forecast(user.id)  # повтор нажатия: строка уже есть
+        if key is not None:
+            entries[key] = None
+            while len(entries) > ENTRY_LIMIT:
+                entries.pop(next(iter(entries)))
+        author = await author_name(application.bot, user) or ""
+        gs = application.bot_data["gs_service"]
+        try:
+            record = await asyncio.to_thread(add_record_row, gs, body, author)
+        except Exception:
+            if key is not None:
+                entries.pop(key, None)
+            logger.exception("Calendar write failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        logger.info("Calendar record %s added by user_id=%s", record.id, user.id)
+        await notify_others(
+            application.bot, user.id, record_note("новая запись", author, record)
+        )
+        return await fresh_forecast(user.id)
+
+    async def update_record(request: Request) -> JSONResponse:
+        user = current_user(request)
+        record_id = request.path_params["record_id"]
+        body = await calendar_body(request)
+        if isinstance(body, JSONResponse):
+            return body
+        gs = application.bot_data["gs_service"]
+        try:
+            current = await asyncio.to_thread(find_record, gs, record_id)
+        except Exception:
+            logger.exception("Calendar read failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if current is None:
+            return error_response(404, "record_not_found", RECORD_GONE)
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        if bad := check_record(body, application.bot_data, today, current):
+            return validation_error(bad)
+        author = await author_name(application.bot, user) or ""
+        record = record_from(body, record_id, author)
+        try:
+            found = await asyncio.to_thread(
+                gs.update_calendar_row, record_id, record_row(record)
+            )
+        except Exception:
+            logger.exception("Calendar write failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if not found:
+            return error_response(404, "record_not_found", RECORD_GONE)
+        await notify_others(
+            application.bot, user.id, record_note("запись изменена", author, record)
+        )
+        return await fresh_forecast(user.id)
+
+    async def delete_record(request: Request) -> JSONResponse:
+        user = current_user(request)
+        record_id = request.path_params["record_id"]
+        gs = application.bot_data["gs_service"]
+        try:
+            current = await asyncio.to_thread(find_record, gs, record_id)
+            deleted = current is not None and await asyncio.to_thread(
+                gs.delete_calendar_row, record_id
+            )
+        except Exception:
+            logger.exception("Calendar write failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if current is None or not deleted:
+            return error_response(404, "record_not_found", RECORD_GONE)
+        author = await author_name(application.bot, user) or ""
+        await notify_others(
+            application.bot, user.id, record_note("запись удалена", author, current)
+        )
+        return await fresh_forecast(user.id)
 
     async def month_plan(request: Request) -> JSONResponse:
         user = current_user(request)
@@ -813,6 +1072,9 @@ def routes(application: Application) -> list[Route]:
         Route("/expenses/undo", undo_expense, methods=["POST"]),
         Route("/dashboard", dashboard),
         Route("/forecast", forecast),
+        Route("/calendar", add_record, methods=["POST"]),
+        Route("/calendar/{record_id}", update_record, methods=["PUT"]),
+        Route("/calendar/{record_id}", delete_record, methods=["DELETE"]),
         Route("/plan", month_plan),
         Route("/plan", save_month_plan, methods=["POST"]),
         Route("/plan/next", create_next_plan, methods=["POST"]),
