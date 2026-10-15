@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { ApiError, type Api, type Forecast } from "../api";
 import DayCard from "./DayCard";
 import ForecastChart from "./ForecastChart";
+import MonthGrid from "./MonthGrid";
+import RecordsList from "./RecordsList";
 import {
   DEFAULT_VIEW,
   TOTAL,
@@ -19,10 +21,8 @@ import {
   viewCode,
   viewDays,
   warnings,
-  weekOf,
   type View,
 } from "./view";
-import WeekStrip from "./WeekStrip";
 
 const EXPLAIN =
   "План — остаток плана статей, разложенный по дням. Темп — средние траты за 14 дней без переводов и платежей из списка.";
@@ -91,21 +91,35 @@ function Switches({ data, view, onView }: SwitchesProps) {
   );
 }
 
+/** Выбранный день, если он ещё в прогнозе; иначе сегодня. */
+function shownDay(data: Forecast, selected: number | null): number {
+  const today = dayOf(data.today);
+  const end = data.end ? dayOf(data.end) : today;
+  return selected !== null && selected >= today && selected <= end
+    ? selected
+    : today;
+}
+
 interface MonthProps {
   data: Forecast;
   view: View;
-  selected: number | null;
+  day: number;
   onView: (view: View) => void;
   onSelect: (day: number) => void;
+  onAdd?: (day: number) => void; // нет — без справочника записи только смотреть
+  onEdit?: (id: string) => void;
 }
 
-function Month({ data, view, selected, onView, onSelect }: MonthProps) {
-  const today = dayOf(data.today);
-  const end = data.end ? dayOf(data.end) : today;
-  const day =
-    selected !== null && selected >= today && selected <= end
-      ? selected
-      : today;
+function Month({
+  data,
+  view,
+  day,
+  onView,
+  onSelect,
+  onAdd,
+  onEdit,
+}: MonthProps) {
+  const end = data.end ? dayOf(data.end) : dayOf(data.today);
   const code = viewCode(view);
   const days = viewDays(data, view);
   const last = days[days.length - 1];
@@ -120,14 +134,14 @@ function Month({ data, view, selected, onView, onSelect }: MonthProps) {
           {text}
         </p>
       ))}
-      <WeekStrip
+      <MonthGrid data={data} view={view} selected={day} onSelect={onSelect} />
+      <DayCard
         data={data}
         view={view}
-        start={weekOf(day, today)}
-        selected={day}
-        onSelect={onSelect}
+        day={day}
+        onAdd={onAdd}
+        onEdit={onEdit}
       />
-      <DayCard data={data} view={view} day={day} />
       <section className="flex flex-col gap-2 rounded-2xl bg-section p-4">
         <div className="flex items-baseline justify-between gap-2">
           <h2 className="font-semibold">До конца месяца</h2>
@@ -153,6 +167,11 @@ function Month({ data, view, selected, onView, onSelect }: MonthProps) {
           </p>
         )}
       </section>
+      <RecordsList
+        data={data}
+        onAdd={onAdd && (() => onAdd(day))}
+        onEdit={onEdit}
+      />
       <section className="flex flex-col gap-1">
         <h2 className="font-semibold">
           {`По валютам: сейчас → ${shortDate(end, data.today)}`}
@@ -231,6 +250,7 @@ export default function ForecastScreen({ api }: { api: Api }) {
     setView(next);
     storeView(next);
   }, []);
+  const day = data ? shownDay(data, selected) : 0;
 
   return (
     <div className="flex flex-col gap-4">
@@ -263,7 +283,7 @@ export default function ForecastScreen({ api }: { api: Api }) {
         <Month
           data={data}
           view={view}
-          selected={selected}
+          day={day}
           onView={changeView}
           onSelect={setSelected}
         />

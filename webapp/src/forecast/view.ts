@@ -33,7 +33,6 @@ const IN_CURRENCY: Record<string, string> = {
   USD: "в долларах",
   RUB: "в рублях",
 };
-const WEEKDAYS = ["вс", "пн", "вт", "ср", "чт", "пт", "сб"];
 const WEEKDAYS_LONG = [
   "Воскресенье",
   "Понедельник",
@@ -61,11 +60,6 @@ export function shortDate(day: number, today: string): string {
 
 function weekday(iso: string): number {
   return new Date(`${iso}T00:00:00Z`).getUTCDay();
-}
-
-/** «сб». */
-export function weekdayShort(iso: string): string {
-  return WEEKDAYS[weekday(iso)] ?? "";
 }
 
 /** «Суббота, 17 октября». */
@@ -173,11 +167,6 @@ export function chartNote(view: View): string {
   const code = viewCode(view);
   const unit = IN_CURRENCY[code] ?? `в ${code}`;
   return view.scope === TOTAL ? `${unit}, по курсу таблицы` : unit;
-}
-
-/** Первый день недели ленты, в которой день day: недели идут с сегодня по семь дней. */
-export function weekOf(day: number, today: number): number {
-  return today + Math.floor((day - today) / 7) * 7;
 }
 
 /** «⚠️ По темпу сумы уйдут в минус 25.10, вернутся 30.10» — по линии в минусе. */

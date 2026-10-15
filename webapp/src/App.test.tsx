@@ -42,7 +42,7 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App api={fakeApi()} />);
     await user.click(screen.getByRole("tab", { name: "Прогноз" }));
-    expect(await screen.findByText("Октябрь, неделя")).toBeTruthy();
+    expect(await screen.findByText("Октябрь")).toBeTruthy();
   });
 
   afterEach(() => {
