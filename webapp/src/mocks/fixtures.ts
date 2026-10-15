@@ -132,19 +132,21 @@ export const dashboardFixture: Dashboard = {
     dollars: 460,
   },
   // по строкам fact: в «кафе» есть трата в долларах, которой вкладка не видит
-  spent: [
+  categories: [
     {
       name: "🍔 ЕДА",
-      amount: 3_342_000,
+      plan: 3_000_000,
+      fact: 3_342_000,
       items: [
-        { name: "кафе", icon: "🍽️", amount: 3_092_000 },
-        { name: "кофе", icon: "☕", amount: 250_000 },
+        { name: "кафе", icon: "🍽️", plan: 2_700_000, fact: 3_092_000 },
+        { name: "кофе", icon: "☕", plan: 300_000, fact: 250_000 },
       ],
     },
     {
       name: "🏚️ ДОМ",
-      amount: 500_000,
-      items: [{ name: "продукты", icon: "🛒", amount: 500_000 }],
+      plan: 2_000_000,
+      fact: 500_000,
+      items: [{ name: "продукты", icon: "🛒", plan: 2_000_000, fact: 500_000 }],
     },
   ],
   untracked: [

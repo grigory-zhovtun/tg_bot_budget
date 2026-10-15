@@ -60,11 +60,12 @@ export interface GroupPlan {
   items: PlanItem[];
 }
 
-/** Траты группы за месяц по строкам fact, в сумах; подкатегории — от большей. */
-export interface SpentGroup {
+/** План-факт группы: план — вкладка месяца, факт — строки fact с 1-го по сегодня. */
+export interface Category {
   name: string;
-  amount: number;
-  items: { name: string; icon: string; amount: number }[];
+  plan: number; // в сумах
+  fact: number; // в сумах
+  items: { name: string; icon: string; plan: number; fact: number }[];
 }
 
 /** Траты статьи без строки во вкладке месяца — в план-факт они не попали. */
@@ -140,14 +141,14 @@ export interface Dashboard {
     uzs: number;
     change: number;
   } | null;
-  groups: GroupPlan[];
   spending: DaySpend[]; // с 1-го числа по сегодня
   upcoming: ForecastItem[];
   subscriptions: Subscription[];
   runway: Runway | null;
-  spent: SpentGroup[]; // расходы по категориям, от большей
+  groups: GroupPlan[]; // план-факт вкладки: остаток по плану на плитках «Ввода»
   untracked: Untracked[];
   cards: CardBalance[];
+  categories: Category[]; // план-факт по категориям, от больших трат
 }
 
 /** Строка списка, которая ещё впереди: сумма — остаток, в валюте строки. */

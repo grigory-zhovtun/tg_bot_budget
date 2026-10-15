@@ -7,9 +7,8 @@ import {
 } from "../api";
 import { itemAmount, longDay, money, short, withCurrency } from "../format";
 import CardBalances from "./CardBalances";
-import GroupBars from "./GroupBars";
+import CategoryChart from "./CategoryChart";
 import SpendingChart from "./SpendingChart";
-import SpentBars from "./SpentBars";
 
 const STATE_TEXT: Record<SubscriptionState, string> = {
   charged: "списано",
@@ -159,15 +158,9 @@ function Content({ data }: { data: Dashboard }) {
           Во вкладке месяца нет блока прогноза — лимит на день не посчитать.
         </p>
       )}
-      {data.groups.length > 0 && (
-        <section className="flex flex-col gap-2" aria-label="План-факт">
-          <h2 className="font-semibold">План-факт</h2>
-          <GroupBars groups={data.groups} />
-        </section>
-      )}
-      {data.spent.length > 0 && (
-        <SpentBars
-          groups={data.spent}
+      {data.categories.length > 0 && (
+        <CategoryChart
+          categories={data.categories}
           untracked={data.untracked}
           today={data.today}
         />
