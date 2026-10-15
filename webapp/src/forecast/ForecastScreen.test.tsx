@@ -173,6 +173,10 @@ describe("ForecastScreen", () => {
       end: null,
       currencies: [],
       total: null,
+      rates: {},
+      calendar: [],
+      articles: [],
+      hints: {},
     });
     render(<ForecastScreen api={fakeApi({ forecast })} />);
     expect(

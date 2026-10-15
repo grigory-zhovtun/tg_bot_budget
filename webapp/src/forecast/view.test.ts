@@ -91,9 +91,11 @@ describe("forecast view", () => {
       },
     ]);
     expect(dayEvents(forecastFixture, UZS, 18)).toEqual([]);
+    // ▼ 24-го — разовая запись «Продукты на неделю»; кофе каждый день не отмечаем
     expect(marks(forecastFixture, UZS)).toEqual([
       { day: 15, up: true },
       { day: 17, up: false },
+      { day: 24, up: false },
       { day: 30, up: true },
     ]);
   });

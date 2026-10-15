@@ -90,7 +90,7 @@ export function viewCode(view: View): string {
 }
 
 /** Валюты вида: во «Всего» — все, иначе одна. */
-function viewCurrencies(data: Forecast, view: View): ForecastCurrency[] {
+export function viewCurrencies(data: Forecast, view: View): ForecastCurrency[] {
   return view.scope === TOTAL
     ? data.currencies
     : data.currencies.filter((line) => line.code === view.scope);
@@ -122,18 +122,21 @@ export function dayEvents(data: Forecast, view: View, day: number): DayEvent[] {
   );
 }
 
-/** Отметки графика: ▲ в дни поступлений, ▼ в дни платежей. */
+/** Отметки графика: ▲ в дни поступлений, ▼ в дни платежей и открытых разовых записей. */
 export function marks(
   data: Forecast,
   view: View,
 ): { day: number; up: boolean }[] {
   const found: { day: number; up: boolean }[] = [];
+  const add = (day: number, up: boolean) => {
+    if (!found.some((mark) => mark.day === day && mark.up === up)) {
+      found.push({ day, up });
+    }
+  };
   for (const line of viewCurrencies(data, view)) {
-    for (const event of line.events) {
-      const up = event.amount > 0;
-      if (!found.some((mark) => mark.day === event.day && mark.up === up)) {
-        found.push({ day: event.day, up });
-      }
+    for (const event of line.events) add(event.day, event.amount > 0);
+    for (const record of line.records) {
+      if (record.repeat === "once" && record.open > 0) add(record.day, false);
     }
   }
   return found.sort((a, b) => a.day - b.day);
