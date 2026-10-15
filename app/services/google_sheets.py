@@ -58,6 +58,9 @@ MAX_PROFILE = 2000
 CALENDAR_TTL = 60.0  # секунд: лист «Календарь» перечитываем не чаще раза в минуту
 CALENDAR_HEADER = ["ID", "Дата", "Повтор", "Дни", "Группа", "Подкатегория",
                    "Валюта", "Сумма", "Название", "Кто"]  # fmt: skip
+# секунд: соединение и ответ Google; без таймаута зависший запрос ждёт бесконечно
+# и ничего не пишет в лог, а приложение через 25 с показывает «Сервер долго не отвечает»
+SHEETS_TIMEOUT = (10, 60)
 
 
 def row_values(row: SheetRow) -> list[Any]:
@@ -159,6 +162,7 @@ class GoogleSheetsService:
                 creds, _ = google.auth.default(scopes=SCOPES)
                 self.client = gspread.authorize(creds)
 
+            self.client.set_timeout(SHEETS_TIMEOUT)
             self.sheet = self.client.open_by_key(config.SPREADSHEET_ID)
             self._worksheets.clear()
             logger.info("Successfully connected to Google Sheets.")
@@ -463,6 +467,7 @@ class GoogleSheetsService:
         try:
             return self._worksheet(config.CALENDAR_SHEET_NAME)
         except gspread.WorksheetNotFound:
+            logger.info("No sheet %s, creating it", config.CALENDAR_SHEET_NAME)
             worksheet = self.sheet.add_worksheet(
                 config.CALENDAR_SHEET_NAME, rows=200, cols=len(CALENDAR_HEADER)
             )
@@ -470,6 +475,7 @@ class GoogleSheetsService:
                 [CALENDAR_HEADER], value_input_option=ValueInputOption.raw
             )
             self._worksheets[config.CALENDAR_SHEET_NAME] = worksheet
+            logger.info("Sheet %s created", config.CALENDAR_SHEET_NAME)
             return worksheet
 
     def add_calendar_row(self, row: Sequence[Any]) -> None:

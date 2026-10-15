@@ -823,6 +823,7 @@ def routes(application: Application) -> list[Route]:
 
     async def add_record(request: Request) -> JSONResponse:
         user = current_user(request)
+        logger.info("Calendar add by user_id=%s", user.id)
         body = await calendar_body(request)
         if isinstance(body, JSONResponse):
             return body
@@ -856,6 +857,7 @@ def routes(application: Application) -> list[Route]:
 
     async def update_record(request: Request) -> JSONResponse:
         user = current_user(request)
+        logger.info("Calendar update by user_id=%s", user.id)
         record_id = request.path_params["record_id"]
         body = await calendar_body(request)
         if isinstance(body, JSONResponse):
@@ -889,6 +891,7 @@ def routes(application: Application) -> list[Route]:
 
     async def delete_record(request: Request) -> JSONResponse:
         user = current_user(request)
+        logger.info("Calendar delete by user_id=%s", user.id)
         record_id = request.path_params["record_id"]
         gs = application.bot_data["gs_service"]
         try:
