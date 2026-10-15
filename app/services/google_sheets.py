@@ -54,6 +54,8 @@ SERIAL_ZERO = date(1899, 12, 30)
 # заголовок блока «🧠 О нас для советника» в первой строке листа system
 PROFILE_MARK = "О НАС"
 MAX_PROFILE = 2000
+CALENDAR_HEADER = ["ID", "Дата", "Повтор", "Дни", "Группа", "Подкатегория",
+                   "Валюта", "Сумма", "Название", "Кто"]  # fmt: skip
 
 
 def row_values(row: SheetRow) -> list[Any]:
