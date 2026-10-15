@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
-import { ApiError, type Api, type Forecast } from "../api";
+import {
+  ApiError,
+  type Api,
+  type Bootstrap,
+  type CalendarRecord,
+  type Forecast,
+} from "../api";
 import DayCard from "./DayCard";
 import ForecastChart from "./ForecastChart";
 import MonthGrid from "./MonthGrid";
+import RecordSheet from "./RecordSheet";
 import RecordsList from "./RecordsList";
 import {
   DEFAULT_VIEW,
@@ -209,13 +216,24 @@ function Month({
   );
 }
 
-export default function ForecastScreen({ api }: { api: Api }) {
+interface Editing {
+  record: CalendarRecord | null; // null — новая запись
+  day: number;
+}
+
+interface Props {
+  api: Api;
+  boot: Bootstrap | null; // справочник для окна записи; нет — записи только смотреть
+}
+
+export default function ForecastScreen({ api, boot }: Props) {
   const [data, setData] = useState<Forecast | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [version, setVersion] = useState(0);
   const [view, setView] = useState<View>(DEFAULT_VIEW);
   const [selected, setSelected] = useState<number | null>(null);
+  const [editing, setEditing] = useState<Editing | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -251,6 +269,20 @@ export default function ForecastScreen({ api }: { api: Api }) {
     storeView(next);
   }, []);
   const day = data ? shownDay(data, selected) : 0;
+  const saved = useCallback((fresh: Forecast) => {
+    setData(fresh);
+    setEditing(null);
+  }, []);
+  const add = useCallback((on: number) => {
+    setEditing({ record: null, day: on });
+  }, []);
+  const edit = useCallback(
+    (id: string) => {
+      const record = data?.calendar.find((item) => item.id === id);
+      if (record) setEditing({ record, day });
+    },
+    [data, day],
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -286,6 +318,19 @@ export default function ForecastScreen({ api }: { api: Api }) {
           day={day}
           onView={changeView}
           onSelect={setSelected}
+          onAdd={boot ? add : undefined}
+          onEdit={boot ? edit : undefined}
+        />
+      )}
+      {editing && boot && data?.status === "ok" && (
+        <RecordSheet
+          api={api}
+          boot={boot}
+          data={data}
+          day={editing.day}
+          record={editing.record}
+          onSaved={saved}
+          onClose={() => setEditing(null)}
         />
       )}
     </div>

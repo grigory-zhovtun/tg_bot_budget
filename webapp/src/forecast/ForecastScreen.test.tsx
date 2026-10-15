@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Api, type CalendarRecord, type Forecast } from "../api";
-import { forecastFixture } from "../mocks/fixtures";
+import { bootstrapFixture, forecastFixture } from "../mocks/fixtures";
 import { fakeApi } from "../test/fakeApi";
 import ForecastScreen from "./ForecastScreen";
 import { VIEW_KEY } from "./view";
@@ -11,8 +11,11 @@ function pill(day: number): HTMLElement {
   return screen.getByRole("button", { name: new RegExp(`^${day} октября`) });
 }
 
+/** Пробелы между разрядами — неразрывные, как в money(). */
+const nb = (text: string) => text.replace(/(\d) (?=\d)/g, "$1\u00a0");
+
 function show(api: Api = fakeApi()) {
-  return render(<ForecastScreen api={api} />);
+  return render(<ForecastScreen api={api} boot={bootstrapFixture} />);
 }
 
 describe("ForecastScreen", () => {
@@ -68,6 +71,11 @@ describe("ForecastScreen", () => {
     expect(within(card).getByText("−150 000 сум")).toBeTruthy();
     expect(within(card).getByText("ЕДА / кофе · каждый день")).toBeTruthy();
     expect(within(card).getByText("сверх плана")).toBeTruthy();
+    expect(
+      within(card).getByRole("button", {
+        name: "＋ Запланировать на 16 октября",
+      }),
+    ).toBeTruthy();
   });
 
   it("shows a paid record as spent", async () => {
@@ -287,5 +295,73 @@ describe("ForecastScreen", () => {
     ).toBeTruthy();
     expect(screen.getByText("03.11")).toBeTruthy();
     expect(screen.getByText("700 000 сум")).toBeTruthy(); // не «✓»: лагерь впереди
+  });
+
+  it("plans a record on the chosen day and shows the fresh forecast", async () => {
+    const addRecord = vi
+      .fn<Api["addRecord"]>()
+      .mockResolvedValue({ ...forecastFixture, calendar: [] });
+    const user = userEvent.setup();
+    show(fakeApi({ addRecord }));
+    await screen.findByText("Октябрь");
+    await user.click(pill(16));
+    await user.click(
+      screen.getByRole("button", { name: "＋ Запланировать на 16 октября" }),
+    );
+    const sheet = screen.getByRole("dialog", { name: "Запись на 16 октября" });
+    await user.click(within(sheet).getByRole("button", { name: "🍔 ЕДА" }));
+    await user.click(within(sheet).getByRole("button", { name: "кафе" }));
+    expect(
+      within(sheet).getByText(
+        "В статье осталось 1 200 000 сум из 1 700 000 сум",
+      ),
+    ).toBeTruthy();
+    await user.click(
+      within(sheet).getByRole("button", { name: nb("обычно 160 000") }),
+    );
+    await user.type(within(sheet).getByLabelText("Название"), "Кафе");
+    await user.click(
+      within(sheet).getByRole("button", { name: "Запланировать" }),
+    );
+    expect(addRecord).toHaveBeenCalledWith({
+      entry_id: expect.any(String),
+      date: "2026-10-16",
+      repeat: "once",
+      weekdays: [],
+      group: "🍔 ЕДА",
+      subcategory: "кафе",
+      currency: "UZS",
+      amount: "160000",
+      name: "Кафе",
+    });
+    expect(
+      await screen.findByText(
+        "Запланируйте траты на дни — прогноз вычтет их в свой день.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("opens a record from the list", async () => {
+    const user = userEvent.setup();
+    show();
+    await screen.findByText("Октябрь");
+    await user.click(
+      screen.getByRole("button", { name: /Продукты на неделю/ }),
+    );
+    const sheet = screen.getByRole("dialog", { name: "Запись" });
+    expect(within(sheet).getByLabelText("Название")).toHaveProperty(
+      "value",
+      "Продукты на неделю",
+    );
+    await user.click(within(sheet).getByRole("button", { name: "Закрыть" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("only shows the records without the catalog", async () => {
+    render(<ForecastScreen api={fakeApi()} boot={null} />);
+    await screen.findByText("Октябрь");
+    expect(screen.queryByRole("button", { name: /Запланировать/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "＋ Новая" })).toBeNull();
   });
 });
