@@ -8,6 +8,7 @@ import calendar
 import io
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,7 @@ from app.services.google_sheets import GoogleSheetsService
 
 if TYPE_CHECKING:
     from app.services.dashboard import Dashboard
+    from app.services.forecast import MonthForecast
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +70,14 @@ def chart_label(text: str) -> str:
     return re.sub(r"[^\w\s.,/()%-]", "", text).strip()
 
 
-def transactions_frame(rows: list[list[Any]], rates: Rates) -> pd.DataFrame:
+def transactions_frame(
+    rows: list[list[Any]], rates: Rates, keep_unknown: bool = False
+) -> pd.DataFrame:
     """Строки fact (UNFORMATTED) → таблица с суммой в сумах (amount_uzs).
 
     amount — колонка D со знаком таблицы: расход и доход плюс, прочий приход минус.
+    Строки валюты без курса пропускаются; keep_unknown оставляет их с amount_uzs 0 —
+    прогноз считает каждую валюту в её собственных деньгах.
     """
     records = []
     for row in rows[1:]:
@@ -93,10 +99,10 @@ def transactions_frame(rows: list[list[Any]], rates: Rates) -> pd.DataFrame:
     frame = pd.DataFrame(records, columns=COLUMNS)
     rate = frame["currency"].map(lambda code: rates.to_uzs.get(code, 0.0))
     unknown = frame.loc[rate == 0, "currency"].unique()
-    if len(unknown):
+    if len(unknown) and not keep_unknown:
         logger.warning("No rate for currencies %s, their rows are skipped", unknown)
     frame["amount_uzs"] = frame["amount"] * rate
-    return frame[rate > 0]
+    return frame if keep_unknown else frame[rate > 0]
 
 
 def expenses(frame: pd.DataFrame) -> pd.DataFrame:
@@ -545,6 +551,30 @@ class AnalyticsService:
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
         return build_dashboard(frame, rows, today, rates, config.FROZEN_CURRENCY)
+
+    def forecast(
+        self, today: date, currencies: Iterable[str]
+    ) -> "MonthForecast | None":
+        """Экран «Прогноз» Mini App; None — вкладки месяца нет."""
+        from app.services.day_budget import read_forecast
+        from app.services.forecast import month_forecast
+        from app.services.plan import read_plan
+
+        sheet = month_title(today)
+        try:
+            rows = self.gs_service.get_values(sheet)
+        except WorksheetNotFound:
+            logger.info("No plan sheet %s", sheet)
+            return None
+        rates = self.gs_service.get_rates()
+        frame = transactions_frame(
+            self.gs_service.get_values(config.FACT_SHEET_NAME), rates, keep_unknown=True
+        )
+        listed = read_forecast(rows)
+        items = listed.items if listed is not None else ()
+        return month_forecast(
+            frame, read_plan(rows).articles, items, today, rates, currencies
+        )
 
     def weekly_digest(self, today: date | None = None) -> str:
         """Воскресная сводка: траты недели против прошлой и план-факт месяца."""

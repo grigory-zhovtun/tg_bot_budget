@@ -120,6 +120,57 @@ export interface Dashboard {
   runway: Runway | null;
 }
 
+/** Строка списка, которая ещё впереди: сумма — остаток, в валюте строки. */
+export interface ForecastEvent {
+  day: number;
+  name: string;
+  amount: number;
+  late: boolean; // день строки прошёл — ждём сегодня
+}
+
+/** Сколько будет вечером дня: по плану и по темпу. */
+export interface ForecastDay {
+  day: number;
+  plan: number;
+  pace: number;
+}
+
+/** Уход в минус: первый день ниже нуля и когда остаток вернётся. */
+export interface ForecastDip {
+  start: number;
+  until: number | null; // null — до конца месяца не вернётся
+}
+
+export interface ForecastDips {
+  plan: ForecastDip | null;
+  pace: ForecastDip | null;
+}
+
+export interface ForecastCurrency {
+  code: string;
+  now: number;
+  per_day_plan: number;
+  per_day_pace: number;
+  spent_today: number;
+  in_total: boolean; // false — нет курса, во «Всего» не входит
+  events: ForecastEvent[];
+  days: ForecastDay[]; // с сегодня по последний день месяца
+  below_zero: ForecastDips;
+}
+
+export interface Forecast {
+  status: "ok" | "no_month_tab";
+  month: string;
+  today: string;
+  end: string | null;
+  currencies: ForecastCurrency[];
+  total: {
+    uzs: ForecastDay[];
+    usd: ForecastDay[]; // пусто — нет курса доллара
+    below_zero: ForecastDips;
+  } | null;
+}
+
 export interface PlanArticle {
   key: string;
   kind: "spend" | "income";
@@ -356,6 +407,7 @@ export const api = {
     }),
   undo: () => request<UndoResult>("/expenses/undo", { method: "POST" }),
   dashboard: () => request<Dashboard>("/dashboard"),
+  forecast: () => request<Forecast>("/forecast"),
   plan: (month: string) =>
     request<MonthPlan>(`/plan?month=${encodeURIComponent(month)}`),
   savePlan: (input: PlanSave) =>

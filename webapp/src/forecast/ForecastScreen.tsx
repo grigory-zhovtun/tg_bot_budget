@@ -1,0 +1,273 @@
+import { useCallback, useEffect, useState } from "react";
+import { ApiError, type Api, type Forecast } from "../api";
+import DayCard from "./DayCard";
+import ForecastChart from "./ForecastChart";
+import {
+  DEFAULT_VIEW,
+  TOTAL,
+  amount,
+  chartNote,
+  currencyRows,
+  dayOf,
+  hasDollars,
+  loadView,
+  marks,
+  perDay,
+  scopes,
+  shortDate,
+  storeView,
+  viewCode,
+  viewDays,
+  warnings,
+  weekOf,
+  type View,
+} from "./view";
+import WeekStrip from "./WeekStrip";
+
+const EXPLAIN =
+  "План — остаток плана статей, разложенный по дням. Темп — средние траты за 14 дней без переводов и платежей из списка.";
+
+function Skeleton() {
+  return (
+    <div className="flex flex-col gap-3" aria-label="Загрузка">
+      {[0, 1, 2].map((key) => (
+        <div key={key} className="h-20 animate-pulse rounded-2xl bg-section" />
+      ))}
+    </div>
+  );
+}
+
+interface SwitchesProps {
+  data: Forecast;
+  view: View;
+  onView: (view: View) => void;
+}
+
+/** «Всего · UZS · USD · RUB» и для «Всего» — «сум | $». */
+function Switches({ data, view, onView }: SwitchesProps) {
+  const button = (on: boolean) =>
+    `rounded-lg px-2 py-1 text-sm font-medium ${on ? "bg-bg shadow-sm" : "text-hint"}`;
+  return (
+    <div className="flex gap-2">
+      <div
+        role="radiogroup"
+        aria-label="Что показать"
+        className="grid flex-1 auto-cols-fr grid-flow-col gap-1 rounded-xl bg-section p-1"
+      >
+        {scopes(data).map((scope) => (
+          <button
+            key={scope}
+            type="button"
+            role="radio"
+            aria-checked={view.scope === scope}
+            className={button(view.scope === scope)}
+            onClick={() => onView({ ...view, scope })}
+          >
+            {scope === TOTAL ? "Всего" : scope}
+          </button>
+        ))}
+      </div>
+      {view.scope === TOTAL && hasDollars(data) && (
+        <div
+          role="radiogroup"
+          aria-label="Единица"
+          className="grid grid-cols-2 gap-1 rounded-xl bg-section p-1"
+        >
+          {(["uzs", "usd"] as const).map((unit) => (
+            <button
+              key={unit}
+              type="button"
+              role="radio"
+              aria-checked={view.unit === unit}
+              className={button(view.unit === unit)}
+              onClick={() => onView({ ...view, unit })}
+            >
+              {unit === "uzs" ? "сум" : "$"}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface MonthProps {
+  data: Forecast;
+  view: View;
+  selected: number | null;
+  onView: (view: View) => void;
+  onSelect: (day: number) => void;
+}
+
+function Month({ data, view, selected, onView, onSelect }: MonthProps) {
+  const today = dayOf(data.today);
+  const end = data.end ? dayOf(data.end) : today;
+  const day =
+    selected !== null && selected >= today && selected <= end
+      ? selected
+      : today;
+  const code = viewCode(view);
+  const days = viewDays(data, view);
+  const last = days[days.length - 1];
+  const ends = last
+    ? `по плану ${amount(last.plan, code)}, по темпу ${amount(last.pace, code)}`
+    : "";
+  return (
+    <>
+      <Switches data={data} view={view} onView={onView} />
+      {warnings(data, view).map((text) => (
+        <p key={text} className="text-sm font-medium text-danger">
+          {text}
+        </p>
+      ))}
+      <WeekStrip
+        data={data}
+        view={view}
+        start={weekOf(day, today)}
+        selected={day}
+        onSelect={onSelect}
+      />
+      <DayCard data={data} view={view} day={day} />
+      <section className="flex flex-col gap-2 rounded-2xl bg-section p-4">
+        <div className="flex items-baseline justify-between gap-2">
+          <h2 className="font-semibold">До конца месяца</h2>
+          <span className="text-xs text-hint">{chartNote(view)}</span>
+        </div>
+        <ForecastChart
+          days={days}
+          marks={marks(data, view)}
+          selected={day}
+          label={`До конца месяца: ${ends}`}
+          onSelect={onSelect}
+        />
+        {last && (
+          <p className="flex flex-wrap gap-x-3 text-xs text-hint">
+            <span>
+              <span className="text-link">━</span>
+              {` по плану ≈ ${amount(last.plan, code)}`}
+            </span>
+            <span>
+              <span className="text-warn">╍</span>
+              {` по темпу ≈ ${amount(last.pace, code)}`}
+            </span>
+          </p>
+        )}
+      </section>
+      <section className="flex flex-col gap-1">
+        <h2 className="font-semibold">
+          {`По валютам: сейчас → ${shortDate(end, data.today)}`}
+        </h2>
+        <ul className="flex flex-col gap-1 text-sm">
+          {currencyRows(data).map((row) => (
+            <li
+              key={row.code}
+              className="grid grid-cols-[2.5rem_1fr_auto] items-baseline gap-2"
+            >
+              <span className="text-hint">{row.code}</span>
+              <span>
+                {row.now}{" "}
+                <span className="whitespace-nowrap">
+                  → <b>{row.end}</b>
+                </span>
+                {!row.counted && (
+                  <span className="text-xs text-hint">
+                    {" "}
+                    · нет курса, не во «Всего»
+                  </span>
+                )}
+              </span>
+              <span
+                className={`text-xs ${row.minus ? "text-danger" : "text-hint"}`}
+              >
+                {row.pace}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+      <p className="text-xs text-hint">{`${EXPLAIN} ${perDay(data, view)}`}</p>
+    </>
+  );
+}
+
+export default function ForecastScreen({ api }: { api: Api }) {
+  const [data, setData] = useState<Forecast | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [version, setVersion] = useState(0);
+  const [view, setView] = useState<View>(DEFAULT_VIEW);
+  const [selected, setSelected] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api.forecast().then(
+      (result) => {
+        if (!alive) return;
+        setData(result);
+        setView(loadView(result));
+        setError(null);
+        setLoading(false);
+      },
+      (reason: unknown) => {
+        if (!alive) return;
+        setError(
+          reason instanceof ApiError
+            ? reason.message
+            : "Не получилось загрузить прогноз",
+        );
+        setLoading(false);
+      },
+    );
+    return () => {
+      alive = false;
+    };
+  }, [api, version]);
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    setVersion((current) => current + 1);
+  }, []);
+  const changeView = useCallback((next: View) => {
+    setView(next);
+    storeView(next);
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-semibold">
+          {data ? `Прогноз · ${data.month}` : "Прогноз"}
+        </h1>
+        <button
+          type="button"
+          className="text-link disabled:opacity-50"
+          disabled={loading}
+          onClick={refresh}
+        >
+          Обновить
+        </button>
+      </div>
+      {loading && !data && <Skeleton />}
+      {error && (
+        <div className="flex flex-col items-start gap-2" role="alert">
+          <p>{error}</p>
+          <button type="button" className="text-link" onClick={refresh}>
+            Повторить
+          </button>
+        </div>
+      )}
+      {data?.status === "no_month_tab" && (
+        <p>Нет вкладки месяца — прогноз появится, когда она будет</p>
+      )}
+      {data?.status === "ok" && (
+        <Month
+          data={data}
+          view={view}
+          selected={selected}
+          onView={changeView}
+          onSelect={setSelected}
+        />
+      )}
+    </div>
+  );
+}

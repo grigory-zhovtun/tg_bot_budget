@@ -3,6 +3,7 @@ import {
   adviceFixture,
   bootstrapFixture,
   dashboardFixture,
+  forecastFixture,
   nextPlanFixture,
   notCreatedFixture,
   planFixture,
@@ -21,6 +22,7 @@ export const mockApi: Api = {
   addExpense: () => later(writtenFixture),
   undo: () => later({ message: "↩️ Удалил из таблицы: строка 4169." }),
   dashboard: () => later(dashboardFixture),
+  forecast: () => later(forecastFixture),
   plan: (month: string) => {
     if (month !== nextPlanFixture.month) return later(planFixture);
     return later(nextCreated ? nextPlanFixture : notCreatedFixture);

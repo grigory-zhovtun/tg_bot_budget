@@ -4,6 +4,7 @@ import {
   adviceFixture,
   bootstrapFixture,
   dashboardFixture,
+  forecastFixture,
   nextPlanFixture,
   notCreatedFixture,
   planFixture,
@@ -19,6 +20,7 @@ export function fakeApi(overrides: Partial<Api> = {}): Api {
       .fn<Api["undo"]>()
       .mockResolvedValue({ message: "↩️ Удалил из таблицы: строка 4169." }),
     dashboard: vi.fn<Api["dashboard"]>().mockResolvedValue(dashboardFixture),
+    forecast: vi.fn<Api["forecast"]>().mockResolvedValue(forecastFixture),
     plan: vi
       .fn<Api["plan"]>()
       .mockImplementation((month) =>

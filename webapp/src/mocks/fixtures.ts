@@ -3,6 +3,8 @@ import type {
   Bootstrap,
   Dashboard,
   ExpenseResult,
+  Forecast,
+  ForecastDay,
   MonthPlan,
 } from "../api";
 
@@ -289,4 +291,97 @@ export const adviceFixture: { points: AdvicePoint[] } = {
     },
     { text: "После цели остаётся 9,5 млн — месяц сходится.", apply: null },
   ],
+};
+
+/** Остаток на вечер с 15-го по 31-е октября: деньги сейчас + события − в день. */
+function evenings(
+  now: number,
+  plan: number,
+  pace: number,
+  moves: Record<number, number>,
+): ForecastDay[] {
+  const days: ForecastDay[] = [];
+  let byPlan = now;
+  let byPace = now;
+  for (let day = 15; day <= 31; day += 1) {
+    byPlan += (moves[day] ?? 0) - plan;
+    byPace += (moves[day] ?? 0) - pace;
+    days.push({ day, plan: byPlan, pace: byPace });
+  }
+  return days;
+}
+
+// пример спеки: сумы уходят в минус по темпу 25-го и возвращаются с ЗП 30-го
+const uzsDays = evenings(6_810_000, 470_000, 850_000, {
+  15: 2_500_000,
+  17: -320_000,
+  30: 30_000_000,
+});
+const usdDays = evenings(1_800, 3, 5, { 18: -500 });
+const rubDays = evenings(20_000, 300, 0, {});
+const totalUzs: ForecastDay[] = uzsDays.map((point, index) => ({
+  day: point.day,
+  plan:
+    point.plan +
+    (usdDays[index]?.plan ?? 0) * 12_000 +
+    (rubDays[index]?.plan ?? 0) * 150,
+  pace:
+    point.pace +
+    (usdDays[index]?.pace ?? 0) * 12_000 +
+    (rubDays[index]?.pace ?? 0) * 150,
+}));
+
+export const forecastFixture: Forecast = {
+  status: "ok",
+  month: "Oct 26",
+  today: "2026-10-15",
+  end: "2026-10-31",
+  currencies: [
+    {
+      code: "UZS",
+      now: 6_810_000,
+      per_day_plan: 470_000,
+      per_day_pace: 850_000,
+      spent_today: 0,
+      in_total: true,
+      events: [
+        { day: 15, name: "Аванс", amount: 2_500_000, late: false },
+        { day: 17, name: "Детский центр", amount: -320_000, late: false },
+        { day: 30, name: "ЗП", amount: 30_000_000, late: false },
+      ],
+      days: uzsDays,
+      below_zero: { plan: null, pace: { start: 25, until: 30 } },
+    },
+    {
+      code: "USD",
+      now: 1_800,
+      per_day_plan: 3,
+      per_day_pace: 5,
+      spent_today: 0,
+      in_total: true,
+      events: [{ day: 18, name: "Квартплата", amount: -500, late: false }],
+      days: usdDays,
+      below_zero: { plan: null, pace: null },
+    },
+    {
+      code: "RUB",
+      now: 20_000,
+      per_day_plan: 300,
+      per_day_pace: 0,
+      spent_today: 0,
+      in_total: true,
+      events: [],
+      days: rubDays,
+      below_zero: { plan: null, pace: null },
+    },
+  ],
+  total: {
+    uzs: totalUzs,
+    usd: totalUzs.map((point) => ({
+      day: point.day,
+      plan: point.plan / 12_000,
+      pace: point.pace / 12_000,
+    })),
+    below_zero: { plan: null, pace: null },
+  },
 };

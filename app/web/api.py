@@ -7,7 +7,7 @@
 
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -27,6 +27,7 @@ from app.handlers.month import describe, tell_owner
 from app.handlers.receipts import mark_dirty
 from app.handlers.undo import undo_last
 from app.services.dashboard import Dashboard
+from app.services.forecast import Dip, Evening, MonthForecast
 from app.services.plan import (
     ArticleChange,
     Catalog,
@@ -59,7 +60,14 @@ from app.web.schemas import (
     ErrorOut,
     ExpenseIn,
     ExpenseOut,
+    ForecastCurrencyOut,
+    ForecastDayOut,
+    ForecastDipOut,
+    ForecastDipsOut,
+    ForecastEventOut,
     ForecastItemOut,
+    ForecastOut,
+    ForecastTotalOut,
     FrozenOut,
     GroupOut,
     GroupPlanOut,
@@ -273,6 +281,71 @@ def dashboard_out(
             for sub in found.subscriptions
         ],
         runway=runway,
+    )
+
+
+WHOLE_CURRENCIES = frozenset({"UZS", "RUB"})  # остальные валюты — до центов
+
+
+def _rounded(value: float, code: str) -> float:
+    return float(round(value)) if code in WHOLE_CURRENCIES else round(value, 2)
+
+
+def _days_out(days: Sequence[Evening], code: str) -> list[ForecastDayOut]:
+    return [
+        ForecastDayOut(
+            day=point.day,
+            plan=_rounded(point.plan, code),
+            pace=_rounded(point.pace, code),
+        )
+        for point in days
+    ]
+
+
+def _dips_out(plan: Dip | None, pace: Dip | None) -> ForecastDipsOut:
+    def one(dip: Dip | None) -> ForecastDipOut | None:
+        return None if dip is None else ForecastDipOut(start=dip.start, until=dip.until)
+
+    return ForecastDipsOut(plan=one(plan), pace=one(pace))
+
+
+def forecast_out(found: MonthForecast | None, today: date) -> ForecastOut:
+    """Прогноз для экрана; без вкладки месяца — только статус."""
+    if found is None:
+        return ForecastOut(status="no_month_tab", month=month_title(today), today=today)
+    currencies = [
+        ForecastCurrencyOut(
+            code=line.code,
+            now=_rounded(line.now, line.code),
+            per_day_plan=_rounded(line.per_day_plan, line.code),
+            per_day_pace=_rounded(line.per_day_pace, line.code),
+            spent_today=_rounded(line.spent_today, line.code),
+            in_total=line.code in found.counted,
+            events=[
+                ForecastEventOut(
+                    day=event.day,
+                    name=event.name,
+                    amount=_rounded(event.amount, line.code),
+                    late=event.late,
+                )
+                for event in line.events
+            ],
+            days=_days_out(line.days, line.code),
+            below_zero=_dips_out(line.plan_dip, line.pace_dip),
+        )
+        for line in found.currencies
+    ]
+    return ForecastOut(
+        status="ok",
+        month=month_title(found.today),
+        today=found.today,
+        end=found.end,
+        currencies=currencies,
+        total=ForecastTotalOut(
+            uzs=_days_out(found.total_uzs, "UZS"),
+            usd=_days_out(found.total_usd, "USD"),
+            below_zero=_dips_out(found.plan_dip, found.pace_dip),
+        ),
     )
 
 
@@ -561,6 +634,20 @@ def routes(application: Application) -> list[Route]:
         icons: dict[str, str] = application.bot_data.get("icons", {})
         return JSONResponse(dashboard_out(found, today, icons).model_dump(mode="json"))
 
+    async def forecast(request: Request) -> JSONResponse:
+        user = current_user(request)
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        analytics = application.bot_data["analytics_service"]
+        sources: list[str] = application.bot_data.get("sources", [])
+        # валюты карт бота; без справочника карт — хотя бы сумы
+        codes = [currency_of(source) for source in sources] or ["UZS"]
+        try:
+            found = await asyncio.to_thread(analytics.forecast, today, codes)
+        except Exception:
+            logger.exception("Forecast failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        return JSONResponse(forecast_out(found, today).model_dump(mode="json"))
+
     async def month_plan(request: Request) -> JSONResponse:
         user = current_user(request)
         today = local_today(config.ANALYTICS_TIMEZONE)
@@ -725,6 +812,7 @@ def routes(application: Application) -> list[Route]:
         Route("/expenses", add_expense, methods=["POST"]),
         Route("/expenses/undo", undo_expense, methods=["POST"]),
         Route("/dashboard", dashboard),
+        Route("/forecast", forecast),
         Route("/plan", month_plan),
         Route("/plan", save_month_plan, methods=["POST"]),
         Route("/plan/next", create_next_plan, methods=["POST"]),

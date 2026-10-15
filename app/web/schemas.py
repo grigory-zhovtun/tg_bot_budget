@@ -165,6 +165,58 @@ class DashboardOut(ApiModel):
     runway: RunwayOut | None = None
 
 
+class ForecastEventOut(ApiModel):
+    day: int
+    name: str
+    amount: float  # что ещё впереди по строке: в её валюте и со знаком
+    late: bool  # день строки прошёл — ждём сегодня
+
+
+class ForecastDayOut(ApiModel):
+    day: int
+    plan: float  # остаток на вечер по плану
+    pace: float  # остаток на вечер по темпу
+
+
+class ForecastDipOut(ApiModel):
+    start: int  # первый день ниже нуля
+    until: int | None  # первый день после него не ниже нуля; None — не вернётся
+
+
+class ForecastDipsOut(ApiModel):
+    plan: ForecastDipOut | None
+    pace: ForecastDipOut | None
+
+
+class ForecastCurrencyOut(ApiModel):
+    code: str
+    now: float
+    per_day_plan: float
+    per_day_pace: float
+    spent_today: float
+    in_total: bool  # False — нет курса, во «Всего» не входит
+    events: list[ForecastEventOut]
+    days: list[ForecastDayOut]
+    below_zero: ForecastDipsOut
+
+
+class ForecastTotalOut(ApiModel):
+    uzs: list[ForecastDayOut]
+    usd: list[ForecastDayOut]  # пусто — нет курса доллара
+    below_zero: ForecastDipsOut
+
+
+class ForecastOut(ApiModel):
+    """Прогноз до конца месяца по валютам карт и всего; без вкладки — только статус."""
+
+    status: Literal["ok", "no_month_tab"]
+    month: str
+    today: date
+    end: date | None = None
+    currencies: list[ForecastCurrencyOut] = []
+    total: ForecastTotalOut | None = None
+
+
 class PlanHistoryOut(ApiModel):
     average: list[str]  # три полных месяца «YYYY-MM»
     last: str

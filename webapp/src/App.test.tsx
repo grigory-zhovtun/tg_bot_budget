@@ -38,6 +38,13 @@ describe("App", () => {
     expect(await screen.findByText("Можно сегодня")).toBeTruthy();
   });
 
+  it("switches to the forecast", async () => {
+    const user = userEvent.setup();
+    render(<App api={fakeApi()} />);
+    await user.click(screen.getByRole("tab", { name: "Прогноз" }));
+    expect(await screen.findByText("Октябрь, неделя")).toBeTruthy();
+  });
+
   afterEach(() => {
     localStorage.clear();
   });
