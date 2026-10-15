@@ -127,6 +127,7 @@ class GoogleSheetsService:
         self._worksheets: dict[str, gspread.Worksheet] = {}
         self._balance_cells: dict[str, str] | None = None
         self._calendar: tuple[float, list[list[Any]]] | None = None
+        self._calendar_writes = 0  # сколько раз бот писал в «Календарь»
         self._authenticate()
 
     def _authenticate(self) -> None:
@@ -439,11 +440,14 @@ class GoogleSheetsService:
     def get_calendar(self) -> list[list[Any]]:
         """Значения листа «Календарь» (UNFORMATTED); копия живёт CALENDAR_TTL секунд.
 
-        Листа нет — записей нет. Запись в лист ботом копию сбрасывает.
+        Листа нет — записей нет. Запись в лист ботом копию сбрасывает, а чтение,
+        во время которого бот писал, в копию не попадает: лист мог быть прочитан
+        до записи.
         """
         now = time.monotonic()
         if self._calendar is not None and now - self._calendar[0] < CALENDAR_TTL:
             return self._calendar[1]
+        writes = self._calendar_writes
         try:
             worksheet = self._worksheet(config.CALENDAR_SHEET_NAME)
         except gspread.WorksheetNotFound:
@@ -455,8 +459,15 @@ class GoogleSheetsService:
                     value_render_option=ValueRenderOption.unformatted
                 ),
             )
-        self._calendar = (now, rows)
+        if writes == self._calendar_writes:
+            self._calendar = (now, rows)
         return rows
+
+    def _calendar_written(self) -> None:
+        """Бот записал в лист: копию — сбросить, идущее чтение — не копировать.
+        Звать после ответа на запись: чтение, начатое позже, запись уже видит."""
+        self._calendar_writes += 1
+        self._calendar = None
 
     def _calendar_sheet(self) -> gspread.Worksheet:
         """Лист «Календарь»; нет — создать его с шапкой."""
@@ -479,7 +490,7 @@ class GoogleSheetsService:
         worksheet.append_rows(
             [list(row)], value_input_option=ValueInputOption.raw, table_range="A:J"
         )
-        self._calendar = None
+        self._calendar_written()
 
     def _calendar_row(self, record_id: str) -> tuple[gspread.Worksheet, int] | None:
         """Лист и номер строки записи record_id; листа или строки нет — None."""
@@ -512,7 +523,7 @@ class GoogleSheetsService:
                 value_input_option=ValueInputOption.raw,
             ),
         )
-        self._calendar = None
+        self._calendar_written()
         return True
 
     def delete_calendar_row(self, record_id: str) -> bool:
@@ -538,7 +549,7 @@ class GoogleSheetsService:
                 ]
             }
         )
-        self._calendar = None
+        self._calendar_written()
         return True
 
     def sheet_id(self, worksheet_name: str) -> int:
