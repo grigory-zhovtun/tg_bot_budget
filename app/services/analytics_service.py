@@ -8,6 +8,7 @@ import calendar
 import io
 import logging
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
@@ -22,6 +23,7 @@ from app.services.google_sheets import GoogleSheetsService
 
 if TYPE_CHECKING:
     from app.services.dashboard import Dashboard
+    from app.services.forecast import MonthForecast
 
 logger = logging.getLogger(__name__)
 
@@ -549,6 +551,30 @@ class AnalyticsService:
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
         return build_dashboard(frame, rows, today, rates, config.FROZEN_CURRENCY)
+
+    def forecast(
+        self, today: date, currencies: Iterable[str]
+    ) -> "MonthForecast | None":
+        """Экран «Прогноз» Mini App; None — вкладки месяца нет."""
+        from app.services.day_budget import read_forecast
+        from app.services.forecast import month_forecast
+        from app.services.plan import read_plan
+
+        sheet = month_title(today)
+        try:
+            rows = self.gs_service.get_values(sheet)
+        except WorksheetNotFound:
+            logger.info("No plan sheet %s", sheet)
+            return None
+        rates = self.gs_service.get_rates()
+        frame = transactions_frame(
+            self.gs_service.get_values(config.FACT_SHEET_NAME), rates, keep_unknown=True
+        )
+        listed = read_forecast(rows)
+        items = listed.items if listed is not None else ()
+        return month_forecast(
+            frame, read_plan(rows).articles, items, today, rates, currencies
+        )
 
     def weekly_digest(self, today: date | None = None) -> str:
         """Воскресная сводка: траты недели против прошлой и план-факт месяца."""
