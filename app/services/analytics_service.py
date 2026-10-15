@@ -22,6 +22,7 @@ from app.domain import INCOME_GROUP, Rates, local_today, month_title
 from app.services.google_sheets import GoogleSheetsService
 
 if TYPE_CHECKING:
+    from app.services.calendar import CalendarRecord
     from app.services.dashboard import Dashboard
     from app.services.forecast import MonthForecast
 
@@ -448,6 +449,12 @@ class AnalyticsService:
             return f"Вкладки «{sheet}» с планом нет — бот создаёт её 1-го числа."
         return format_plan_report(rows, today)
 
+    def _records(self) -> "tuple[CalendarRecord, ...]":
+        """Записи календаря: лист «Календарь» (бот держит его копию минуту)."""
+        from app.services.calendar import read_calendar
+
+        return read_calendar(self.gs_service.get_calendar())
+
     def morning_brief(self, today: date | None = None, now: bool = False) -> str:
         """Лимит на сегодня по вкладке месяца: утреннее сообщение и /today."""
         return self._brief(today, now)[0]
@@ -476,7 +483,9 @@ class AnalyticsService:
         frame = transactions_frame(
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
-        budget = day_budget(frame, rows, today, rates, config.FROZEN_CURRENCY)
+        budget = day_budget(
+            frame, rows, today, rates, config.FROZEN_CURRENCY, self._records()
+        )
         if budget is None:
             return (
                 f"Во вкладке «{sheet}» нет списка поступлений и платежей (блок "
@@ -508,7 +517,9 @@ class AnalyticsService:
         frame = transactions_frame(
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
-        budget = day_budget(frame, rows, today, rates, config.FROZEN_CURRENCY)
+        budget = day_budget(
+            frame, rows, today, rates, config.FROZEN_CURRENCY, self._records()
+        )
         if budget is not None:
             lines.append(today_line(budget))
         return lines
@@ -550,7 +561,9 @@ class AnalyticsService:
         frame = transactions_frame(
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
-        return build_dashboard(frame, rows, today, rates, config.FROZEN_CURRENCY)
+        return build_dashboard(
+            frame, rows, today, rates, config.FROZEN_CURRENCY, self._records()
+        )
 
     def forecast(
         self, today: date, currencies: Iterable[str]
@@ -573,7 +586,13 @@ class AnalyticsService:
         listed = read_forecast(rows)
         items = listed.items if listed is not None else ()
         return month_forecast(
-            frame, read_plan(rows).articles, items, today, rates, currencies
+            frame,
+            read_plan(rows).articles,
+            items,
+            today,
+            rates,
+            currencies,
+            self._records(),
         )
 
     def weekly_digest(self, today: date | None = None) -> str:

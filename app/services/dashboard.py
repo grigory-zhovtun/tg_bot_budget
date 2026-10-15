@@ -6,6 +6,7 @@
 этого месяца.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Any
@@ -14,6 +15,7 @@ import pandas as pd
 
 from app.domain import Rates
 from app.services.analytics_service import PlanLine, plan_lines
+from app.services.calendar import CalendarRecord
 from app.services.day_budget import (
     DayBudget,
     DayPoint,
@@ -101,12 +103,13 @@ def build_dashboard(
     today: date,
     rates: Rates,
     frozen_currency: str | None,
+    records: Sequence[CalendarRecord] = (),
 ) -> Dashboard:
     """Сводка по fact и вкладке месяца; без блока прогноза — только план-факт."""
     spend, _ = plan_lines(rows)
     groups = group_plans(spend)
     forecast = read_forecast(rows)
-    budget = day_budget(frame, rows, today, rates, frozen_currency)
+    budget = day_budget(frame, rows, today, rates, frozen_currency, records)
     if forecast is None or budget is None:
         return Dashboard("no_forecast", None, groups, (), (), ())
     upcoming = budget.ahead
