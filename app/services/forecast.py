@@ -12,18 +12,19 @@
 """
 
 import calendar
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Protocol
 
 import pandas as pd
 
-from app.domain import INCOME_GROUP
+from app.domain import INCOME_GROUP, Rates
 from app.services.analytics_service import expenses
 from app.services.receipts import NOTHING, Receipt, match_receipts, remaining
 
 PACE_DAYS = 14
+ORDER = ("UZS", "USD", "RUB")  # дальше — остальные валюты по алфавиту
 CENT = 0.01  # ниже нуля — меньше −0,01: ноль из округлений минусом не считается
 
 
@@ -83,6 +84,18 @@ class CurrencyForecast:
     events: tuple[Event, ...]
     days: tuple[Evening, ...]  # с сегодня по последний день месяца
     plan_dip: Dip | None
+    pace_dip: Dip | None
+
+
+@dataclass(frozen=True)
+class MonthForecast:
+    today: date
+    end: date
+    currencies: tuple[CurrencyForecast, ...]  # UZS, USD, RUB, остальные по алфавиту
+    counted: frozenset[str]  # валюты с курсом таблицы — они во «Всего»
+    total_uzs: tuple[Evening, ...]
+    total_usd: tuple[Evening, ...]  # пусто — нет курса доллара
+    plan_dip: Dip | None  # у «Всего»
     pace_dip: Dip | None
 
 
@@ -236,4 +249,53 @@ def currency_forecast(
         ),
         dip(numbers, plan),
         dip(numbers, paced),
+    )
+
+
+def currency_order(codes: Iterable[str]) -> list[str]:
+    """UZS, USD, RUB, остальные по алфавиту; без повторов и пустых."""
+    unique = {code for code in codes if code}
+    return [code for code in ORDER if code in unique] + sorted(unique - set(ORDER))
+
+
+def month_forecast(
+    frame: pd.DataFrame,
+    articles: Sequence[PlanArticle],
+    items: Sequence[ListItem],
+    today: date,
+    rates: Rates,
+    currencies: Iterable[str],
+) -> MonthForecast:
+    """Прогноз по валютам карт и всего — по сегодняшним курсам таблицы."""
+    lines = tuple(
+        currency_forecast(frame, articles, items, today, code)
+        for code in currency_order(currencies)
+    )
+    rated = [(line, rate) for line in lines if (rate := rates.to_uzs.get(line.code))]
+    numbers = list(range(today.day, month_end(today).day + 1))
+    plans = [0.0] * len(numbers)
+    paces = [0.0] * len(numbers)
+    for line, rate in rated:
+        for index, point in enumerate(line.days):
+            plans[index] += point.plan * rate
+            paces[index] += point.pace * rate
+    uzs = tuple(
+        Evening(number, plan, pace)
+        for number, plan, pace in zip(numbers, plans, paces, strict=True)
+    )
+    dollar = rates.to_uzs.get("USD")
+    usd = (
+        tuple(Evening(p.day, p.plan / dollar, p.pace / dollar) for p in uzs)
+        if dollar
+        else ()
+    )
+    return MonthForecast(
+        today,
+        month_end(today),
+        lines,
+        frozenset(line.code for line, _ in rated),
+        uzs,
+        usd,
+        dip(numbers, [point.plan for point in uzs]),
+        dip(numbers, [point.pace for point in uzs]),
     )

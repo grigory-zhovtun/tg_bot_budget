@@ -100,6 +100,13 @@ def test_frame_converts_currency_and_skips_unknown() -> None:
     assert claude["amount_uzs"] == 120000.0
 
 
+def test_frame_keeps_currencies_without_a_rate_for_the_forecast() -> None:
+    frame = transactions_frame(FACT, RATES, keep_unknown=True)
+    assert len(frame) == len(FACT) - 2  # шапка и пустая строка
+    sgd = frame[frame["currency"] == "SGD"].iloc[0]
+    assert (sgd["amount"], sgd["amount_uzs"]) == (3.0, 0.0)
+
+
 def test_expenses_and_income_filters() -> None:
     frame = transactions_frame(FACT, RATES)
     assert "💳 СЧЕТА" not in set(expenses(frame)["group"])

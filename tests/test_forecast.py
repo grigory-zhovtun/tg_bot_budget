@@ -15,6 +15,7 @@ from app.services.forecast import (
     Evening,
     Event,
     currency_forecast,
+    month_forecast,
 )
 from app.services.plan import Article
 from tests.test_day_budget import FACT_HEADER, fact_row
@@ -231,3 +232,69 @@ def test_a_dip_that_does_not_come_back_has_no_end() -> None:
     assert line.days[5] == Evening(20, 3_000_000, 0)
     assert line.pace_dip == Dip(21, None)
     assert line.plan_dip is None
+
+
+def test_currencies_follow_uzs_usd_rub_then_the_alphabet() -> None:
+    codes = ["RUB", "EUR", "UZS", "USD", "UZS", ""]
+    found = month_forecast(facts(), (), (), TODAY, RATES, codes)
+    assert [line.code for line in found.currencies] == ["UZS", "USD", "RUB", "EUR"]
+    assert found.counted == frozenset({"UZS", "USD", "RUB"})  # у евро нет курса
+    assert found.end == date(2026, 10, 31)
+
+
+def test_total_is_every_currency_at_todays_rate() -> None:
+    rows = [
+        fact_row(date(2026, 9, 1), "💰 ДОХОДЫ", "нач остаток", 1_000, "USD"),
+        fact_row(date(2026, 9, 1), "💰 ДОХОДЫ", "нач остаток", 20_000, "RUB"),
+        fact_row(date(2026, 10, 14), "🍔 ЕДА", "кофе", 14, "USD"),  # $1 в день
+    ]
+    found = month_forecast(facts(*rows), (), (), TODAY, RATES, ["UZS", "USD", "RUB"])
+    first = found.total_uzs[0]
+    # 10 млн + ($1000 − $14 − $1 за сегодня) × 12 000 + 20 000 ₽ × 150
+    assert first.pace == pytest.approx(10_000_000 + 985 * 12_000 + 3_000_000)
+    assert first.plan == pytest.approx(10_000_000 + 986 * 12_000 + 3_000_000)
+    assert found.total_usd[0].pace == pytest.approx(first.pace / 12_000)
+    assert [point.day for point in found.total_uzs] == list(range(15, 32))
+
+
+def test_without_a_dollar_rate_there_is_no_total_in_dollars() -> None:
+    found = month_forecast(facts(), (), (), TODAY, Rates({"UZS": 1.0}), ["UZS"])
+    assert found.total_usd == ()
+    assert found.total_uzs[0].plan == 10_000_000
+
+
+def test_a_currency_without_a_rate_stays_out_of_the_total() -> None:
+    euro = fact_row(date(2026, 9, 1), "💰 ДОХОДЫ", "нач остаток", 300, "EUR")
+    frame = transactions_frame([FACT_HEADER, OPENING, euro], RATES, keep_unknown=True)
+    found = month_forecast(frame, (), (), TODAY, RATES, ["UZS", "EUR"])
+    assert [(line.code, line.now) for line in found.currencies] == [
+        ("UZS", 10_000_000),
+        ("EUR", 300),
+    ]
+    assert found.counted == frozenset({"UZS"})
+    assert found.total_uzs[0].plan == 10_000_000
+
+
+def test_a_list_row_in_a_currency_without_a_card_is_left_out() -> None:
+    rubles = item("Подписка", 20, -1_000, row=12, currency="RUB")
+    found = month_forecast(facts(), (), [rubles], TODAY, RATES, ["UZS"])
+    assert [line.code for line in found.currencies] == ["UZS"]
+    assert found.currencies[0].events == ()
+    assert found.total_uzs[-1].plan == 10_000_000
+
+
+def test_the_total_goes_below_zero_only_when_all_money_does() -> None:
+    rows = [
+        fact_row(date(2026, 9, 1), "💰 ДОХОДЫ", "нач остаток", 500, "USD"),  # 6 млн
+        fact_row(date(2026, 10, 14), "🍔 ЕДА", "кафе", 14_000_000),  # 1 млн в день
+    ]
+    found = month_forecast(facts(*rows), (), (), TODAY, RATES, ["UZS", "USD"])
+    assert found.currencies[0].pace_dip == Dip(15, None)  # сумы: −4 млн уже сейчас
+    # всего: 15-го 1 млн, 16-го ноль — ещё не минус, 17-го минус
+    assert [point.pace for point in found.total_uzs[:3]] == [
+        1_000_000,
+        0,
+        -1_000_000,
+    ]
+    assert found.pace_dip == Dip(17, None)
+    assert found.plan_dip is None

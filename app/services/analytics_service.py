@@ -68,10 +68,14 @@ def chart_label(text: str) -> str:
     return re.sub(r"[^\w\s.,/()%-]", "", text).strip()
 
 
-def transactions_frame(rows: list[list[Any]], rates: Rates) -> pd.DataFrame:
+def transactions_frame(
+    rows: list[list[Any]], rates: Rates, keep_unknown: bool = False
+) -> pd.DataFrame:
     """Строки fact (UNFORMATTED) → таблица с суммой в сумах (amount_uzs).
 
     amount — колонка D со знаком таблицы: расход и доход плюс, прочий приход минус.
+    Строки валюты без курса пропускаются; keep_unknown оставляет их с amount_uzs 0 —
+    прогноз считает каждую валюту в её собственных деньгах.
     """
     records = []
     for row in rows[1:]:
@@ -93,10 +97,10 @@ def transactions_frame(rows: list[list[Any]], rates: Rates) -> pd.DataFrame:
     frame = pd.DataFrame(records, columns=COLUMNS)
     rate = frame["currency"].map(lambda code: rates.to_uzs.get(code, 0.0))
     unknown = frame.loc[rate == 0, "currency"].unique()
-    if len(unknown):
+    if len(unknown) and not keep_unknown:
         logger.warning("No rate for currencies %s, their rows are skipped", unknown)
     frame["amount_uzs"] = frame["amount"] * rate
-    return frame[rate > 0]
+    return frame if keep_unknown else frame[rate > 0]
 
 
 def expenses(frame: pd.DataFrame) -> pd.DataFrame:
