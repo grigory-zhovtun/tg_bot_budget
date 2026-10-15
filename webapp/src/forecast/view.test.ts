@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { Forecast } from "../api";
 import { forecastFixture } from "../mocks/fixtures";
 import {
+  viewPast,
   DEFAULT_VIEW,
   VIEW_KEY,
   amount,
@@ -170,5 +171,25 @@ describe("forecast view", () => {
     expect(loadView(forecastFixture)).toEqual(DEFAULT_VIEW);
     localStorage.setItem(VIEW_KEY, "{");
     expect(loadView(forecastFixture)).toEqual(DEFAULT_VIEW);
+  });
+
+  it("gives the past days by fact in the numbers of the view", () => {
+    expect(viewPast(forecastFixture, UZS)[13]).toEqual({
+      day: 14,
+      evening: 6_810_000,
+      change: -450_000,
+    });
+    // «Всего»: сумы + $1 800 по 12 000 + 20 000 ₽ по 150
+    expect(viewPast(forecastFixture, DEFAULT_VIEW)[13]).toEqual({
+      day: 14,
+      evening: 31_410_000,
+      change: -555_000,
+    });
+    expect(viewPast(forecastFixture, DOLLARS)[4]?.change).toBeCloseTo(
+      3_895_000 / 12_000,
+    );
+    expect(viewPast({ ...forecastFixture, total: null }, DEFAULT_VIEW)).toEqual(
+      [],
+    );
   });
 });

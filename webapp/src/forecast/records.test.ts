@@ -71,6 +71,14 @@ describe("calendar records", () => {
     expect(gridWeeks("2026-10-31", END)).toEqual([
       [26, 27, 28, 29, 30, 31, null],
     ]);
+    // весь месяц — с недели 1-го числа
+    expect(gridWeeks("2026-10-01", END)).toEqual([
+      [null, null, null, 1, 2, 3, 4],
+      [5, 6, 7, 8, 9, 10, 11],
+      [12, 13, 14, 15, 16, 17, 18],
+      [19, 20, 21, 22, 23, 24, 25],
+      [26, 27, 28, 29, 30, 31, null],
+    ]);
   });
 
   it("sums the open records of a day in the units of the view", () => {

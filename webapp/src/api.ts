@@ -166,6 +166,13 @@ export interface ForecastDay {
   pace: number;
 }
 
+/** Прошедший день по факту: сколько было вечером и изменение за день (доход плюсом). */
+export interface ForecastPast {
+  day: number;
+  evening: number;
+  change: number;
+}
+
 /** Уход в минус: первый день ниже нуля и когда остаток вернётся. */
 export interface ForecastDip {
   start: number;
@@ -204,6 +211,7 @@ export interface ForecastCurrency {
   days: ForecastDay[]; // с сегодня по последний день месяца
   below_zero: ForecastDips;
   records: ForecastRecord[];
+  past: ForecastPast[]; // с 1-го по вчера, по факту
 }
 
 /** Запись для списка и окна: повтор или разовая с сегодня. */
@@ -250,6 +258,8 @@ export interface Forecast {
     uzs: ForecastDay[];
     usd: ForecastDay[]; // пусто — нет курса доллара
     below_zero: ForecastDips;
+    past_uzs: ForecastPast[];
+    past_usd: ForecastPast[];
   } | null;
   rates: Record<string, number>; // к суму, без UZS
   calendar: CalendarRecord[];

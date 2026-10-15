@@ -6,6 +6,7 @@ import type {
   ExpenseResult,
   Forecast,
   ForecastDay,
+  ForecastPast,
   ForecastRecord,
   MonthPlan,
 } from "../api";
@@ -386,6 +387,38 @@ const totalUzs: ForecastDay[] = uzsDays.map((point, index) => ({
     (rubDays[index]?.pace ?? 0) * 150,
 }));
 
+/** Прошедшие дни с 1-го по 14-е: вечер 14-го — деньги сейчас, назад — по изменениям. */
+function pastDays(
+  evening14: number,
+  usual: number,
+  changes: Record<number, number>,
+): ForecastPast[] {
+  const days: ForecastPast[] = [];
+  let evening = evening14;
+  for (let day = 14; day >= 1; day -= 1) {
+    const change = changes[day] ?? -usual;
+    days.unshift({ day, evening, change });
+    evening -= change;
+  }
+  return days;
+}
+
+// 5-го пришёл аванс, 7-го долларами не платили
+const uzsPast = pastDays(6_810_000, 450_000, { 5: 4_000_000 });
+const usdPast = pastDays(1_800, 5, { 7: 0 });
+const rubPast = pastDays(20_000, 300, {});
+const totalPast: ForecastPast[] = uzsPast.map((point, index) => ({
+  day: point.day,
+  evening:
+    point.evening +
+    (usdPast[index]?.evening ?? 0) * 12_000 +
+    (rubPast[index]?.evening ?? 0) * 150,
+  change:
+    point.change +
+    (usdPast[index]?.change ?? 0) * 12_000 +
+    (rubPast[index]?.change ?? 0) * 150,
+}));
+
 // записи календаря: кофе каждый день (сверх плана статьи), кафе по пятницам,
 // продукты 24-го разово и доставка в долларах 18-го каждого месяца
 const coffee: CalendarRecord = {
@@ -485,6 +518,7 @@ export const forecastFixture: Forecast = {
       days: uzsDays,
       below_zero: { plan: null, pace: { start: 25, until: 30 } },
       records: uzsRecords,
+      past: uzsPast,
     },
     {
       code: "USD",
@@ -497,6 +531,7 @@ export const forecastFixture: Forecast = {
       days: usdDays,
       below_zero: { plan: null, pace: null },
       records: occurrences(delivery, [18]),
+      past: usdPast,
     },
     {
       code: "RUB",
@@ -509,6 +544,7 @@ export const forecastFixture: Forecast = {
       days: rubDays,
       below_zero: { plan: null, pace: null },
       records: [],
+      past: rubPast,
     },
   ],
   total: {
@@ -519,6 +555,12 @@ export const forecastFixture: Forecast = {
       pace: point.pace / 12_000,
     })),
     below_zero: { plan: null, pace: null },
+    past_uzs: totalPast,
+    past_usd: totalPast.map((point) => ({
+      day: point.day,
+      evening: point.evening / 12_000,
+      change: point.change / 12_000,
+    })),
   },
   rates: { USD: 12_000, RUB: 150 },
   calendar: [delivery, coffee, cafe, groceries],
