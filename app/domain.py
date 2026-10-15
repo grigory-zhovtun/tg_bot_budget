@@ -207,6 +207,15 @@ def currency_of(source: str) -> str:
     return source.strip()[-3:].upper()
 
 
+def balance_tolerance(source: str) -> float:
+    """Разница остатков, которую считаем совпадением: цент у долларов, сум/рубль у остальных."""
+    return 0.01 if currency_of(source) == "USD" else 1.0
+
+
+def same_balance(diff: float, source: str) -> bool:
+    return abs(diff) <= balance_tolerance(source) + 1e-9
+
+
 def _letters(text: str) -> str:
     return re.sub(r"[^a-zа-яё0-9 ]", "", text.lower()).strip()
 

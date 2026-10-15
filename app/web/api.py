@@ -28,6 +28,7 @@ from app.handlers.receipts import mark_dirty
 from app.handlers.undo import undo_last
 from app.services.analytics_service import TRANSFERS_GROUP, money
 from app.services.calendar import CalendarRecord, new_id, read_calendar, record_row
+from app.services.cards import CardBalance
 from app.services.dashboard import Dashboard
 from app.services.forecast import Dip, Evening, MonthForecast
 from app.services.plan import (
@@ -57,6 +58,7 @@ from app.web.schemas import (
     BootstrapOut,
     CalendarIn,
     CalendarRecordOut,
+    CardOut,
     DashboardOut,
     DayPointOut,
     DaySpendOut,
@@ -93,8 +95,11 @@ from app.web.schemas import (
     RowsOut,
     RunwayOut,
     SourceOut,
+    SpentGroupOut,
+    SpentItemOut,
     SubcategoryOut,
     SubscriptionOut,
+    UntrackedOut,
     UserOut,
 )
 
@@ -208,6 +213,23 @@ def check_entry(entry: ExpenseIn, bot_data: dict[str, Any], today: date) -> set[
     return bad
 
 
+def card_out(card: CardBalance, today: date) -> CardOut:
+    """Карта для экрана: имя без валюты — она у суммы."""
+    name = card.name
+    if name.upper().endswith(f" {card.currency}"):
+        name = name[: -len(card.currency)].strip()
+    return CardOut(
+        name=name,
+        currency=card.currency,
+        balance=card.balance,
+        uzs=card.uzs,
+        bank=card.bank,
+        checked=card.checked.date() if card.checked else None,
+        matches=card.matches,
+        stale=card.stale(today),
+    )
+
+
 def dashboard_out(
     found: Dashboard | None, today: date, icons: dict[str, str]
 ) -> DashboardOut:
@@ -232,10 +254,41 @@ def dashboard_out(
         )
         for group in found.groups
     ]
+    spent = [
+        SpentGroupOut(
+            name=group.name,
+            amount=group.amount,
+            items=[
+                SpentItemOut(
+                    name=item.subcategory,
+                    icon=icons.get(item.subcategory, ""),
+                    amount=item.amount,
+                )
+                for item in group.items
+            ],
+        )
+        for group in found.spent
+    ]
+    untracked = [
+        UntrackedOut(
+            group=item.group,
+            subcategory=item.subcategory,
+            currency=item.currency,
+            amount=item.amount,
+        )
+        for item in found.untracked
+    ]
+    cards = [card_out(card, today) for card in found.cards]
     budget = found.budget
     if budget is None:
         return DashboardOut(
-            status="no_forecast", month=month, today=today, groups=groups
+            status="no_forecast",
+            month=month,
+            today=today,
+            groups=groups,
+            spent=spent,
+            untracked=untracked,
+            cards=cards,
         )
     runway = None
     if budget.runway is not None:
@@ -300,6 +353,9 @@ def dashboard_out(
             for sub in found.subscriptions
         ],
         runway=runway,
+        spent=spent,
+        untracked=untracked,
+        cards=cards,
     )
 
 
