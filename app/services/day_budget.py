@@ -28,6 +28,7 @@ from app.services.analytics_service import (
     money,
     plan_lines,
 )
+from app.services.forecast import currency_forecast
 from app.services.receipts import NOTHING, Receipt, match_receipts, remaining
 from app.services.runway import Runway, uzs_runway
 
@@ -205,8 +206,9 @@ def day_budget(
 ) -> DayBudget | None:
     """Лимит на сегодня по листу fact и вкладке месяца; None — во вкладке нет списка.
 
-    Строки списка — по сверке с fact (services.receipts): к утру дня — для лимита,
-    заморозки и прогноза по сумам; на сейчас — для «Впереди» и трат дня.
+    Строки списка — по сверке с fact (services.receipts): к утру дня — для лимита и
+    заморозки; на сейчас — для «Впереди» и трат дня. Прогноз по сумам — линия «по
+    темпу» модели прогноза (services.forecast), как во вкладке «Прогноз».
     """
     forecast = read_forecast(rows)
     if forecast is None:
@@ -285,10 +287,7 @@ def day_budget(
         upcoming=left_now[:2],
         over_plan=tuple(over[:3]),
         runway=uzs_runway(
-            frame,
-            [replace(item, day=max(item.day, today.day)) for item in morning],
-            today,
-            rates,
+            currency_forecast(frame, (), items, today, "UZS"), today, rates
         ),
         history=tuple(
             DaySpend(day, _spent_on(frame, day, paid), limit_on(day))
