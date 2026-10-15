@@ -1,5 +1,6 @@
 """Лист «Календарь» в сервисе таблицы: чтение с копией на минуту, запись по ID."""
 
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -37,6 +38,20 @@ class CalendarWorksheet:
         self.updates.append(options)
 
 
+class SlowReadWorksheet(CalendarWorksheet):
+    """Лист прочитан, а ответ ещё в пути: тем временем бот пишет в лист по запросу
+    второго пользователя (meanwhile — один раз)."""
+
+    meanwhile: Callable[[], Any] | None = None
+
+    def get_all_values(self, **options: Any) -> list[list[Any]]:
+        rows = super().get_all_values(**options)
+        if self.meanwhile is not None:
+            write, self.meanwhile = self.meanwhile, None
+            write()
+        return rows
+
+
 class CalendarSpreadsheet:
     def __init__(self, worksheet: CalendarWorksheet | None) -> None:
         self.ws = worksheet
@@ -64,6 +79,7 @@ def service_with(ws: CalendarWorksheet | None) -> GoogleSheetsService:
     service._worksheets = {}
     service._balance_cells = None
     service._calendar = None
+    service._calendar_writes = 0
     service._authenticate = lambda: None
     return service
 
@@ -109,6 +125,33 @@ def test_writes_forget_the_copy_of_the_sheet() -> None:
     service.get_calendar()
     service.add_calendar_row(ROW)
     assert service.get_calendar() == [HEADER, ROW]
+    assert ws.reads == 2
+
+
+def test_a_record_added_during_a_read_is_in_the_next_read() -> None:
+    ws = SlowReadWorksheet([HEADER])
+    service = service_with(ws)
+    ws.meanwhile = lambda: service.add_calendar_row(ROW)
+    assert service.get_calendar() == [HEADER]  # прочитано до записи
+    assert service.get_calendar() == [HEADER, ROW]
+
+
+@pytest.mark.parametrize(
+    "write",
+    [
+        lambda service: service.update_calendar_row("k7f2qa", ROW),
+        lambda service: service.delete_calendar_row("k7f2qa"),
+    ],
+    ids=["update", "delete"],
+)
+def test_after_a_change_during_a_read_the_sheet_is_read_again(
+    write: Callable[[GoogleSheetsService], bool],
+) -> None:
+    ws = SlowReadWorksheet([HEADER, ROW])
+    service = service_with(ws)
+    ws.meanwhile = lambda: write(service)
+    service.get_calendar()
+    service.get_calendar()
     assert ws.reads == 2
 
 

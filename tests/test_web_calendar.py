@@ -1,21 +1,28 @@
 """Календарь записей: GET /api/forecast с записями и POST/PUT/DELETE /api/calendar."""
 
+import asyncio
+import time
 from datetime import date, timedelta
+from itertools import pairwise
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from app import config
 from app.services.calendar import HEADER, read_calendar
 from app.services.forecast import month_forecast
+from app.web.server import create_app
 from tests.test_day_budget import RATES, frame
 from tests.test_web_api import OWNER, TODAY, WIFE, auth, client_for, make_application
 
 ROW = ["m3a9zt", "01.10.2026", "каждый день", "", "🍔 ЕДА", "кофе", "UZS", 30000,
        "Кофе", "Иван"]  # fmt: skip
+ABOVE = ["a1yoga", *ROW[1:8], "Йога", "Иван"]
+BELOW = ["t7taxi", *ROW[1:8], "Такси", "Иван"]
 
 
 @pytest.fixture(autouse=True)
@@ -53,6 +60,43 @@ class CalendarSheets:
         return False
 
 
+class TwoStepSheets(CalendarSheets):
+    """Как в Google: правка и удаление — два запроса, найти строку по ID и записать
+    в неё или удалить её, а между ними лист может сдвинуться; spans — когда шла
+    каждая запись."""
+
+    def __init__(self, rows: list[list[Any]]) -> None:
+        super().__init__(rows)
+        self.spans: list[tuple[float, float]] = []
+
+    def number(self, record_id: str) -> int | None:
+        return next(
+            (n for n, row in enumerate(self.rows) if n and row[0] == record_id), None
+        )
+
+    def add_calendar_row(self, row: list[Any]) -> None:
+        start = time.monotonic()
+        time.sleep(0.05)
+        super().add_calendar_row(row)
+        self.spans.append((start, time.monotonic()))
+
+    def update_calendar_row(self, record_id: str, row: list[Any]) -> bool:
+        start, number = time.monotonic(), self.number(record_id)
+        time.sleep(0.1)  # строка найдена, запись ещё в пути — удаление выше успеет
+        if number is not None:
+            self.rows[number] = list(row)
+        self.spans.append((start, time.monotonic()))
+        return number is not None
+
+    def delete_calendar_row(self, record_id: str) -> bool:
+        start, number = time.monotonic(), self.number(record_id)
+        time.sleep(0.05)
+        if number is not None:
+            del self.rows[number]
+        self.spans.append((start, time.monotonic()))
+        return number is not None
+
+
 class CalendarAnalytics:
     """Прогноз по листу в памяти: что записали — то и в ответе."""
 
@@ -64,8 +108,10 @@ class CalendarAnalytics:
         return month_forecast(frame(), (), (), today, RATES, currencies, records)
 
 
-def setup(rows: list[list[Any]] | None = None) -> tuple[Any, CalendarSheets]:
-    sheets = CalendarSheets(rows)
+def setup(
+    rows: list[list[Any]] | None = None, sheets: CalendarSheets | None = None
+) -> tuple[Any, CalendarSheets]:
+    sheets = CalendarSheets(rows) if sheets is None else sheets
     application = make_application(sheets)
     application.bot_data["analytics_service"] = CalendarAnalytics(sheets)
     application.bot.get_chat = AsyncMock(
@@ -194,6 +240,40 @@ def test_a_record_is_deleted() -> None:
     assert application.bot.send_message.await_args.kwargs["text"] == (
         "📅 Иван — запись удалена: каждый день с 01.10 Кофе 30 000 UZS (ЕДА / кофе)"
     )
+
+
+def coffee_saved() -> dict[str, Any]:
+    """PUT записи ROW: тот же повтор, другое название."""
+    return body(entry_id=None, date="2026-10-01", repeat="daily", subcategory="кофе",
+                name="Капучино")  # fmt: skip
+
+
+async def test_a_save_while_a_record_above_is_deleted_loses_no_record() -> None:
+    sheets = TwoStepSheets([ABOVE, ROW, BELOW])
+    application, _ = setup(sheets=sheets)
+    transport = httpx.ASGITransport(app=create_app(application, "s"))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        answers = await asyncio.gather(
+            client.put("/api/calendar/m3a9zt", json=coffee_saved(), headers=auth(WIFE)),
+            client.delete("/api/calendar/a1yoga", headers=auth()),
+        )
+    assert [a.status_code for a in answers] == [200, 200]
+    assert [row[8] for row in sheets.rows[1:]] == ["Капучино", "Такси"]
+
+
+async def test_calendar_writes_go_one_at_a_time() -> None:
+    sheets = TwoStepSheets([ABOVE, ROW, BELOW])
+    application, _ = setup(sheets=sheets)
+    transport = httpx.ASGITransport(app=create_app(application, "s"))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        await asyncio.gather(
+            client.post("/api/calendar", json=body(), headers=auth()),
+            client.put("/api/calendar/m3a9zt", json=coffee_saved(), headers=auth(WIFE)),
+            client.delete("/api/calendar/a1yoga", headers=auth()),
+        )
+    spans = sorted(sheets.spans)
+    overlaps = [(a, b) for a, b in pairwise(spans) if a[1] > b[0]]
+    assert (len(spans), overlaps) == (3, [])
 
 
 def test_a_record_someone_already_deleted_is_404() -> None:
