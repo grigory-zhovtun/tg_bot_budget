@@ -134,6 +134,7 @@ def test_a_currency_without_a_rate_is_outside_the_total() -> None:
         "events": [],
         "days": [],
         "below_zero": {"plan": None, "pace": None},
+        "records": [],
     }
 
 
