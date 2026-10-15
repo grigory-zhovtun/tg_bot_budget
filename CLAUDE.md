@@ -38,7 +38,7 @@ app/
 ├── web/
 │   ├── server.py        # Starlette: POST /telegram (webhook → PTB update_queue), GET /health, security headers, PTB lifespan
 │   ├── auth.py          # Mini App auth: initData (HMAC with the bot token), signed launch links for the keyboard button, webhook secret
-│   ├── api.py           # /api/bootstrap, /api/expenses (entry_row → save_rows, idempotent by entry_id), /api/expenses/undo, /api/dashboard
+│   ├── api.py           # /api/bootstrap, /api/expenses (entry_row → save_rows, idempotent by entry_id), /api/expenses/undo, /api/dashboard, /api/forecast
 │   └── schemas.py       # Pydantic models of the API
 ├── handlers/
 │   ├── common.py        # /start, keyboard helpers, message tracking
@@ -60,6 +60,8 @@ app/
 │   ├── analytics_service.py # AnalyticsService - reports with matplotlib charts
 │   ├── recurring.py     # Monthly payments from fact: recurring_key, amount clusters, day ±4, /subs text and morning lines
 │   ├── dashboard.py     # Mini App «Сводка»: build_dashboard — DayBudget, plan_lines by group, read_daily (O:R under «Дата»), subscription states
+│   ├── forecast.py      # Mini App «Прогноз»: money until the month end per currency and in total, plan and pace lines, list rows as events
+│   ├── runway.py        # «💳 Сумы» card: the forecast's pace line in sums → last day, gap, dollars to exchange
 │   └── day_budget.py    # Daily limit from the month tab forecast block, frozen money, morning text
 └── utils/
     └── keyboards.py     # Keyboards: icons from system!D (`with_icon`), prompts naming card/choice (inline buttons are as wide as the message), `action(..., style)` coloured buttons
@@ -74,6 +76,8 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 **Mini App entry**: «📱 Приложение» (cards keyboard, URL with a signed launch token) or the home-screen icon (initData) → `GET /api/bootstrap` → tiles and keypad → `POST /api/expenses` → `domain.entry_row` → `messages.save_rows` (the same summary and buttons as a chat entry; `app:<entry_id>` in `seen_inputs`) Home-screen shortcuts always go through the Main Mini App (`t.me/<bot>?startapp=home` → `offerHomeScreen`), never through the 30-day launch link.
 
 **Mini App dashboard**: `GET /api/dashboard` → `AnalyticsService.dashboard()` → `build_dashboard` (the same `day_budget` as `/today`, `plan_lines` by group, `read_daily` — the month tab's daily table, `find_series` with this month's state) → `api.dashboard_out`
+
+**Mini App forecast**: `GET /api/forecast` → `AnalyticsService.forecast(today, card currencies)` → `month_forecast` (`fact` with `keep_unknown`, `read_plan(...).articles`, `read_forecast(...).items`; per currency `currency_forecast`: money now, plan per day by the morning reconciliation, pace of 14 days without list payments, events by the reconciliation now; total at today's rates) → `api.forecast_out`
 
 **AI Parsing**: text/photo/document → `GeminiService.parse_transaction()` → each item validated by `domain.ParsedTransaction` → `domain.build_row` (source by card digits, currency conversion with rates from `system!H2:I10`, category/subcategory must exist in `system`, otherwise "🚧 РАЗНОЕ / неучтенка") → one `append_transactions` call → one summary message
 
