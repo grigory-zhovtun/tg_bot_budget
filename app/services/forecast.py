@@ -144,15 +144,10 @@ def _spent(
     return float(spent.loc[mask, "amount"].sum())
 
 
-def _plan_per_day(
-    frame: pd.DataFrame,
-    articles: Sequence[PlanArticle],
-    items: Sequence[ListItem],
-    morning: Mapping[int, Receipt],
-    code: str,
-    today: date,
+def _plan_rest(
+    frame: pd.DataFrame, articles: Sequence[PlanArticle], code: str, today: date
 ) -> float:
-    """Остаток плана статей без неоплаченных к утру платежей списка — на день."""
+    """Остаток плана статей расходов валюты: план минус факт с 1-го по вчера."""
     plans: dict[str, float] = {}
     for article in articles:
         if article.kind == "spend" and article.currency == code:
@@ -165,16 +160,55 @@ def _plan_per_day(
         & (frame["day"] < today)
     ]
     facts = month.groupby("subcategory")["amount"].sum()
-    rest = sum(
+    return sum(
         max(plan - float(facts.get(sub, 0.0)), 0.0) for sub, plan in plans.items()
     )
-    unpaid = -sum(
+
+
+def _unpaid(
+    items: Sequence[ListItem], morning: Mapping[int, Receipt], code: str
+) -> float:
+    """Неоплаченные к утру платежи списка валюты — положительной суммой."""
+    return -sum(
         remaining(item, morning.get(item.row, NOTHING))
         for item in items
         if item.currency == code and item.amount < 0
     )
-    left = (month_end(today) - today).days + 1
-    return max(rest - unpaid, 0.0) / left
+
+
+def _plan_left(
+    frame: pd.DataFrame,
+    articles: Sequence[PlanArticle],
+    items: Sequence[ListItem],
+    today: date,
+    rates: Rates,
+    codes: Sequence[str],
+) -> dict[str, float]:
+    """Сколько плана статей ещё разложить по дням в каждой валюте.
+
+    Неоплаченный платёж списка вычитается из статей своей валюты. Если их не
+    хватает (платёж в долларах, а статья в сумах), остаток по курсу таблицы
+    снимается со статей других валют, сначала сумов: как и вкладка, прогноз не
+    считает платёж дважды — днями в одной валюте и событием в другой.
+    """
+    morning = match_receipts(
+        frame, items, today.replace(day=1), today - timedelta(days=1)
+    )
+    left: dict[str, float] = {}
+    extra = 0.0  # в сумах: платежи, которым не хватило статей своей валюты
+    for code in codes:
+        rest = _plan_rest(frame, articles, code, today)
+        unpaid = _unpaid(items, morning, code)
+        left[code] = max(rest - unpaid, 0.0)
+        extra += max(unpaid - rest, 0.0) * rates.to_uzs.get(code, 0.0)
+    for code in codes:
+        rate = rates.to_uzs.get(code)
+        if not rate or extra <= 0:
+            continue
+        taken = min(left[code] * rate, extra)
+        left[code] -= taken / rate
+        extra -= taken
+    return left
 
 
 def _events(
@@ -220,8 +254,13 @@ def currency_forecast(
     items: Sequence[ListItem],
     today: date,
     code: str,
+    plan_left: float | None = None,
 ) -> CurrencyForecast:
-    """Прогноз одной валюты с сегодня по последний день месяца."""
+    """Прогноз одной валюты с сегодня по последний день месяца.
+
+    plan_left — сколько плана статей разложить по дням (month_forecast делит его
+    между валютами); None — статьи своей валюты без её неоплаченных платежей.
+    """
     first = today.replace(day=1)
     yesterday = today - timedelta(days=1)
     morning = match_receipts(frame, items, first, yesterday)
@@ -230,7 +269,10 @@ def currency_forecast(
     window = _spent(frame, code, start, yesterday, _paid(morning))
     pace = max(window / PACE_DAYS, 0.0)
     spent = max(_spent(frame, code, today, today, _paid(now)), 0.0)
-    per_day = _plan_per_day(frame, articles, items, morning, code, today)
+    if plan_left is None:
+        rest = _plan_rest(frame, articles, code, today)
+        plan_left = max(rest - _unpaid(items, morning, code), 0.0)
+    per_day = plan_left / ((month_end(today) - today).days + 1)
     events = _events(items, now, code, today)
     money = _money_now(frame, code, today)
     plan = _line(money, events, per_day, spent, today)
@@ -267,9 +309,11 @@ def month_forecast(
     currencies: Iterable[str],
 ) -> MonthForecast:
     """Прогноз по валютам карт и всего — по сегодняшним курсам таблицы."""
+    codes = currency_order(currencies)
+    left = _plan_left(frame, articles, items, today, rates, codes)
     lines = tuple(
-        currency_forecast(frame, articles, items, today, code)
-        for code in currency_order(currencies)
+        currency_forecast(frame, articles, items, today, code, left[code])
+        for code in codes
     )
     rated = [(line, rate) for line in lines if (rate := rates.to_uzs.get(line.code))]
     numbers = list(range(today.day, month_end(today).day + 1))
