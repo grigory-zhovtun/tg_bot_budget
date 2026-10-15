@@ -130,6 +130,7 @@ ADVISOR_DOWN = "Советник сейчас недоступен"
 RECORD_GONE = "Запись уже удалили — обновите прогноз"
 CLOSED_GROUPS = frozenset({INCOME_GROUP, TRANSFERS_GROUP})  # в календаре только траты
 MAX_AHEAD_DAYS = 366  # запись — не дальше чем через год
+CALENDAR_LOCK = "calendar_lock"  # bot_data: в «Календарь» пишет один запрос за раз
 CALENDAR_ENTRIES = "calendar_entries"  # user_data: entry_id уже записанных записей
 ENTRY_LIMIT = 200
 # Обе модели с повторами — до двух минут; приложение ждёт советника 100 с
@@ -821,6 +822,12 @@ def routes(application: Application) -> list[Route]:
                 {str(e["loc"][0]) if e["loc"] else "body" for e in error.errors()}
             )
 
+    def calendar_lock() -> asyncio.Lock:
+        """Записи в «Календарь» — по одной: правка и удаление находят строку по ID,
+        а пишут по её номеру; чужое удаление выше между ними сдвинуло бы строки,
+        и правка легла бы на другую запись."""
+        return application.bot_data.setdefault(CALENDAR_LOCK, asyncio.Lock())
+
     async def add_record(request: Request) -> JSONResponse:
         user = current_user(request)
         body = await calendar_body(request)
@@ -842,7 +849,8 @@ def routes(application: Application) -> list[Route]:
         author = await author_name(application.bot, user) or ""
         gs = application.bot_data["gs_service"]
         try:
-            record = await asyncio.to_thread(add_record_row, gs, body, author)
+            async with calendar_lock():
+                record = await asyncio.to_thread(add_record_row, gs, body, author)
         except Exception:
             if key is not None:
                 entries.pop(key, None)
@@ -874,9 +882,10 @@ def routes(application: Application) -> list[Route]:
         author = await author_name(application.bot, user) or ""
         record = record_from(body, record_id, author)
         try:
-            found = await asyncio.to_thread(
-                gs.update_calendar_row, record_id, record_row(record)
-            )
+            async with calendar_lock():
+                found = await asyncio.to_thread(
+                    gs.update_calendar_row, record_id, record_row(record)
+                )
         except Exception:
             logger.exception("Calendar write failed for user_id=%s", user.id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
@@ -892,10 +901,11 @@ def routes(application: Application) -> list[Route]:
         record_id = request.path_params["record_id"]
         gs = application.bot_data["gs_service"]
         try:
-            current = await asyncio.to_thread(find_record, gs, record_id)
-            deleted = current is not None and await asyncio.to_thread(
-                gs.delete_calendar_row, record_id
-            )
+            async with calendar_lock():
+                current = await asyncio.to_thread(find_record, gs, record_id)
+                deleted = current is not None and await asyncio.to_thread(
+                    gs.delete_calendar_row, record_id
+                )
         except Exception:
             logger.exception("Calendar write failed for user_id=%s", user.id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
