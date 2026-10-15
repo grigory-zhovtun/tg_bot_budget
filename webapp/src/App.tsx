@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, type Api, type Bootstrap } from "./api";
 import DashboardScreen from "./dashboard/DashboardScreen";
 import EntryScreen from "./entry/EntryScreen";
+import ForecastScreen from "./forecast/ForecastScreen";
 import HomeScreenButton from "./HomeScreenButton";
 import {
   changeCount,
@@ -13,12 +14,13 @@ import {
 import { nextMonth } from "./plan/months";
 import PlanTab from "./plan/PlanTab";
 
-type Tab = "entry" | "dashboard" | "plan";
+type Tab = "entry" | "dashboard" | "plan" | "forecast";
 
 const TABS: { name: Tab; title: string }[] = [
   { name: "entry", title: "Ввод" },
   { name: "dashboard", title: "Сводка" },
   { name: "plan", title: "План" },
+  { name: "forecast", title: "Прогноз" },
 ];
 
 function errorText(reason: unknown): string {
@@ -91,7 +93,7 @@ export default function App({ api }: { api: Api }) {
   return (
     <main className="mx-auto flex max-w-md flex-col gap-4 p-4">
       <nav
-        className="grid grid-cols-3 gap-1 rounded-xl bg-section p-1"
+        className="grid grid-cols-4 gap-1 rounded-xl bg-section p-1"
         role="tablist"
         aria-label="Разделы"
       >
@@ -143,6 +145,7 @@ export default function App({ api }: { api: Api }) {
           onRestoredSeen={restoredSeen}
         />
       )}
+      {tab === "forecast" && <ForecastScreen api={api} />}
     </main>
   );
 }
