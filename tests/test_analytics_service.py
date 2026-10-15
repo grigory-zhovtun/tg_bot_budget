@@ -87,6 +87,8 @@ class FakeSheets:
         ("", None),
         ("вчера", None),
         (True, None),
+        (3_000_000, None),  # сумма в колонке даты — позже 31.12.9999
+        (float("inf"), None),
     ],
 )
 def test_to_day(value: Any, expected: date | None) -> None:

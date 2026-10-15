@@ -121,9 +121,11 @@ def read_calendar(rows: Sequence[Sequence[Any]]) -> tuple[CalendarRecord, ...]:
     """Значения листа (UNFORMATTED, первая строка — шапка) → записи.
 
     Строка без ID, даты, статьи или суммы, с незнакомым повтором или без дней у
-    «по дням недели» пропускается и пишется в лог.
+    «по дням недели» пропускается и пишется в лог; строка с ID, который уже был выше
+    (строку скопировали руками), — тоже: правка и удаление по ID берут первую.
     """
     found: list[CalendarRecord] = []
+    seen: set[str] = set()
     for number, row in enumerate(rows[1:], start=2):
         cells = list(row[: len(HEADER)]) + [""] * (
             len(HEADER) - len(row[: len(HEADER)])
@@ -149,6 +151,12 @@ def read_calendar(rows: Sequence[Sequence[Any]]) -> tuple[CalendarRecord, ...]:
             if any(_text(cell) for cell in cells):
                 logger.warning("Calendar row %s is skipped: %s", number, cells)
             continue
+        if record_id in seen:
+            logger.warning(
+                "Calendar row %s repeats ID %s and is skipped", number, record_id
+            )
+            continue
+        seen.add(record_id)
         found.append(
             CalendarRecord(
                 record_id,

@@ -58,7 +58,10 @@ def md_escape(text: str) -> str:
 def to_day(value: Any) -> date | None:
     """Серийная дата Google Sheets или «ДД.ММ.ГГГГ» → date."""
     if isinstance(value, int | float) and not isinstance(value, bool) and value > 0:
-        return SERIAL_ZERO + timedelta(days=int(value))
+        try:
+            return SERIAL_ZERO + timedelta(days=int(value))
+        except (OverflowError, ValueError):  # позже 9999 года: число не в той колонке
+            return None
     try:
         parsed = pd.to_datetime(str(value), format="%d.%m.%Y")
     except (ValueError, TypeError):

@@ -96,10 +96,20 @@ def test_broken_rows_are_skipped() -> None:
          "", ""],
         ["a5", day, "нет", "", "👶 ДЕТИ", "развитие", "UZS", 0, "", ""],
         ["a6", day, "нет", "", "", "развитие", "UZS", 1, "", ""],
+        ["a7", 3_000_000, "нет", "", "👶 ДЕТИ", "развитие", "UZS", 1, "", ""],  # сумма в дате
         [],
     ]  # fmt: skip
     assert read_calendar(rows) == ()
     assert read_calendar([]) == ()
+
+
+def test_a_copied_row_with_the_same_id_is_skipped() -> None:
+    first = ["k7f2qa", "17.10.2026", "нет", "", "👶 ДЕТИ", "развитие", "UZS", 320000,
+             "Детский центр", "Тест"]  # fmt: skip
+    copy = ["k7f2qa", "24.10.2026", "нет", "", "👶 ДЕТИ", "развитие", "UZS", 150000,
+            "Бассейн", "Тест"]  # fmt: skip
+    # копия строки с тем же ID не считается: правка и удаление по ID берут первую
+    assert [r.name for r in read_calendar([HEADER, first, copy])] == ["Детский центр"]
 
 
 @pytest.mark.parametrize(
