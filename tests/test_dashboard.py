@@ -207,3 +207,35 @@ def test_broken_card_block_does_not_take_the_dashboard_down(
     found = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab()})).dashboard(TODAY)
     assert found is not None
     assert (found.status, found.cards) == ("ok", ())
+
+
+def test_categories_join_the_tab_plan_with_this_months_fact_rows() -> None:
+    found = build_dashboard(
+        frame(
+            CAFE,
+            fact_row(date(2026, 10, 1), "🚌 ТРАНСПОРТ", "такси", 50_000),  # вне плана
+            fact_row(date(2026, 10, 2), "🏚️ ДОМ", "инвентарь", 600_000),
+        ),
+        tab(),
+        TODAY,
+        RATES,
+        "USD",
+    )
+    # от больших трат к меньшим; внутри группы — так же, без трат — по плану
+    assert [(c.name, c.plan, c.fact) for c in found.categories] == [
+        ("🏚️ ДОМ", 8_300_000, 600_000),
+        ("🍔 ЕДА", 2_600_000, 400_000),
+        ("🚌 ТРАНСПОРТ", 0, 50_000),
+    ]
+    assert [(i.subcategory, i.plan, i.fact) for i in found.categories[0].items] == [
+        ("инвентарь", 500_000, 600_000),
+        ("квартплата", 7_800_000, 0),
+    ]
+
+
+def test_a_planned_group_without_spending_stays_at_the_end() -> None:
+    found = build_dashboard(frame(CAFE), tab(), TODAY, RATES, "USD")
+    assert [(c.name, c.plan, c.fact) for c in found.categories] == [
+        ("🍔 ЕДА", 2_600_000, 400_000),
+        ("🏚️ ДОМ", 8_300_000, 0),
+    ]

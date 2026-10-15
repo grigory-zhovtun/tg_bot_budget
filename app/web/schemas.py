@@ -126,6 +126,22 @@ class SpentGroupOut(ApiModel):
     items: list[SpentItemOut]
 
 
+class CategoryLineOut(ApiModel):
+    name: str
+    icon: str
+    plan: float  # вкладка месяца, в сумах
+    fact: float  # строки fact месяца, в сумах
+
+
+class CategoryOut(ApiModel):
+    """План-факт группы: план вкладки и траты по строкам fact с 1-го по сегодня."""
+
+    name: str
+    plan: float
+    fact: float
+    items: list[CategoryLineOut]
+
+
 class UntrackedOut(ApiModel):
     """Траты статьи без строки во вкладке месяца — в план-факт они не попали."""
 
@@ -215,9 +231,10 @@ class DashboardOut(ApiModel):
     upcoming: list[ForecastItemOut] = []
     subscriptions: list[SubscriptionOut] = []
     runway: RunwayOut | None = None
-    spent: list[SpentGroupOut] = []  # расходы по категориям, от большей
+    spent: list[SpentGroupOut] = []  # для открытых до обновления версий приложения
     untracked: list[UntrackedOut] = []
     cards: list[CardOut] = []
+    categories: list[CategoryOut] = []  # план-факт по категориям, от больших трат
 
 
 class ForecastEventOut(ApiModel):
@@ -231,6 +248,12 @@ class ForecastDayOut(ApiModel):
     day: int
     plan: float  # остаток на вечер по плану
     pace: float  # остаток на вечер по темпу
+
+
+class ForecastPastOut(ApiModel):
+    day: int
+    evening: float  # сколько было вечером по факту
+    change: float  # изменение за день: доход плюсом, расход минусом
 
 
 class ForecastDipOut(ApiModel):
@@ -269,12 +292,15 @@ class ForecastCurrencyOut(ApiModel):
     days: list[ForecastDayOut]
     below_zero: ForecastDipsOut
     records: list[ForecastRecordOut] = []
+    past: list[ForecastPastOut] = []  # с 1-го по вчера, по факту
 
 
 class ForecastTotalOut(ApiModel):
     uzs: list[ForecastDayOut]
     usd: list[ForecastDayOut]  # пусто — нет курса доллара
     below_zero: ForecastDipsOut
+    past_uzs: list[ForecastPastOut] = []
+    past_usd: list[ForecastPastOut] = []
 
 
 class CalendarRecordOut(ApiModel):

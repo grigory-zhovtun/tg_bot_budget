@@ -262,6 +262,7 @@ def test_total_is_every_currency_at_todays_rate() -> None:
 def test_without_a_dollar_rate_there_is_no_total_in_dollars() -> None:
     found = month_forecast(facts(), (), (), TODAY, Rates({"UZS": 1.0}), ["UZS"])
     assert found.total_usd == ()
+    assert found.past_usd == ()
     assert found.total_uzs[0].plan == 10_000_000
 
 
@@ -275,6 +276,7 @@ def test_a_currency_without_a_rate_stays_out_of_the_total() -> None:
     ]
     assert found.counted == frozenset({"UZS"})
     assert found.total_uzs[0].plan == 10_000_000
+    assert found.past_uzs[0].evening == 10_000_000  # евро и в прошлом не во «Всего»
 
 
 def test_a_list_row_in_a_currency_without_a_card_is_left_out() -> None:
@@ -461,3 +463,42 @@ def test_the_list_keeps_every_repeat_and_one_offs_ahead() -> None:
         ("k7f2qa", 0, 320_000, True),
         ("c4mp00", 0, 0, False),
     ]
+
+
+def test_past_days_are_the_evenings_by_fact_and_the_change_of_each_day() -> None:
+    rows = [
+        fact_row(date(2026, 9, 30), "🍔 ЕДА", "кафе", 100_000),  # прошлый месяц
+        fact_row(date(2026, 10, 2), "🍔 ЕДА", "кафе", 400_000),
+        fact_row(date(2026, 10, 5), "💰 ДОХОДЫ", "зарплата", 2_000_000),
+        fact_row(date(2026, 10, 5), "🍔 ЕДА", "кофе", 30_000),
+        fact_row(date(2026, 10, 9), "🍔 ЕДА", "кафе", -50_000),  # возврат
+        fact_row(TODAY, "🍔 ЕДА", "кофе", 20_000),  # сегодня — ещё не прошёл
+        fact_row(date(2026, 10, 4), "🍔 ЕДА", "кафе", 70, "USD"),  # другая валюта
+    ]
+    past = uzs(rows).past
+    assert [day.day for day in past] == list(range(1, 15))
+    evenings = {day.day: (day.evening, day.change) for day in past}
+    assert evenings[1] == (9_900_000, 0)
+    assert evenings[2] == (9_500_000, -400_000)
+    assert evenings[5] == (11_470_000, 1_970_000)  # зарплата минус кофе
+    assert evenings[9] == (11_520_000, 50_000)
+    assert evenings[14] == (11_520_000, 0)
+
+
+def test_on_the_first_day_no_day_has_passed() -> None:
+    assert uzs(today=date(2026, 10, 1)).past == ()
+
+
+def test_past_days_in_total_are_every_currency_at_todays_rate() -> None:
+    rows = [
+        fact_row(date(2026, 9, 1), "💰 ДОХОДЫ", "нач остаток", 1_000, "USD"),
+        fact_row(date(2026, 10, 3), "🍔 ЕДА", "кафе", 10, "USD"),
+        fact_row(date(2026, 10, 3), "🍔 ЕДА", "кафе", 300_000),
+    ]
+    found = month_forecast(facts(*rows), (), (), TODAY, RATES, ["UZS", "USD"])
+    assert [day.day for day in found.past_uzs] == list(range(1, 15))
+    third = found.past_uzs[2]
+    assert third.evening == pytest.approx(9_700_000 + 990 * 12_000)
+    assert third.change == pytest.approx(-300_000 - 10 * 12_000)
+    assert found.past_usd[2].evening == pytest.approx(third.evening / 12_000)
+    assert found.past_usd[2].change == pytest.approx(third.change / 12_000)
