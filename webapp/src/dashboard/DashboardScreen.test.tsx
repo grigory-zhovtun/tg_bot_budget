@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type Api } from "../api";
@@ -84,8 +84,50 @@ describe("DashboardScreen", () => {
   it("opens a group to show its subcategories", async () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi()} />);
-    await user.click(await screen.findByRole("button", { name: /ЕДА/ }));
-    expect(screen.getByText(/кафе/)).toBeTruthy();
+    const plan = await screen.findByRole("region", { name: "План-факт" });
+    await user.click(within(plan).getByRole("button", { name: /ЕДА/ }));
+    expect(within(plan).getByText(/кафе/)).toBeTruthy();
+  });
+
+  it("shows the cards now and where the money went this month", async () => {
+    render(<DashboardScreen api={fakeApi()} />);
+    // плашка — остаток на вечер вчера для сравнения с планом, список — сейчас
+    expect(await screen.findByText("На картах утром")).toBeTruthy();
+    const cards = screen.getByRole("region", { name: "Остатки на картах" });
+    expect(within(cards).getByText("5 250 000 сум")).toBeTruthy();
+    expect(
+      within(cards).getByText("в банке 2 450,00 RUB · сверено 01.10"),
+    ).toBeTruthy();
+    const spent = screen.getByRole("region", {
+      name: "Расходы по категориям",
+    });
+    expect(within(spent).getByText("за 1–10 октября")).toBeTruthy();
+    expect(
+      within(spent).getByRole("button", { name: /ЕДА.*3,34 млн · 87 %/ }),
+    ).toBeTruthy();
+    expect(
+      within(spent).getByText(/не учтено: 🍔 ЕДА \/ кафе \(USD\)/),
+    ).toBeTruthy();
+  });
+
+  it("keeps the cards and the chart without the forecast block", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      status: "no_forecast",
+      limit: null,
+      left_today: null,
+      spent_today: null,
+      balance: null,
+      planned_balance: null,
+      runway: null,
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    expect(
+      await screen.findByRole("region", { name: "Остатки на картах" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("region", { name: "Расходы по категориям" }),
+    ).toBeTruthy();
   });
 
   it("offers a retry when the sheet does not answer", async () => {

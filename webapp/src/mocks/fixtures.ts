@@ -131,6 +131,57 @@ export const dashboardFixture: Dashboard = {
     until: "2026-10-30",
     dollars: 460,
   },
+  // по строкам fact: в «кафе» есть трата в долларах, которой вкладка не видит
+  spent: [
+    {
+      name: "🍔 ЕДА",
+      amount: 3_342_000,
+      items: [
+        { name: "кафе", icon: "🍽️", amount: 3_092_000 },
+        { name: "кофе", icon: "☕", amount: 250_000 },
+      ],
+    },
+    {
+      name: "🏚️ ДОМ",
+      amount: 500_000,
+      items: [{ name: "продукты", icon: "🛒", amount: 500_000 }],
+    },
+  ],
+  untracked: [
+    { group: "🍔 ЕДА", subcategory: "кафе", currency: "USD", amount: 42_000 },
+  ],
+  cards: [
+    {
+      name: "VISA 1111",
+      currency: "UZS",
+      balance: 5_250_000.4,
+      uzs: 5_250_000.4,
+      bank: 5_250_000.4,
+      checked: "2026-10-10",
+      matches: true,
+      stale: false,
+    },
+    {
+      name: "VISA 2222",
+      currency: "USD",
+      balance: 1500.25,
+      uzs: 18_003_000,
+      bank: 1500.24,
+      checked: "2026-10-04",
+      matches: true,
+      stale: false,
+    },
+    {
+      name: "VISA 6666",
+      currency: "RUB",
+      balance: 2400.5,
+      uzs: 360_075,
+      bank: 2450,
+      checked: "2026-10-01",
+      matches: false,
+      stale: true,
+    },
+  ],
 };
 
 export const planFixture: MonthPlan = {
