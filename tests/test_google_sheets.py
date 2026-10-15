@@ -476,3 +476,26 @@ def test_the_sheet_id_survives_one_failure() -> None:
     service.sheet = Flaky(ws)
     assert service.sheet_id("Oct 26") == 31
     assert service.reconnects == 1
+
+
+def test_requests_to_google_have_a_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.timeout: Any = None
+
+        def set_timeout(self, timeout: Any) -> None:
+            self.timeout = timeout
+
+        def open_by_key(self, key: str) -> object:
+            return object()
+
+    client = FakeClient()
+    monkeypatch.setattr(
+        google_sheets.Credentials,
+        "from_service_account_info",
+        lambda info, scopes: object(),
+    )
+    monkeypatch.setattr(google_sheets.gspread, "authorize", lambda creds: client)
+    GoogleSheetsService()
+    # без таймаута зависший запрос к Google ждёт бесконечно и ничего не пишет в лог
+    assert client.timeout == google_sheets.SHEETS_TIMEOUT == (10, 60)
