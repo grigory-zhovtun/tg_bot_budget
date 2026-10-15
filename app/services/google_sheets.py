@@ -3,6 +3,7 @@
 import logging
 import os
 import re
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -54,6 +55,7 @@ SERIAL_ZERO = date(1899, 12, 30)
 # заголовок блока «🧠 О нас для советника» в первой строке листа system
 PROFILE_MARK = "О НАС"
 MAX_PROFILE = 2000
+CALENDAR_TTL = 60.0  # секунд: лист «Календарь» перечитываем не чаще раза в минуту
 CALENDAR_HEADER = ["ID", "Дата", "Повтор", "Дни", "Группа", "Подкатегория",
                    "Валюта", "Сумма", "Название", "Кто"]  # fmt: skip
 
@@ -124,6 +126,7 @@ class GoogleSheetsService:
         self.sheet: gspread.Spreadsheet | None = None
         self._worksheets: dict[str, gspread.Worksheet] = {}
         self._balance_cells: dict[str, str] | None = None
+        self._calendar: tuple[float, list[list[Any]]] | None = None
         self._authenticate()
 
     def _authenticate(self) -> None:
@@ -184,6 +187,7 @@ class GoogleSheetsService:
         """Сбросить кэши (после правок структуры таблицы, команда /reboot)."""
         self._worksheets.clear()
         self._balance_cells = None
+        self._calendar = None
 
     def get_categories_and_sources(
         self,
@@ -431,6 +435,111 @@ class GoogleSheetsService:
                 value_render_option=ValueRenderOption.unformatted
             ),
         )
+
+    def get_calendar(self) -> list[list[Any]]:
+        """Значения листа «Календарь» (UNFORMATTED); копия живёт CALENDAR_TTL секунд.
+
+        Листа нет — записей нет. Запись в лист ботом копию сбрасывает.
+        """
+        now = time.monotonic()
+        if self._calendar is not None and now - self._calendar[0] < CALENDAR_TTL:
+            return self._calendar[1]
+        try:
+            worksheet = self._worksheet(config.CALENDAR_SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            rows: list[list[Any]] = []
+        else:
+            rows = self._with_retry(
+                "Reading calendar",
+                lambda: worksheet.get_all_values(
+                    value_render_option=ValueRenderOption.unformatted
+                ),
+            )
+        self._calendar = (now, rows)
+        return rows
+
+    def _calendar_sheet(self) -> gspread.Worksheet:
+        """Лист «Календарь»; нет — создать его с шапкой."""
+        try:
+            return self._worksheet(config.CALENDAR_SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            worksheet = self.sheet.add_worksheet(
+                config.CALENDAR_SHEET_NAME, rows=200, cols=len(CALENDAR_HEADER)
+            )
+            worksheet.append_rows(
+                [CALENDAR_HEADER], value_input_option=ValueInputOption.raw
+            )
+            self._worksheets[config.CALENDAR_SHEET_NAME] = worksheet
+            return worksheet
+
+    def add_calendar_row(self, row: Sequence[Any]) -> None:
+        """Новая запись календаря строкой в конец листа, значения как есть (RAW)."""
+        worksheet = self._calendar_sheet()
+        # без повтора: если ответ потерялся, повтор записал бы строку дважды
+        worksheet.append_rows(
+            [list(row)], value_input_option=ValueInputOption.raw, table_range="A:J"
+        )
+        self._calendar = None
+
+    def _calendar_row(self, record_id: str) -> tuple[gspread.Worksheet, int] | None:
+        """Лист и номер строки записи record_id; листа или строки нет — None."""
+        try:
+            worksheet = self._worksheet(config.CALENDAR_SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            return None
+        ids = self._with_retry("Reading calendar ids", lambda: worksheet.col_values(1))
+        number = next(
+            (
+                index
+                for index, value in enumerate(ids, start=1)
+                if index > 1 and str(value).strip() == record_id
+            ),
+            None,
+        )
+        return None if number is None else (worksheet, number)
+
+    def update_calendar_row(self, record_id: str, row: Sequence[Any]) -> bool:
+        """Переписать строку записи record_id (A:J как есть); записи нет — False."""
+        found = self._calendar_row(record_id)
+        if found is None:
+            return False
+        worksheet, number = found
+        self._with_retry(
+            "Writing calendar row",
+            lambda: worksheet.update(
+                values=[list(row)],
+                range_name=f"A{number}:J{number}",
+                value_input_option=ValueInputOption.raw,
+            ),
+        )
+        self._calendar = None
+        return True
+
+    def delete_calendar_row(self, record_id: str) -> bool:
+        """Удалить строку записи record_id; записи нет — False."""
+        found = self._calendar_row(record_id)
+        if found is None:
+            return False
+        worksheet, number = found
+        # без повтора: если ответ потерялся, второй запрос снёс бы другую строку
+        self.sheet.batch_update(
+            {
+                "requests": [
+                    {
+                        "deleteDimension": {
+                            "range": {
+                                "sheetId": worksheet.id,
+                                "dimension": "ROWS",
+                                "startIndex": number - 1,
+                                "endIndex": number,
+                            }
+                        }
+                    }
+                ]
+            }
+        )
+        self._calendar = None
+        return True
 
     def sheet_id(self, worksheet_name: str) -> int:
         return self._with_retry(
