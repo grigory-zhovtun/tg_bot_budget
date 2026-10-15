@@ -103,7 +103,9 @@ describe("DashboardScreen", () => {
     const spent = screen.getByRole("region", {
       name: "План-факт по категориям",
     });
-    expect(within(spent).getByText("из 5,00 млн за 1–10 октября")).toBeTruthy();
+    expect(
+      within(spent).getByText("за 1–10 октября · план на месяц 5,00 млн"),
+    ).toBeTruthy();
     expect(
       within(spent).getByRole("button", {
         name: /ЕДА.*3,34 млн из 3,00 млн · 87 %/,

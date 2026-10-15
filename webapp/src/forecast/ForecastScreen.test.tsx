@@ -39,6 +39,10 @@ describe("ForecastScreen", () => {
     expect(within(pill(14)).getByText("−555к")).toBeTruthy();
     expect(within(pill(5)).getByText("36,3")).toBeTruthy();
     expect(within(pill(5)).getByText("+3,9м").className).toContain("text-ok");
+    // скринридеру — полные суммы, а не сокращения клетки
+    expect(pill(5).getAttribute("aria-label")).toBe(
+      nb("5 октября: вечером было 36,3 млн сум, за день +3 895 000 сум"),
+    );
     expect(screen.getAllByRole("button", { name: /октября:/ })).toHaveLength(
       31,
     );
@@ -315,6 +319,20 @@ describe("ForecastScreen", () => {
     ).toBeTruthy();
     expect(screen.getByText("03.11")).toBeTruthy();
     expect(screen.getByText("700 000 сум")).toBeTruthy(); // не «✓»: лагерь впереди
+  });
+
+  it("plans a new record from today when a past day is chosen", async () => {
+    const user = userEvent.setup();
+    show();
+    await screen.findByText("Октябрь");
+    await user.click(pill(3));
+    await user.click(screen.getByRole("button", { name: "＋ Новая" }));
+    // в прошлое не планируют: окно открывается на сегодня, а не на 3-е
+    const sheet = screen.getByRole("dialog");
+    expect(within(sheet).getByLabelText("Дата")).toHaveProperty(
+      "value",
+      "2026-10-15",
+    );
   });
 
   it("plans a record on the chosen day and shows the fresh forecast", async () => {

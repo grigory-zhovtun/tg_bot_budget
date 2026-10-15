@@ -49,7 +49,10 @@ describe("CategoryChart", () => {
   it("shows the month against the plan and every group with its share", () => {
     show();
     expect(screen.getByText("8,40 млн")).toBeTruthy();
-    expect(screen.getByText("из 12,50 млн за 1–15 октября")).toBeTruthy();
+    // план — на весь месяц, а не на прошедшие дни
+    expect(
+      screen.getByText("за 1–15 октября · план на месяц 12,50 млн"),
+    ).toBeTruthy();
     expect(
       screen.getAllByRole("button").map((button) => button.textContent),
     ).toEqual([
@@ -128,6 +131,8 @@ describe("CategoryChart", () => {
 
   it("speaks of one day on the first of the month", () => {
     show("2026-10-01");
-    expect(screen.getByText("из 12,50 млн за 1 октября")).toBeTruthy();
+    expect(
+      screen.getByText("за 1 октября · план на месяц 12,50 млн"),
+    ).toBeTruthy();
   });
 });

@@ -8,6 +8,7 @@ import {
   isoDay,
   pillUnit,
   pillValue,
+  signed,
   viewCode,
   viewDays,
   viewPast,
@@ -44,7 +45,7 @@ function PastCell({ iso, evening, change, code, on, onSelect }: PastProps) {
       type="button"
       aria-pressed={on}
       aria-label={`${longDay(iso)}: вечером было ${pillValue(evening, code)} ${pillUnit(code)}${
-        moved ? `, за день ${moved}` : ""
+        moved ? `, за день ${signed(change, code)}` : ""
       }`}
       className={`flex flex-col items-center rounded-xl border px-0.5 py-1.5 ${
         on ? "border-button bg-button text-button-text" : "border-section"

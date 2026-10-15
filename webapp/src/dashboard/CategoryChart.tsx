@@ -99,7 +99,9 @@ export default function CategoryChart({ categories, untracked, today }: Props) {
       <h2 className="font-semibold">План-факт по категориям</h2>
       <p className="text-sm">
         <span className="font-semibold">{short(fact)}</span>
-        <span className="text-hint">{` из ${short(plan)} ${period(today)}`}</span>
+        <span className="text-hint">
+          {` ${period(today)} · план на месяц ${short(plan)}`}
+        </span>
       </p>
       <ul className="flex flex-col gap-3">
         {categories.map((group) => (

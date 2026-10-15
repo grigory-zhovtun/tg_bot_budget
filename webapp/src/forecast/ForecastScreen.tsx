@@ -176,7 +176,8 @@ function Month({
       </section>
       <RecordsList
         data={data}
-        onAdd={onAdd && (() => onAdd(day))}
+        // в прошлое не планируют: при выбранном прошедшем дне — с сегодня
+        onAdd={onAdd && (() => onAdd(Math.max(day, dayOf(data.today))))}
         onEdit={onEdit}
       />
       <section className="flex flex-col gap-1">
