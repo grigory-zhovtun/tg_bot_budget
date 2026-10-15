@@ -59,7 +59,8 @@ app/
 │   ├── ai_service.py    # GeminiService (google-genai, JSON schema output, merchant hints from fact)
 │   ├── analytics_service.py # AnalyticsService - reports with matplotlib charts
 │   ├── recurring.py     # Monthly payments from fact: recurring_key, amount clusters, day ±4, /subs text and morning lines
-│   ├── dashboard.py     # Mini App «Сводка»: build_dashboard — DayBudget, plan_lines by group, read_daily (O:R under «Дата»), subscription states
+│   ├── dashboard.py     # Mini App «Сводка»: build_dashboard — DayBudget, plan_lines by group, read_daily (O:R under «Дата»), subscription states, spending by group from fact rows (spent_groups) and articles without a month-tab row (untracked)
+│   ├── cards.py         # «Сводка»: card balances from the fact balance block (I name, J «Текущий баланс», N «Проверка», Q «Сверено»), the bank check
 │   ├── forecast.py      # Mini App «Прогноз»: money until the month end per currency and in total, plan and pace lines, list rows and calendar records as events
 │   ├── calendar.py      # «Календарь» sheet: records (once, every day, days of the week, once a month), their days, closing by fact, sum hints
 │   ├── runway.py        # «💳 Сумы» card: the forecast's pace line in sums → last day, gap, dollars to exchange
@@ -76,7 +77,7 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 
 **Mini App entry**: «📱 Приложение» (cards keyboard, URL with a signed launch token) or the home-screen icon (initData) → `GET /api/bootstrap` → tiles and keypad → `POST /api/expenses` → `domain.entry_row` → `messages.save_rows` (the same summary and buttons as a chat entry; `app:<entry_id>` in `seen_inputs`) Home-screen shortcuts always go through the Main Mini App (`t.me/<bot>?startapp=home` → `offerHomeScreen`), never through the 30-day launch link.
 
-**Mini App dashboard**: `GET /api/dashboard` → `AnalyticsService.dashboard()` → `build_dashboard` (the same `day_budget` as `/today`, `plan_lines` by group, `read_daily` — the month tab's daily table, `find_series` with this month's state) → `api.dashboard_out`
+**Mini App dashboard**: `GET /api/dashboard` → `AnalyticsService.dashboard()` → `build_dashboard` (the same `day_budget` as `/today`, `plan_lines` by group, `read_daily` — the month tab's daily table, `find_series` with this month's state, `spent_groups` and `untracked` — this month's fact rows, `card_balances` — the fact balance block from the same read of `fact`, no extra request) → `api.dashboard_out`
 
 **Mini App forecast**: `GET /api/forecast` → `AnalyticsService.forecast(today, card currencies)` → `month_forecast` (`fact` with `keep_unknown`, `read_plan(...).articles`, `read_forecast(...).items`; per currency `currency_forecast`: money now, plan per day by the morning reconciliation, pace of 14 days without list payments, events by the reconciliation now; total at today's rates) → `api.forecast_out`
 

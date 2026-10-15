@@ -3,7 +3,7 @@
 import asyncio
 import time
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
@@ -15,6 +15,7 @@ from starlette.testclient import TestClient
 
 from app import config
 from app.domain import entry_row, local_today
+from app.services.cards import CardBalance
 from app.services.dashboard import build_dashboard
 from app.services.google_sheets import row_values
 from app.web.auth import launch_token
@@ -366,6 +367,57 @@ def test_dashboard_has_spending_and_limit_by_day() -> None:
     assert body["spending"] == [
         {"day": "2026-10-01", "spent": 400_000, "limit": pytest.approx(100_000)},
         {"day": "2026-10-02", "spent": 0, "limit": pytest.approx(90_000)},
+    ]
+
+
+def test_dashboard_has_spending_by_group_and_card_balances() -> None:
+    spent = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000)
+    usd_cafe = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 3.5, "USD")
+    old_check = datetime(2026, 9, 20, 20, 30)
+    cards = (
+        CardBalance("VISA 2222 USD", "USD", 1500.25, 18_003_000, 1500.24, old_check),
+        CardBalance("HUMO 4444 UZS", "UZS", None, None, None, None),
+    )
+    found = build_dashboard(
+        frame(spent, usd_cafe), tab(), date(2026, 10, 2), RATES, "USD", cards=cards
+    )
+    body = dashboard_for(found).json()
+    assert body["spent"] == [
+        {
+            "name": "🍔 ЕДА",
+            "amount": pytest.approx(442_000),
+            "items": [{"name": "кафе", "icon": "", "amount": pytest.approx(442_000)}],
+        }
+    ]
+    assert body["untracked"] == [
+        {
+            "group": "🍔 ЕДА",
+            "subcategory": "кафе",
+            "currency": "USD",
+            "amount": pytest.approx(42_000),
+        }
+    ]
+    assert body["cards"] == [
+        {
+            "name": "VISA 2222",  # валюта — у суммы
+            "currency": "USD",
+            "balance": 1500.25,
+            "uzs": 18_003_000,
+            "bank": 1500.24,
+            "checked": "2026-09-20",
+            "matches": True,  # цент у долларов — совпадение
+            "stale": True,  # сверяли больше недели назад
+        },
+        {
+            "name": "HUMO 4444",
+            "currency": "UZS",
+            "balance": None,
+            "uzs": None,
+            "bank": None,
+            "checked": None,
+            "matches": None,
+            "stale": False,
+        },
     ]
 
 

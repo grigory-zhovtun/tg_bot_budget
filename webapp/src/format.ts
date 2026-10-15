@@ -24,6 +24,14 @@ export function withCurrency(value: number, currency: string): string {
   return `${money(value, currency === "UZS" ? 0 : 2)} ${currency}`;
 }
 
+/** Сколько дней от from до to (ISO-даты): «2026-10-09» → «2026-10-15» — 6. */
+export function daysBetween(from: string, to: string): number {
+  const day = 24 * 60 * 60 * 1000;
+  return Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / day,
+  );
+}
+
 /** «2026-10-10» ± дни → ISO-дата; считаем в UTC, без часовых поясов. */
 export function shiftDay(isoDay: string, days: number): string {
   const date = new Date(`${isoDay}T00:00:00Z`);

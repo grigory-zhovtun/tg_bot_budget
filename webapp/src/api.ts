@@ -60,6 +60,33 @@ export interface GroupPlan {
   items: PlanItem[];
 }
 
+/** Траты группы за месяц по строкам fact, в сумах; подкатегории — от большей. */
+export interface SpentGroup {
+  name: string;
+  amount: number;
+  items: { name: string; icon: string; amount: number }[];
+}
+
+/** Траты статьи без строки во вкладке месяца — в план-факт они не попали. */
+export interface Untracked {
+  group: string;
+  subcategory: string;
+  currency: string;
+  amount: number; // в сумах
+}
+
+/** Остаток карты по таблице и сверка с банком. */
+export interface CardBalance {
+  name: string; // без валюты — она у суммы: «VISA 1111»
+  currency: string;
+  balance: number | null; // «Текущий баланс»; null — ошибка в ячейке
+  uzs: number | null; // null — нет курса или остатка
+  bank: number | null; // остаток банка при последней сверке
+  checked: string | null; // когда сверяли, ISO-дата
+  matches: boolean | null; // null — сверять не с чем
+  stale: boolean; // сверке больше недели
+}
+
 /** День месяца: траты без платежей из списка и лимит, с которым день начался. */
 export interface DaySpend {
   day: string;
@@ -118,6 +145,9 @@ export interface Dashboard {
   upcoming: ForecastItem[];
   subscriptions: Subscription[];
   runway: Runway | null;
+  spent: SpentGroup[]; // расходы по категориям, от большей
+  untracked: Untracked[];
+  cards: CardBalance[];
 }
 
 /** Строка списка, которая ещё впереди: сумма — остаток, в валюте строки. */

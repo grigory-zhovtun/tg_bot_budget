@@ -6,8 +6,10 @@ import {
   type SubscriptionState,
 } from "../api";
 import { itemAmount, longDay, money, short, withCurrency } from "../format";
+import CardBalances from "./CardBalances";
 import GroupBars from "./GroupBars";
 import SpendingChart from "./SpendingChart";
+import SpentBars from "./SpentBars";
 
 const STATE_TEXT: Record<SubscriptionState, string> = {
   charged: "списано",
@@ -71,7 +73,7 @@ function Cards({ data }: { data: Dashboard }) {
   return (
     <section className="grid grid-cols-2 gap-2">
       <div className="rounded-2xl bg-section p-3">
-        <p className="text-xs text-hint">На картах</p>
+        <p className="text-xs text-hint">На картах утром</p>
         <p className="font-semibold">{short(data.balance)}</p>
         <p className="text-xs text-hint">
           по плану {short(data.planned_balance)} ({gap >= 0 ? "+" : ""}
@@ -149,16 +151,26 @@ function Content({ data }: { data: Dashboard }) {
       <Today data={data} />
       <Cards data={data} />
       <Sums data={data} />
+      {data.cards.length > 0 && (
+        <CardBalances cards={data.cards} today={data.today} />
+      )}
       {data.status === "no_forecast" && (
         <p className="text-sm text-hint">
           Во вкладке месяца нет блока прогноза — лимит на день не посчитать.
         </p>
       )}
       {data.groups.length > 0 && (
-        <section className="flex flex-col gap-2">
+        <section className="flex flex-col gap-2" aria-label="План-факт">
           <h2 className="font-semibold">План-факт</h2>
           <GroupBars groups={data.groups} />
         </section>
+      )}
+      {data.spent.length > 0 && (
+        <SpentBars
+          groups={data.spent}
+          untracked={data.untracked}
+          today={data.today}
+        />
       )}
       {data.spending.length > 0 && (
         <section className="flex flex-col gap-2">

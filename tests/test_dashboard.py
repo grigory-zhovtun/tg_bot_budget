@@ -2,7 +2,10 @@
 
 from datetime import date
 
+import pytest
+
 from app.services.analytics_service import AnalyticsService
+from app.services.cards import CardBalance
 from app.services.dashboard import build_dashboard, subscriptions
 from app.services.day_budget import DayPoint, day_budget, read_daily
 from tests.test_analytics_service import serial
@@ -97,3 +100,110 @@ def test_service_reads_the_month_tab_and_the_fact() -> None:
     assert found is not None
     assert found.budget == day_budget(frame(CAFE), tab(), TODAY, RATES, "USD")
     assert AnalyticsService(Sheets({"fact": fact})).dashboard(TODAY) is None
+
+
+def test_spending_by_group_counts_this_month_from_the_fact_rows() -> None:
+    found = build_dashboard(
+        frame(
+            fact_row(date(2026, 9, 30), "🍔 ЕДА", "кафе", 900_000),  # прошлый месяц
+            CAFE,
+            fact_row(date(2026, 10, 1), "🍔 ЕДА", "кофе", 30_000),
+            fact_row(date(2026, 10, 2), "🍔 ЕДА", "кафе", -100_000),  # возврат
+            fact_row(date(2026, 10, 2), "🏚️ ДОМ", "квартплата", 500, "USD"),
+            fact_row(date(2026, 10, 2), "💰 ДОХОДЫ", "зарплата", 5_000_000),
+            fact_row(date(2026, 10, 2), "💳 СЧЕТА", "перевод", 1_000_000),
+            fact_row(date(2026, 10, 3), "🚌 ТРАНСПОРТ", "такси", 50_000),  # завтра
+        ),
+        tab(),
+        TODAY,
+        RATES,
+        "USD",
+    )
+    assert [(g.name, g.amount) for g in found.spent] == [
+        ("🏚️ ДОМ", 6_000_000),
+        ("🍔 ЕДА", 330_000),
+    ]
+    assert [(i.subcategory, i.amount) for i in found.spent[1].items] == [
+        ("кафе", 300_000),
+        ("кофе", 30_000),
+    ]
+
+
+def test_a_group_left_with_refunds_only_is_not_in_the_chart() -> None:
+    refund = fact_row(date(2026, 10, 1), "🚑 ЗДОРОВЬЕ", "аптека", -20_000)
+    found = build_dashboard(frame(CAFE, refund), tab(), TODAY, RATES, "USD")
+    assert [g.name for g in found.spent] == ["🍔 ЕДА"]
+
+
+def test_spending_on_an_article_missing_from_the_month_tab_is_reported() -> None:
+    usd_cafe = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 3.5, "USD")
+    taxi = fact_row(date(2026, 10, 2), "🚌 ТРАНСПОРТ", "такси", 50_000)
+    found = build_dashboard(frame(CAFE, usd_cafe, taxi), tab(), TODAY, RATES, "USD")
+    # вкладка считает факт по паре (подкатегория, валюта): «кафе» у неё только
+    # в сумах, «такси» нет вовсе — в план-факт эти траты не попали
+    assert [
+        (u.group, u.subcategory, u.currency, u.amount) for u in found.untracked
+    ] == [
+        ("🚌 ТРАНСПОРТ", "такси", "UZS", 50_000),
+        ("🍔 ЕДА", "кафе", "USD", pytest.approx(42_000)),
+    ]
+
+
+def test_without_the_forecast_block_the_chart_and_cards_stay() -> None:
+    rows = [
+        ["Статья", "Категория", "Подкатегория"],
+        plan_row("🍔 ЕДА", "кафе", 100, 50),
+    ]
+    cards = (CardBalance("VISA 1111 UZS", "UZS", 100.0, 100.0, None, None),)
+    found = build_dashboard(frame(CAFE), rows, TODAY, RATES, "USD", cards=cards)
+    assert found.status == "no_forecast"
+    assert [g.name for g in found.spent] == ["🍔 ЕДА"]
+    assert found.cards == cards
+
+
+def test_service_takes_card_balances_from_the_same_fact_read() -> None:
+    fact = [list(row) for row in (FACT_HEADER, *OPENING, CAFE)]
+    fact[0] += ["Счет", "Текущий баланс"]
+    fact[1] += ["VISA 1111 UZS", 4_600_000]
+    fact[2] += ["VISA 2222 USD", 1000]
+    # у фейка нет get_table_balances: лишнего запроса к таблице сервис не делает
+    found = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab()})).dashboard(TODAY)
+    assert found is not None
+    assert [(c.name, c.balance, c.uzs) for c in found.cards] == [
+        ("VISA 1111 UZS", 4_600_000, 4_600_000),
+        ("VISA 2222 USD", 1000, 12_000_000),
+    ]
+
+
+def test_month_tab_articles_match_like_the_sheet_formula() -> None:
+    """Вкладка ищет подкатегорию без учёта регистра и только среди своих строк.
+
+    «Кафе» с большой буквы вкладка засчитывает строке «кафе» — не пропуск;
+    трату с подкатегорией строки доходов в расходы вкладка не возьмёт — пропуск.
+    """
+    rows = tab()
+    rows.append(["Доходы", "💰 ДОХОДЫ", "премия", -100, 0, 100, "UZS", -100, 0])
+    found = build_dashboard(
+        frame(
+            fact_row(date(2026, 10, 1), "🍔 ЕДА", "Кафе", 120_000),
+            fact_row(date(2026, 10, 1), "🚧 РАЗНОЕ", "премия", 70_000),
+        ),
+        rows,
+        TODAY,
+        RATES,
+        "USD",
+    )
+    assert [(u.subcategory, u.amount) for u in found.untracked] == [("премия", 70_000)]
+
+
+def test_broken_card_block_does_not_take_the_dashboard_down(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(*_: object) -> None:
+        raise ValueError("strange block")
+
+    monkeypatch.setattr("app.services.cards.card_balances", broken)
+    fact = [FACT_HEADER, *OPENING, CAFE]
+    found = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab()})).dashboard(TODAY)
+    assert found is not None
+    assert (found.status, found.cards) == ("ok", ())

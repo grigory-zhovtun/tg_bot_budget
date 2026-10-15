@@ -25,6 +25,7 @@ from app.domain import (
     currency_of,
     local_today,
     parse_number,
+    same_balance,
 )
 from app.errors import user_message
 from app.handlers.common import LAST_WRITE
@@ -47,15 +48,6 @@ class Matched:
     balances: list[BankBalance]
     unknown_cards: list[str]  # 4 цифры карт, которых нет в system
     wrong_currency: list[str]  # «VISA 9120 UZS: на скрине USD»
-
-
-def tolerance(source: str) -> float:
-    """Разница, которую считаем совпадением: цент у долларов, сум/рубль у остальных."""
-    return 0.01 if currency_of(source) == "USD" else 1.0
-
-
-def same(diff: float, source: str) -> bool:
-    return abs(diff) <= tolerance(source) + 1e-9
 
 
 def money(value: float, source: str) -> str:
@@ -96,7 +88,7 @@ def _line(bank: BankBalance, table: float | None) -> tuple[str, float | None]:
     if table is None:
         return f"❔ {bank.source}: банк {money(bank.balance, bank.source)}", None
     diff = round(table - bank.balance, 2)
-    if same(diff, bank.source):
+    if same_balance(diff, bank.source):
         return f"✅ {bank.source}: {money(bank.balance, bank.source)} — сходится", None
     where = "больше" if diff > 0 else "меньше"
     return (
@@ -187,7 +179,7 @@ async def align_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if table is None:
             raise ValueError(f"нет остатка «{source}» в блоке остатков")
         diff = round(table - bank, 2)
-        if same(diff, source):
+        if same_balance(diff, source):
             text = f"✅ {source}: уже сходится с банком"
         else:
             row = SheetRow(

@@ -551,6 +551,7 @@ class AnalyticsService:
 
     def dashboard(self, today: date | None = None) -> "Dashboard | None":
         """Экран «Сводка» Mini App; None — вкладки месяца нет."""
+        from app.services.cards import card_balances
         from app.services.dashboard import build_dashboard
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
@@ -561,11 +562,21 @@ class AnalyticsService:
             logger.info("No plan sheet %s", sheet)
             return None
         rates = self.gs_service.get_rates()
-        frame = transactions_frame(
-            self.gs_service.get_values(config.FACT_SHEET_NAME), rates
-        )
+        fact = self.gs_service.get_values(config.FACT_SHEET_NAME)
+        try:
+            cards = card_balances(fact, rates)  # блок остатков — из того же чтения
+        except Exception:
+            # блок правят руками: его поломка не должна убрать всю «Сводку»
+            logger.exception("Could not read the card balance block")
+            cards = ()
         return build_dashboard(
-            frame, rows, today, rates, config.FROZEN_CURRENCY, self._records()
+            transactions_frame(fact, rates),
+            rows,
+            today,
+            rates,
+            config.FROZEN_CURRENCY,
+            self._records(),
+            cards,
         )
 
     def forecast(

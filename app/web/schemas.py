@@ -112,6 +112,42 @@ class GroupPlanOut(ApiModel):
     items: list[PlanItemOut]
 
 
+class SpentItemOut(ApiModel):
+    name: str
+    icon: str
+    amount: float
+
+
+class SpentGroupOut(ApiModel):
+    """Траты группы за месяц по строкам fact, в сумах; подкатегории — от большей."""
+
+    name: str
+    amount: float
+    items: list[SpentItemOut]
+
+
+class UntrackedOut(ApiModel):
+    """Траты статьи без строки во вкладке месяца — в план-факт они не попали."""
+
+    group: str
+    subcategory: str
+    currency: str
+    amount: float  # в сумах
+
+
+class CardOut(ApiModel):
+    """Остаток карты по таблице и сверка с банком."""
+
+    name: str  # без валюты — она у суммы: «VISA 1111»
+    currency: str
+    balance: float | None  # «Текущий баланс»; None — ошибка в ячейке
+    uzs: float | None  # None — нет курса или остатка
+    bank: float | None  # остаток банка при последней сверке
+    checked: date | None  # когда сверяли
+    matches: bool | None  # None — сверять не с чем
+    stale: bool  # сверке больше недели
+
+
 class DayPointOut(ApiModel):
     day: date
     plan: float
@@ -179,6 +215,9 @@ class DashboardOut(ApiModel):
     upcoming: list[ForecastItemOut] = []
     subscriptions: list[SubscriptionOut] = []
     runway: RunwayOut | None = None
+    spent: list[SpentGroupOut] = []  # расходы по категориям, от большей
+    untracked: list[UntrackedOut] = []
+    cards: list[CardOut] = []
 
 
 class ForecastEventOut(ApiModel):
