@@ -387,36 +387,42 @@ const totalUzs: ForecastDay[] = uzsDays.map((point, index) => ({
     (rubDays[index]?.pace ?? 0) * 150,
 }));
 
-/** Прошедшие дни с 1-го по 14-е: вечер 14-го — деньги сейчас, назад — по изменениям. */
+/** Прошедшие дни с 1-го по 14-е: вечер 14-го — деньги сейчас, назад — по движениям дня. */
 function pastDays(
   evening14: number,
-  usual: number,
-  changes: Record<number, number>,
+  spentPerDay: number,
+  moves: Record<number, { spent?: number; earned?: number }>,
 ): ForecastPast[] {
   const days: ForecastPast[] = [];
   let evening = evening14;
   for (let day = 14; day >= 1; day -= 1) {
-    const change = changes[day] ?? -usual;
-    days.unshift({ day, evening, change });
+    const spent = moves[day]?.spent ?? spentPerDay;
+    const earned = moves[day]?.earned ?? 0;
+    const change = earned - spent;
+    days.unshift({ day, evening, change, spent, earned });
     evening -= change;
   }
   return days;
 }
 
-// 5-го пришёл аванс, 7-го долларами не платили
-const uzsPast = pastDays(6_810_000, 450_000, { 5: 4_000_000 });
-const usdPast = pastDays(1_800, 5, { 7: 0 });
+// 5-го пришёл аванс, и в тот же день были траты; 7-го долларами не платили
+const uzsPast = pastDays(6_810_000, 450_000, { 5: { earned: 4_000_000 } });
+const usdPast = pastDays(1_800, 5, { 7: { spent: 0 } });
 const rubPast = pastDays(20_000, 300, {});
+/** Поле прошедшего дня во «Всего»: сумы + доллары по 12 000 + рубли по 150. */
+function inSums(index: number, pick: (point: ForecastPast) => number): number {
+  const part = (line: ForecastPast[], rate: number) => {
+    const point = line[index];
+    return point ? pick(point) * rate : 0;
+  };
+  return part(uzsPast, 1) + part(usdPast, 12_000) + part(rubPast, 150);
+}
 const totalPast: ForecastPast[] = uzsPast.map((point, index) => ({
   day: point.day,
-  evening:
-    point.evening +
-    (usdPast[index]?.evening ?? 0) * 12_000 +
-    (rubPast[index]?.evening ?? 0) * 150,
-  change:
-    point.change +
-    (usdPast[index]?.change ?? 0) * 12_000 +
-    (rubPast[index]?.change ?? 0) * 150,
+  evening: inSums(index, (day) => day.evening),
+  change: inSums(index, (day) => day.change),
+  spent: inSums(index, (day) => day.spent),
+  earned: inSums(index, (day) => day.earned),
 }));
 
 // записи календаря: кофе каждый день (сверх плана статьи), кафе по пятницам,
@@ -560,6 +566,8 @@ export const forecastFixture: Forecast = {
       day: point.day,
       evening: point.evening / 12_000,
       change: point.change / 12_000,
+      spent: point.spent / 12_000,
+      earned: point.earned / 12_000,
     })),
   },
   rates: { USD: 12_000, RUB: 150 },

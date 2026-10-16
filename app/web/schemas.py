@@ -254,6 +254,8 @@ class ForecastPastOut(ApiModel):
     day: int
     evening: float  # сколько было вечером по факту
     change: float  # изменение за день: доход плюсом, расход минусом
+    spent: float = 0  # траты дня по статьям расходов
+    earned: float = 0  # доходы дня
 
 
 class ForecastDipOut(ApiModel):

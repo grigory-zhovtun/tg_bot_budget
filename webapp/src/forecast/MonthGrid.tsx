@@ -1,14 +1,14 @@
-import type { Forecast } from "../api";
+import type { Forecast, ForecastPast } from "../api";
 import { longDay } from "../format";
 import { capital, monthName } from "../plan/months";
 import { WEEKDAY_NAMES, cellAmount, dayRecordSum, gridWeeks } from "./records";
 import {
+  amount,
   dayEvents,
   dayOf,
   isoDay,
   pillUnit,
   pillValue,
-  signed,
   viewCode,
   viewDays,
   viewPast,
@@ -22,51 +22,67 @@ interface Props {
   onSelect: (day: number) => void;
 }
 
-/** Расход или доход дня в клетке: «−410к», «+3,9м»; ноль — null. */
-function changeText(change: number, code: string): string | null {
-  if (Math.round(Math.abs(change)) === 0) return null;
-  return `${change > 0 ? "+" : "−"}${cellAmount(Math.abs(change), code)}`;
+/** Клетка дня: жирные цифры, рамка 2 px — крупно и контрастно. */
+const CELL =
+  "flex flex-col items-center gap-0.5 rounded-xl border-2 px-0.5 py-1.5";
+
+/** Сумма в клетке: «412к», «1,8м»; ноль после округления — null. */
+function cellSum(value: number, code: string): string | null {
+  return Math.round(value) > 0 ? cellAmount(value, code) : null;
+}
+
+/** Фон клетки: выбранная — кнопкой, минус на вечер — красной, остальное — как задано. */
+function cellColors(on: boolean, minus: boolean, usual: string): string {
+  if (on) return "border-button bg-button text-button-text";
+  return minus ? "border-minus bg-minus text-white" : usual;
 }
 
 interface PastProps {
   iso: string;
-  evening: number;
-  change: number;
+  point: ForecastPast;
   code: string;
   on: boolean;
   onSelect: () => void;
 }
 
-/** Прошедший день по факту: сколько было вечером и расход или доход за день. */
-function PastCell({ iso, evening, change, code, on, onSelect }: PastProps) {
-  const moved = changeText(change, code);
+/** Прошедший день по факту, в рамке: сколько было вечером, траты и доходы дня врозь. */
+function PastCell({ iso, point, code, on, onSelect }: PastProps) {
+  const spent = cellSum(point.spent, code);
+  const earned = cellSum(point.earned, code);
+  const minus = point.evening < 0;
+  const plain = on || minus; // на кнопке и красной клетке цифры белые
+  const label = [
+    `${longDay(iso)}: вечером было ${pillValue(point.evening, code)} ${pillUnit(code)}`,
+    spent && `потрачено ${amount(point.spent, code)}`,
+    earned && `пришло ${amount(point.earned, code)}`,
+  ]
+    .filter(Boolean)
+    .join(", ");
   return (
     <button
       type="button"
       aria-pressed={on}
-      aria-label={`${longDay(iso)}: вечером было ${pillValue(evening, code)} ${pillUnit(code)}${
-        moved ? `, за день ${signed(change, code)}` : ""
-      }`}
-      className={`flex flex-col items-center rounded-xl border px-0.5 py-1.5 ${
-        on ? "border-button bg-button text-button-text" : "border-section"
-      }`}
+      aria-label={label}
+      data-minus={minus || undefined}
+      className={`${CELL} ${cellColors(on, minus, "border-outline")}`}
       onClick={onSelect}
     >
-      <span className="text-base leading-tight font-semibold">
+      <span className="text-base leading-tight font-bold">
         {Number(iso.slice(8, 10))}
       </span>
-      <span
-        className={`text-[11px] font-semibold ${evening < 0 && !on ? "text-danger" : ""}`}
-      >
-        {pillValue(evening, code)}
+      <span className="text-[13px] font-bold">
+        {pillValue(point.evening, code)}
       </span>
-      {moved && (
+      {spent && (
+        <span className={`text-sm font-extrabold ${plain ? "" : "text-spent"}`}>
+          {`−${spent}`}
+        </span>
+      )}
+      {earned && (
         <span
-          className={`text-[11px] font-semibold ${
-            on ? "" : change > 0 ? "text-ok" : "text-hint"
-          }`}
+          className={`text-sm font-extrabold ${plain ? "" : "text-earned"}`}
         >
-          {moved}
+          {`+${earned}`}
         </span>
       )}
     </button>
@@ -87,7 +103,7 @@ export default function MonthGrid({ data, view, selected, onSelect }: Props) {
         {capital(monthName(data.today.slice(0, 7)))}
       </h2>
       <div
-        className="grid grid-cols-7 gap-1 text-center text-[11px] text-hint"
+        className="grid grid-cols-7 gap-1 text-center text-[13px] font-bold"
         aria-hidden="true"
       >
         {WEEKDAY_NAMES.map((name) => (
@@ -104,8 +120,7 @@ export default function MonthGrid({ data, view, selected, onSelect }: Props) {
                 <PastCell
                   key={day}
                   iso={isoDay(data.today, day)}
-                  evening={fact.evening}
-                  change={fact.change}
+                  point={fact}
                   code={code}
                   on={day === selected}
                   onSelect={() => onSelect(day)}
@@ -124,10 +139,11 @@ export default function MonthGrid({ data, view, selected, onSelect }: Props) {
               );
             }
             const on = day === selected;
-            const booked = dayRecordSum(data, view, day);
-            const records = Math.round(booked) > 0;
+            const minus = evening < 0;
+            const plain = on || minus;
+            const records = cellSum(dayRecordSum(data, view, day), code);
             const label = `${longDay(isoDay(data.today, day))}: вечером ${pillValue(evening, code)} ${pillUnit(code)}${
-              records ? `, записи −${cellAmount(booked, code)}` : ""
+              records ? `, записи −${records}` : ""
             }`;
             return (
               <button
@@ -136,34 +152,29 @@ export default function MonthGrid({ data, view, selected, onSelect }: Props) {
                 aria-pressed={on}
                 aria-current={day === today ? "date" : undefined}
                 aria-label={label}
-                className={`flex flex-col items-center rounded-xl px-0.5 py-1.5 ${
-                  on ? "bg-button text-button-text" : "bg-section"
-                } ${day === today && !on ? "ring-2 ring-link ring-inset" : ""}`}
+                data-minus={minus || undefined}
+                className={`${CELL} ${cellColors(on, minus, "border-section bg-section")} ${
+                  day === today && !on ? "ring-2 ring-link ring-inset" : ""
+                }`}
                 onClick={() => onSelect(day)}
               >
-                <span className="text-base leading-tight font-semibold">
-                  {day}
-                </span>
-                <span
-                  className={`text-[11px] font-semibold ${
-                    evening < 0 && !on ? "text-danger" : ""
-                  }`}
-                >
+                <span className="text-base leading-tight font-bold">{day}</span>
+                <span className="text-[13px] font-bold">
                   {pillValue(evening, code)}
                 </span>
                 {records && (
                   <span
-                    className={`text-[11px] font-semibold ${on ? "" : "text-danger"}`}
+                    className={`text-sm font-extrabold ${plain ? "" : "text-planned"}`}
                   >
-                    {`−${cellAmount(booked, code)}`}
+                    {`−${records}`}
                   </span>
                 )}
-                <span className="mt-auto flex h-1.5 gap-0.5 pt-0.5">
+                <span className="mt-auto flex h-2 gap-1 pt-0.5">
                   {dayEvents(data, view, day).map((event, index) => (
                     <i
                       key={`${event.currency}-${event.name}-${index}`}
-                      className={`inline-block size-1.5 rounded-full ${
-                        event.amount > 0 ? "bg-ok" : "bg-over"
+                      className={`inline-block size-2 rounded-full ${
+                        event.amount > 0 ? "bg-earned" : "bg-payment"
                       }`}
                     />
                   ))}
@@ -173,9 +184,29 @@ export default function MonthGrid({ data, view, selected, onSelect }: Props) {
           })}
         </div>
       ))}
-      <p className="text-xs text-hint">
-        {`В клетке — остаток на вечер, ${pillUnit(code)}: прошедшие дни — по факту, с расходом или доходом за день; дальше — по плану, с записями дня`}
-      </p>
+      <div className="mt-1 flex flex-col gap-1 text-[13px] font-semibold">
+        <p>
+          {`Остаток на вечер, ${pillUnit(code)}: прошедшие дни — по факту, в рамке; дальше — по плану`}
+        </p>
+        <ul className="flex flex-wrap gap-x-4 gap-y-1">
+          <li>
+            <b className="font-extrabold text-spent">−</b> потрачено за день
+          </li>
+          <li>
+            <b className="font-extrabold text-earned">+</b> пришло за день
+          </li>
+          <li>
+            <b className="font-extrabold text-planned">−</b> запись на день
+          </li>
+          <li>
+            <i
+              className="inline-block size-3 rounded-sm bg-minus align-[-1px]"
+              aria-hidden="true"
+            />{" "}
+            минус на вечер
+          </li>
+        </ul>
+      </div>
     </section>
   );
 }

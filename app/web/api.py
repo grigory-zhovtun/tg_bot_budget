@@ -405,6 +405,8 @@ def _past_out(days: Sequence[PastDay], code: str) -> list[ForecastPastOut]:
             day=point.day,
             evening=_rounded(point.evening, code),
             change=_rounded(point.change, code),
+            spent=_rounded(point.spent, code),
+            earned=_rounded(point.earned, code),
         )
         for point in days
     ]

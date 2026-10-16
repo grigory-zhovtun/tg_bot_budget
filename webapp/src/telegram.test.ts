@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { offerHomeScreen, type WebApp } from "./telegram";
+import { followScheme, offerHomeScreen, type WebApp } from "./telegram";
 
 function app(version: boolean, startParam?: string) {
   const addToHomeScreen = vi.fn();
@@ -26,5 +26,23 @@ describe("offerHomeScreen", () => {
     expect(offerHomeScreen(null)).toBe(false);
     expect(old.addToHomeScreen).not.toHaveBeenCalled();
     expect(plain.addToHomeScreen).not.toHaveBeenCalled();
+  });
+});
+
+describe("followScheme", () => {
+  it("marks the page with Telegram's color scheme and follows its changes", () => {
+    const handlers: (() => void)[] = [];
+    const fake = {
+      colorScheme: "dark",
+      onEvent: (_event: string, handler: () => void) => handlers.push(handler),
+    };
+    const root = document.createElement("div");
+    followScheme(fake as unknown as WebApp, root);
+    expect(root.dataset.scheme).toBe("dark");
+    fake.colorScheme = "light";
+    handlers.forEach((handler) => handler());
+    expect(root.dataset.scheme).toBe("light");
+    followScheme(null, root); // вне Telegram — светлые цвета по умолчанию
+    expect(root.dataset.scheme).toBe("light");
   });
 });

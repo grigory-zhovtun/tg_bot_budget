@@ -15,6 +15,23 @@
   --color-warn: #f5a524;
   --color-over: #e5484d;
   --color-off: #8a8f98;
+  /* календарь «Прогноза» с высоким контрастом: суммы — от 7:1 к фону клетки, без
+     красного текста; минус — красная клетка с белыми цифрами (6,6:1). Светлая
+     тема — тёмные тона, тёмная (data-scheme="dark", main.tsx) — яркие */
+  --color-spent: var(--calendar-spent, #7a4100);
+  --color-earned: var(--calendar-earned, #0a5c30);
+  --color-planned: var(--calendar-planned, #0a4a85);
+  --color-payment: var(--calendar-payment, #b35400);
+  --color-outline: var(--calendar-outline, #7d8b9c);
+  --color-minus: #b42318;
+}
+
+:root[data-scheme="dark"] {
+  --calendar-spent: #ffd43b;
+  --calendar-earned: #6ef0a8;
+  --calendar-planned: #6cd4ff;
+  --calendar-payment: #ff9f1c;
+  --calendar-outline: #5b7089;
 }
 
 html,

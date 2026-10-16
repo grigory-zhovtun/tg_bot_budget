@@ -34,23 +34,40 @@ describe("ForecastScreen", () => {
     // 16-е — кофе и кафе; 18-е во «Всего» — ещё и $20 доставки по 12 000
     expect(within(pill(16)).getByText("−180к")).toBeTruthy();
     expect(within(pill(18)).getByText("−270к")).toBeTruthy();
-    // прошедшие дни — по факту: сколько было вечером и расход или доход дня
+    // записи — голубым, не красным
+    expect(within(pill(16)).getByText("−180к").className).toContain(
+      "text-planned",
+    );
+    // прошедшие дни — по факту: сколько было вечером, траты и доходы дня врозь
     expect(within(pill(14)).getByText("31,4")).toBeTruthy();
-    expect(within(pill(14)).getByText("−555к")).toBeTruthy();
+    expect(within(pill(14)).getByText("−555к").className).toContain(
+      "text-spent",
+    );
     expect(within(pill(5)).getByText("36,3")).toBeTruthy();
-    expect(within(pill(5)).getByText("+3,9м").className).toContain("text-ok");
+    expect(within(pill(5)).getByText("−555к").className).toContain(
+      "text-spent",
+    );
+    expect(within(pill(5)).getByText("+4,0м").className).toContain(
+      "text-earned",
+    );
     // скринридеру — полные суммы, а не сокращения клетки
     expect(pill(5).getAttribute("aria-label")).toBe(
-      nb("5 октября: вечером было 36,3 млн сум, за день +3 895 000 сум"),
+      nb(
+        "5 октября: вечером было 36,3 млн сум, потрачено 555 000 сум, пришло 4 000 000 сум",
+      ),
     );
     expect(screen.getAllByRole("button", { name: /октября:/ })).toHaveLength(
       31,
     );
     expect(
       screen.getByText(
-        "В клетке — остаток на вечер, млн сум: прошедшие дни — по факту, с расходом или доходом за день; дальше — по плану, с записями дня",
+        "Остаток на вечер, млн сум: прошедшие дни — по факту, в рамке; дальше — по плану",
       ),
     ).toBeTruthy();
+    expect(screen.getByText("потрачено за день")).toBeTruthy();
+    expect(screen.getByText("пришло за день")).toBeTruthy();
+    expect(screen.getByText("запись на день")).toBeTruthy();
+    expect(screen.getByText("минус на вечер")).toBeTruthy();
   });
 
   it("shows a past day by fact", async () => {
@@ -62,9 +79,35 @@ describe("ForecastScreen", () => {
     expect(screen.getByText("Понедельник, 5 октября")).toBeTruthy();
     expect(screen.getByText("по факту")).toBeTruthy();
     expect(screen.getByText("36 345 000 сум")).toBeTruthy();
-    expect(screen.getByText("+3 895 000 сум")).toBeTruthy();
+    expect(screen.getByText("−555 000 сум")).toBeTruthy();
+    expect(screen.getByText("+4 000 000 сум")).toBeTruthy();
     // в прошлое не планируют
     expect(screen.queryByRole("button", { name: /Запланировать/ })).toBeNull();
+  });
+
+  it("marks an evening below zero by the cell, not by red text", async () => {
+    const user = userEvent.setup();
+    const minus: Forecast = {
+      ...forecastFixture,
+      currencies: forecastFixture.currencies.map((line) =>
+        line.code === "UZS"
+          ? {
+              ...line,
+              days: line.days.map((point) =>
+                point.day === 20 ? { ...point, plan: -400_000 } : point,
+              ),
+            }
+          : line,
+      ),
+    };
+    const forecast = vi.fn<Api["forecast"]>().mockResolvedValue(minus);
+    show(fakeApi({ forecast }));
+    await user.click(await screen.findByRole("radio", { name: "UZS" }));
+    const cell = pill(20);
+    expect(cell.getAttribute("data-minus")).toBe("true");
+    expect(within(cell).getByText("−0,4").className).not.toContain(
+      "text-danger",
+    );
   });
 
   it("shows the chosen day with its events and ordinary spending", async () => {
@@ -133,7 +176,7 @@ describe("ForecastScreen", () => {
     await user.click(await screen.findByRole("radio", { name: "$" }));
     expect(
       screen.getByText(
-        "В клетке — остаток на вечер, $: прошедшие дни — по факту, с расходом или доходом за день; дальше — по плану, с записями дня",
+        "Остаток на вечер, $: прошедшие дни — по факту, в рамке; дальше — по плану",
       ),
     ).toBeTruthy();
     expect(within(pill(15)).getByText("2 780")).toBeTruthy();

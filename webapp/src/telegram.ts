@@ -37,6 +37,8 @@ export interface WebApp {
   addToHomeScreen(): void;
   checkHomeScreenStatus(callback: (status: HomeScreenStatus) => void): void;
   openTelegramLink(url: string): void;
+  colorScheme: "light" | "dark";
+  onEvent(eventType: "themeChanged", callback: () => void): void;
 }
 
 declare global {
@@ -49,6 +51,25 @@ declare global {
 export function telegram(): WebApp | null {
   const app = window.Telegram?.WebApp;
   return app && app.platform !== "unknown" ? app : null;
+}
+
+/**
+ * Тема Telegram — атрибутом data-scheme на <html>: у сумм календаря свои цвета
+ * для тёмной и светлой темы. Вне Telegram — светлая, как запасные цвета index.css.
+ */
+export function followScheme(
+  app: WebApp | null,
+  root: HTMLElement = document.documentElement,
+): void {
+  if (!app) {
+    root.dataset.scheme = "light";
+    return;
+  }
+  const apply = () => {
+    root.dataset.scheme = app.colorScheme === "dark" ? "dark" : "light";
+  };
+  apply();
+  app.onEvent("themeChanged", apply);
 }
 
 export function haptic(type: "error" | "success"): void {
