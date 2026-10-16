@@ -356,7 +356,7 @@ export default function RecordSheet({
       </label>
       <FieldError text={fields.date} />
       {excess > 0 && (
-        <p className="rounded-xl bg-warn/20 px-3 py-2 text-sm">
+        <p className="rounded-xl bg-minus px-3 py-2 text-sm font-semibold text-white">
           {`⚠️ План статьи «${groupTitle(group)} / ${subcategory}» будет превышен на ${amount(excess, currency)}`}
         </p>
       )}

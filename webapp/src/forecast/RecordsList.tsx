@@ -16,7 +16,7 @@ function dayMonth(iso: string): string {
 
 function OverMark({ record }: { record: CalendarRecord }) {
   return record.over ? (
-    <span className="rounded-md bg-warn/20 px-1.5 text-xs text-text">
+    <span className="rounded-md bg-minus px-1.5 text-xs font-semibold text-white">
       сверх плана
     </span>
   ) : null;
@@ -72,7 +72,7 @@ export default function RecordsList({ data, onAdd, onEdit }: Props) {
                         {`${groupTitle(record.group)} / ${record.subcategory} · ${ruleText(record.repeat, record.weekdays, record.date)}${later}${month}`}
                       </span>
                     </span>
-                    <span className="font-semibold whitespace-nowrap">
+                    <span className="font-bold whitespace-nowrap text-planned">
                       {amount(record.amount, record.currency)}
                     </span>
                   </button>
@@ -109,7 +109,7 @@ export default function RecordsList({ data, onAdd, onEdit }: Props) {
                       </span>
                     </span>
                     <span
-                      className={`whitespace-nowrap ${paid ? "text-hint" : "font-semibold"}`}
+                      className={`whitespace-nowrap ${paid ? "font-semibold text-hint" : "font-bold text-planned"}`}
                     >
                       {`${paid ? "✓ " : ""}${amount(record.amount, record.currency)}`}
                     </span>

@@ -189,7 +189,9 @@ function Content({ data }: { data: Dashboard }) {
                   {item.day < Number(data.today.slice(8, 10)) ? "⏳ " : ""}
                   {String(item.day).padStart(2, "0")} — {item.name}
                 </span>
-                <span className={item.amount > 0 ? "text-ok" : ""}>
+                <span
+                  className={`font-semibold ${item.amount > 0 ? "text-earned" : "text-payment"}`}
+                >
                   {itemAmount(item.amount, item.currency, item.uzs)}
                 </span>
               </li>

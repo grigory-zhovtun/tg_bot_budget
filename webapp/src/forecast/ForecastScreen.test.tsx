@@ -311,6 +311,14 @@ describe("ForecastScreen", () => {
     expect(await screen.findByText("Октябрь")).toBeTruthy();
   });
 
+  it("shows record sums in the color of records", async () => {
+    show();
+    // запись — голубым, как в клетках календаря и в карточке дня
+    expect((await screen.findByText("$20")).className).toContain(
+      "text-planned",
+    );
+  });
+
   it("lists the repeats and the one-offs ahead", async () => {
     show();
     await screen.findByText("Октябрь");

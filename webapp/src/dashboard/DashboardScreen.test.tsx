@@ -22,7 +22,8 @@ describe("DashboardScreen", () => {
     expect(screen.getByText("запас 1,10 млн")).toBeTruthy();
     expect(screen.getByText("можно 500 000 в день")).toBeTruthy();
     expect(screen.getByText("план 450 000 в день")).toBeTruthy();
-    expect(screen.getByText("−650,00 USD")).toBeTruthy();
+    // платёж списка — оранжевым, как точки платежей в календаре
+    expect(screen.getByText("−650,00 USD").className).toContain("text-payment");
     expect(screen.getByText(/ждём/)).toBeTruthy();
   });
 

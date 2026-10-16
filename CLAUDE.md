@@ -67,7 +67,7 @@ app/
 │   └── day_budget.py    # Daily limit from the month tab forecast block, frozen money, morning text
 └── utils/
     └── keyboards.py     # Keyboards: icons from system!D (`with_icon`), prompts naming card/choice (inline buttons are as wide as the message), `action(..., style)` coloured buttons
-webapp/                  # Mini App: React + TS + Tailwind (Vite), served at /app/; src/entry — entry screen, src/api.ts — API client
+webapp/                  # Mini App: React + TS + Tailwind (Vite), served at /app/; src/entry — entry screen, src/api.ts — API client; src/index.css — background, text and buttons from the Telegram theme, all other text colors our own high-contrast palette (≥7:1 on light and dark themes, dark values under data-scheme="dark" set by telegram.followScheme; no red text — warnings orange, below zero a red cell/chip with white numbers), checked by src/theme.test.ts
 tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 ```
 
