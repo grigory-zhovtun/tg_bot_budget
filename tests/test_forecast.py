@@ -483,6 +483,22 @@ def test_past_days_are_the_evenings_by_fact_and_the_change_of_each_day() -> None
     assert evenings[5] == (11_470_000, 1_970_000)  # зарплата минус кофе
     assert evenings[9] == (11_520_000, 50_000)
     assert evenings[14] == (11_520_000, 0)
+    # расход и доход дня — врозь, не одним числом
+    moves = {day.day: (day.spent, day.earned) for day in past}
+    assert moves[2] == (400_000, 0)
+    assert moves[5] == (30_000, 2_000_000)
+    assert moves[9] == (-50_000, 0)  # возврат уменьшает траты дня
+
+
+def test_a_transfer_between_own_cards_is_neither_spending_nor_income() -> None:
+    rows = [
+        fact_row(date(2026, 10, 3), "💳 СЧЕТА", "перевод", 1_000_000),
+        fact_row(date(2026, 10, 3), "💳 СЧЕТА", "перевод", -1_000_000),
+        fact_row(date(2026, 10, 3), "💰 ДОХОДЫ", "нач остаток", 500_000),
+    ]
+    third = uzs(rows).past[2]
+    # «нач остаток» — выравнивание, не доход: деньги на вечер растут, дохода нет
+    assert (third.change, third.spent, third.earned) == (500_000, 0, 0)
 
 
 def test_on_the_first_day_no_day_has_passed() -> None:
@@ -502,3 +518,6 @@ def test_past_days_in_total_are_every_currency_at_todays_rate() -> None:
     assert third.change == pytest.approx(-300_000 - 10 * 12_000)
     assert found.past_usd[2].evening == pytest.approx(third.evening / 12_000)
     assert found.past_usd[2].change == pytest.approx(third.change / 12_000)
+    assert third.spent == pytest.approx(300_000 + 10 * 12_000)
+    assert found.past_usd[2].spent == pytest.approx(third.spent / 12_000)
+    assert third.earned == 0

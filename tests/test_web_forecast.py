@@ -125,10 +125,22 @@ def test_past_days_are_in_the_answer() -> None:
     body = forecast_for(found)[0].json()
     uzs = body["currencies"][0]
     assert len(uzs["past"]) == 14  # с 1-го по вчера
-    assert uzs["past"][2] == {"day": 3, "evening": 4_600_000, "change": -400_000}
+    assert uzs["past"][2] == {
+        "day": 3,
+        "evening": 4_600_000,
+        "change": -400_000,
+        "spent": 400_000,
+        "earned": 0,
+    }
     assert body["total"]["past_uzs"][2]["evening"] == 4_600_000 + 12_000_000
     # 17 млн / 12 000 — доллары до центов
-    assert body["total"]["past_usd"][0] == {"day": 1, "evening": 1416.67, "change": 0}
+    assert body["total"]["past_usd"][0] == {
+        "day": 1,
+        "evening": 1416.67,
+        "change": 0,
+        "spent": 0,
+        "earned": 0,
+    }
 
 
 def test_a_currency_without_a_rate_is_outside_the_total() -> None:

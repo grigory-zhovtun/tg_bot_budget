@@ -14,8 +14,9 @@
 статьи сначала покрывает её записи, по дням идёт то, что осталось; записи — события
 в свой день, разовые — в обеих линиях, повторы — только «по плану».
 
-Прошедшие дни месяца — по факту: деньги на вечер дня (так же, как «сейчас») и на
-сколько они за день изменились — пришло плюсом, ушло минусом.
+Прошедшие дни месяца — по факту: деньги на вечер дня (так же, как «сейчас»), на
+сколько они за день изменились и врозь — траты дня (статьи расходов, возвраты
+вычитаются) и доходы дня; переводы между своими картами — ни то, ни другое.
 """
 
 import calendar
@@ -27,7 +28,7 @@ from typing import Protocol
 import pandas as pd
 
 from app.domain import INCOME_GROUP, Rates
-from app.services.analytics_service import expenses
+from app.services.analytics_service import expenses, income
 from app.services.calendar import (
     CalendarRecord,
     CalendarState,
@@ -89,6 +90,8 @@ class PastDay:
     day: int
     evening: float
     change: float
+    spent: float = 0.0  # траты дня по статьям расходов; возвраты вычитаются
+    earned: float = 0.0  # доходы дня без «нач остаток»
 
 
 @dataclass(frozen=True)
@@ -201,17 +204,29 @@ def _money_now(frame: pd.DataFrame, code: str, today: date) -> float:
 
 
 def _past(frame: pd.DataFrame, code: str, today: date) -> tuple[PastDay, ...]:
-    """Дни месяца до сегодня: деньги на вечер, как «сейчас», и их изменение за день."""
+    """Дни месяца до сегодня: деньги на вечер, как «сейчас», их изменение за день,
+    траты и доходы дня."""
     own = frame[frame["currency"] == code]
     flow = own["amount"].where(own["group"] == INCOME_GROUP, -own["amount"])
     by_day = flow.groupby(own["day"]).sum()
+    spent = expenses(own).groupby("day")["amount"].sum()
+    earned = income(own).groupby("day")["amount"].sum()
     first = today.replace(day=1)
     evening = float(by_day[by_day.index < first].sum())
     found = []
     for number in range(1, today.day):
-        change = float(by_day.get(first.replace(day=number), 0.0))
+        day = first.replace(day=number)
+        change = float(by_day.get(day, 0.0))
         evening += change
-        found.append(PastDay(number, evening, change))
+        found.append(
+            PastDay(
+                number,
+                evening,
+                change,
+                float(spent.get(day, 0.0)),
+                float(earned.get(day, 0.0)),
+            )
+        )
     return tuple(found)
 
 
@@ -538,18 +553,25 @@ def month_forecast(
         if dollar
         else ()
     )
-    evenings = [0.0] * (today.day - 1)
-    changes = [0.0] * (today.day - 1)
+    sums = [[0.0, 0.0, 0.0, 0.0] for _ in range(today.day - 1)]
     for line, rate in rated:
         for index, past in enumerate(line.past):
-            evenings[index] += past.evening * rate
-            changes[index] += past.change * rate
-    past_uzs = tuple(
-        PastDay(index + 1, evening, change)
-        for index, (evening, change) in enumerate(zip(evenings, changes, strict=True))
-    )
+            for slot, value in enumerate(
+                (past.evening, past.change, past.spent, past.earned)
+            ):
+                sums[index][slot] += value * rate
+    past_uzs = tuple(PastDay(index + 1, *values) for index, values in enumerate(sums))
     past_usd = (
-        tuple(PastDay(p.day, p.evening / dollar, p.change / dollar) for p in past_uzs)
+        tuple(
+            PastDay(
+                p.day,
+                p.evening / dollar,
+                p.change / dollar,
+                p.spent / dollar,
+                p.earned / dollar,
+            )
+            for p in past_uzs
+        )
         if dollar
         else ()
     )
