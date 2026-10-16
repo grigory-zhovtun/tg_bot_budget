@@ -4,11 +4,12 @@ import { api } from "./api";
 import App from "./App";
 import "./index.css";
 import { mockApi } from "./mocks/api";
-import { offerHomeScreen, telegram } from "./telegram";
+import { followScheme, offerHomeScreen, telegram } from "./telegram";
 
 const tg = telegram();
 tg?.ready();
 tg?.expand();
+followScheme(tg);
 offerHomeScreen(tg);
 
 // npm run dev — режим mock: страница с тестовыми данными без бота

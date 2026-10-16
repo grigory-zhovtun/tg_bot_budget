@@ -23,31 +23,46 @@ interface Props {
   onEdit?: (id: string) => void;
 }
 
-/** Прошедший день по факту: сколько было вечером и сколько за день пришло или ушло. */
+/** Прошедший день по факту: сколько было вечером, траты и доходы дня врозь. */
 function PastCard({ data, view, day }: Pick<Props, "data" | "view" | "day">) {
   const point = viewPast(data, view).find((item) => item.day === day);
   if (!point) return null;
   const code = viewCode(view);
+  const spent = Math.round(point.spent) > 0;
+  const earned = Math.round(point.earned) > 0;
   return (
     <section className="flex flex-col gap-1 rounded-2xl bg-section p-4">
       <div className="flex items-baseline justify-between gap-2">
         <h2 className="font-semibold">{dayTitle(isoDay(data.today, day))}</h2>
-        <span className="text-xs text-hint">по факту</span>
+        <span className="text-sm font-semibold">по факту</span>
       </div>
       <p className="flex justify-between gap-2">
         <span>вечером было</span>
         <span
-          className={`font-semibold ${point.evening < 0 ? "text-danger" : ""}`}
+          className={`font-bold ${
+            point.evening < 0 ? "rounded-md bg-minus px-1.5 text-white" : ""
+          }`}
         >
           {amount(point.evening, code)}
         </span>
       </p>
-      <p className="flex justify-between gap-2">
-        <span>за день</span>
-        <span className={`font-semibold ${point.change > 0 ? "text-ok" : ""}`}>
-          {signed(point.change, code)}
-        </span>
-      </p>
+      {spent && (
+        <p className="flex justify-between gap-2">
+          <span>потрачено</span>
+          <span className="font-bold text-spent">
+            {`−${amount(point.spent, code)}`}
+          </span>
+        </p>
+      )}
+      {earned && (
+        <p className="flex justify-between gap-2">
+          <span>пришло</span>
+          <span className="font-bold text-earned">
+            {`+${amount(point.earned, code)}`}
+          </span>
+        </p>
+      )}
+      {!spent && !earned && <p>движений не было</p>}
     </section>
   );
 }

@@ -178,15 +178,23 @@ describe("forecast view", () => {
       day: 14,
       evening: 6_810_000,
       change: -450_000,
+      spent: 450_000,
+      earned: 0,
     });
     // «Всего»: сумы + $1 800 по 12 000 + 20 000 ₽ по 150
     expect(viewPast(forecastFixture, DEFAULT_VIEW)[13]).toEqual({
       day: 14,
       evening: 31_410_000,
       change: -555_000,
+      spent: 555_000,
+      earned: 0,
     });
-    expect(viewPast(forecastFixture, DOLLARS)[4]?.change).toBeCloseTo(
-      3_895_000 / 12_000,
+    // 5-го и траты, и аванс — врозь
+    expect(viewPast(forecastFixture, DOLLARS)[4]?.spent).toBeCloseTo(
+      555_000 / 12_000,
+    );
+    expect(viewPast(forecastFixture, DOLLARS)[4]?.earned).toBeCloseTo(
+      4_000_000 / 12_000,
     );
     expect(viewPast({ ...forecastFixture, total: null }, DEFAULT_VIEW)).toEqual(
       [],

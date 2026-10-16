@@ -171,6 +171,8 @@ export interface ForecastPast {
   day: number;
   evening: number;
   change: number;
+  spent: number; // траты дня по статьям расходов
+  earned: number; // доходы дня
 }
 
 /** Уход в минус: первый день ниже нуля и когда остаток вернётся. */
