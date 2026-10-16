@@ -30,7 +30,7 @@ from app.services.analytics_service import TRANSFERS_GROUP, money
 from app.services.calendar import CalendarRecord, new_id, read_calendar, record_row
 from app.services.cards import CardBalance
 from app.services.dashboard import Dashboard
-from app.services.forecast import Dip, Evening, MonthForecast
+from app.services.forecast import Dip, Evening, MonthForecast, PastDay
 from app.services.plan import (
     ArticleChange,
     Catalog,
@@ -59,6 +59,8 @@ from app.web.schemas import (
     CalendarIn,
     CalendarRecordOut,
     CardOut,
+    CategoryLineOut,
+    CategoryOut,
     DashboardOut,
     DayPointOut,
     DaySpendOut,
@@ -74,6 +76,7 @@ from app.web.schemas import (
     ForecastEventOut,
     ForecastItemOut,
     ForecastOut,
+    ForecastPastOut,
     ForecastRecordOut,
     ForecastTotalOut,
     FrozenOut,
@@ -279,6 +282,23 @@ def dashboard_out(
         for item in found.untracked
     ]
     cards = [card_out(card, today) for card in found.cards]
+    joined = [
+        CategoryOut(
+            name=group.name,
+            plan=group.plan,
+            fact=group.fact,
+            items=[
+                CategoryLineOut(
+                    name=line.subcategory,
+                    icon=icons.get(line.subcategory, ""),
+                    plan=line.plan,
+                    fact=line.fact,
+                )
+                for line in group.items
+            ],
+        )
+        for group in found.categories
+    ]
     budget = found.budget
     if budget is None:
         return DashboardOut(
@@ -289,6 +309,7 @@ def dashboard_out(
             spent=spent,
             untracked=untracked,
             cards=cards,
+            categories=joined,
         )
     runway = None
     if budget.runway is not None:
@@ -356,6 +377,7 @@ def dashboard_out(
         spent=spent,
         untracked=untracked,
         cards=cards,
+        categories=joined,
     )
 
 
@@ -372,6 +394,17 @@ def _days_out(days: Sequence[Evening], code: str) -> list[ForecastDayOut]:
             day=point.day,
             plan=_rounded(point.plan, code),
             pace=_rounded(point.pace, code),
+        )
+        for point in days
+    ]
+
+
+def _past_out(days: Sequence[PastDay], code: str) -> list[ForecastPastOut]:
+    return [
+        ForecastPastOut(
+            day=point.day,
+            evening=_rounded(point.evening, code),
+            change=_rounded(point.change, code),
         )
         for point in days
     ]
@@ -408,6 +441,7 @@ def forecast_out(found: MonthForecast | None, today: date) -> ForecastOut:
             days=_days_out(line.days, line.code),
             below_zero=_dips_out(line.plan_dip, line.pace_dip),
             records=_records_out(line.records, line.code),
+            past=_past_out(line.past, line.code),
         )
         for line in found.currencies
     ]
@@ -421,6 +455,8 @@ def forecast_out(found: MonthForecast | None, today: date) -> ForecastOut:
             uzs=_days_out(found.total_uzs, "UZS"),
             usd=_days_out(found.total_usd, "USD"),
             below_zero=_dips_out(found.plan_dip, found.pace_dip),
+            past_uzs=_past_out(found.past_uzs, "UZS"),
+            past_usd=_past_out(found.past_usd, "USD"),
         ),
         rates=dict(found.rates),
         calendar=[

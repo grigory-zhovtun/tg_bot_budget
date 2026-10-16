@@ -13,6 +13,9 @@
 Записи календаря (services.calendar) — часть плана своей статьи на день: остаток
 статьи сначала покрывает её записи, по дням идёт то, что осталось; записи — события
 в свой день, разовые — в обеих линиях, повторы — только «по плану».
+
+Прошедшие дни месяца — по факту: деньги на вечер дня (так же, как «сейчас») и на
+сколько они за день изменились — пришло плюсом, ушло минусом.
 """
 
 import calendar
@@ -80,6 +83,15 @@ class Evening:
 
 
 @dataclass(frozen=True)
+class PastDay:
+    """Прошедший день по факту: деньги на вечер и изменение за день (доход плюсом)."""
+
+    day: int
+    evening: float
+    change: float
+
+
+@dataclass(frozen=True)
 class Dip:
     """Уход в минус: первый день ниже нуля и первый день после него снова не ниже."""
 
@@ -137,6 +149,7 @@ class CurrencyForecast:
     pace_dip: Dip | None
     records: tuple[RecordDay, ...] = ()
     articles: tuple[ArticleState, ...] = ()
+    past: tuple[PastDay, ...] = ()  # с 1-го по вчера
 
 
 @dataclass(frozen=True)
@@ -152,6 +165,8 @@ class MonthForecast:
     calendar: tuple[RecordMonth, ...] = ()
     hints: Mapping[str, Hint] = field(default_factory=dict)
     rates: Mapping[str, float] = field(default_factory=dict)  # к суму, без UZS
+    past_uzs: tuple[PastDay, ...] = ()  # «Всего» по сегодняшним курсам
+    past_usd: tuple[PastDay, ...] = ()  # пусто — нет курса доллара
 
 
 def below_zero(value: float) -> bool:
@@ -183,6 +198,21 @@ def _money_now(frame: pd.DataFrame, code: str, today: date) -> float:
     own = frame[(frame["currency"] == code) & (frame["day"] <= today)]
     flow = own["amount"].where(own["group"] == INCOME_GROUP, -own["amount"])
     return float(flow.sum())
+
+
+def _past(frame: pd.DataFrame, code: str, today: date) -> tuple[PastDay, ...]:
+    """Дни месяца до сегодня: деньги на вечер, как «сейчас», и их изменение за день."""
+    own = frame[frame["currency"] == code]
+    flow = own["amount"].where(own["group"] == INCOME_GROUP, -own["amount"])
+    by_day = flow.groupby(own["day"]).sum()
+    first = today.replace(day=1)
+    evening = float(by_day[by_day.index < first].sum())
+    found = []
+    for number in range(1, today.day):
+        change = float(by_day.get(first.replace(day=number), 0.0))
+        evening += change
+        found.append(PastDay(number, evening, change))
+    return tuple(found)
 
 
 def _spent(
@@ -422,6 +452,7 @@ def currency_forecast(
             for item in state.occurrences
         ),
         book,
+        _past(frame, code, today),
     )
 
 
@@ -507,6 +538,21 @@ def month_forecast(
         if dollar
         else ()
     )
+    evenings = [0.0] * (today.day - 1)
+    changes = [0.0] * (today.day - 1)
+    for line, rate in rated:
+        for index, past in enumerate(line.past):
+            evenings[index] += past.evening * rate
+            changes[index] += past.change * rate
+    past_uzs = tuple(
+        PastDay(index + 1, evening, change)
+        for index, (evening, change) in enumerate(zip(evenings, changes, strict=True))
+    )
+    past_usd = (
+        tuple(PastDay(p.day, p.evening / dollar, p.change / dollar) for p in past_uzs)
+        if dollar
+        else ()
+    )
     return MonthForecast(
         today,
         month_end(today),
@@ -519,4 +565,6 @@ def month_forecast(
         _month_records(lines, records, booked, today),
         hints(frame, today),
         {code: rate for code, rate in rates.to_uzs.items() if code != "UZS"},
+        past_uzs,
+        past_usd,
     )

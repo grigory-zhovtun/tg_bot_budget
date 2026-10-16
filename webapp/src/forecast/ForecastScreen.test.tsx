@@ -23,7 +23,7 @@ describe("ForecastScreen", () => {
     localStorage.clear();
   });
 
-  it("shows the month from this week with the evening and the records", async () => {
+  it("shows the whole month: past days by fact, the rest by plan", async () => {
     show();
     expect(await screen.findByText("Октябрь")).toBeTruthy();
     const today = pill(15);
@@ -34,16 +34,37 @@ describe("ForecastScreen", () => {
     // 16-е — кофе и кафе; 18-е во «Всего» — ещё и $20 доставки по 12 000
     expect(within(pill(16)).getByText("−180к")).toBeTruthy();
     expect(within(pill(18)).getByText("−270к")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^14 октября/ })).toBeNull();
-    expect(screen.getByText("14")).toBeTruthy(); // прошедший день — серым
+    // прошедшие дни — по факту: сколько было вечером и расход или доход дня
+    expect(within(pill(14)).getByText("31,4")).toBeTruthy();
+    expect(within(pill(14)).getByText("−555к")).toBeTruthy();
+    expect(within(pill(5)).getByText("36,3")).toBeTruthy();
+    expect(within(pill(5)).getByText("+3,9м").className).toContain("text-ok");
+    // скринридеру — полные суммы, а не сокращения клетки
+    expect(pill(5).getAttribute("aria-label")).toBe(
+      nb("5 октября: вечером было 36,3 млн сум, за день +3 895 000 сум"),
+    );
     expect(screen.getAllByRole("button", { name: /октября:/ })).toHaveLength(
-      17,
+      31,
     );
     expect(
       screen.getByText(
-        "В клетке — сколько будет вечером, млн сум (по плану), и записи дня",
+        "В клетке — остаток на вечер, млн сум: прошедшие дни — по факту, с расходом или доходом за день; дальше — по плану, с записями дня",
       ),
     ).toBeTruthy();
+  });
+
+  it("shows a past day by fact", async () => {
+    const user = userEvent.setup();
+    show();
+    await screen.findByText("Октябрь");
+    await user.click(pill(5));
+    expect(pill(5).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("Понедельник, 5 октября")).toBeTruthy();
+    expect(screen.getByText("по факту")).toBeTruthy();
+    expect(screen.getByText("36 345 000 сум")).toBeTruthy();
+    expect(screen.getByText("+3 895 000 сум")).toBeTruthy();
+    // в прошлое не планируют
+    expect(screen.queryByRole("button", { name: /Запланировать/ })).toBeNull();
   });
 
   it("shows the chosen day with its events and ordinary spending", async () => {
@@ -112,7 +133,7 @@ describe("ForecastScreen", () => {
     await user.click(await screen.findByRole("radio", { name: "$" }));
     expect(
       screen.getByText(
-        "В клетке — сколько будет вечером, $ (по плану), и записи дня",
+        "В клетке — остаток на вечер, $: прошедшие дни — по факту, с расходом или доходом за день; дальше — по плану, с записями дня",
       ),
     ).toBeTruthy();
     expect(within(pill(15)).getByText("2 780")).toBeTruthy();
@@ -168,11 +189,14 @@ describe("ForecastScreen", () => {
         days: line.days.filter((point) => point.day === 31),
         below_zero: { plan: null, pace: null },
         records: line.records.filter((record) => record.day === 31),
+        past: [],
       })),
       total: forecastFixture.total && {
         ...forecastFixture.total,
         uzs: forecastFixture.total.uzs.filter((point) => point.day === 31),
         usd: forecastFixture.total.usd.filter((point) => point.day === 31),
+        past_uzs: [],
+        past_usd: [],
       },
     };
     const forecast = vi.fn<Api["forecast"]>().mockResolvedValue(lastDay);
@@ -295,6 +319,20 @@ describe("ForecastScreen", () => {
     ).toBeTruthy();
     expect(screen.getByText("03.11")).toBeTruthy();
     expect(screen.getByText("700 000 сум")).toBeTruthy(); // не «✓»: лагерь впереди
+  });
+
+  it("plans a new record from today when a past day is chosen", async () => {
+    const user = userEvent.setup();
+    show();
+    await screen.findByText("Октябрь");
+    await user.click(pill(3));
+    await user.click(screen.getByRole("button", { name: "＋ Новая" }));
+    // в прошлое не планируют: окно открывается на сегодня, а не на 3-е
+    const sheet = screen.getByRole("dialog");
+    expect(within(sheet).getByLabelText("Дата")).toHaveProperty(
+      "value",
+      "2026-10-15",
+    );
   });
 
   it("plans a record on the chosen day and shows the fresh forecast", async () => {

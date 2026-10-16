@@ -4,8 +4,9 @@
 сообщение), план-факт — plan_lines вкладки месяца по группам, остаток по дням —
 таблица дней вкладки (O:R под «Дата»), подписки — серии recurring с состоянием
 этого месяца. Расходы по категориям — строки fact с 1-го числа по сегодня (то,
-что потрачено на самом деле, даже по статье без строки во вкладке), остатки карт
-— блок остатков листа fact (services.cards).
+что потрачено на самом деле, даже по статье без строки во вкладке), план-факт по
+категориям — они же рядом с планом вкладки, остатки карт — блок остатков листа
+fact (services.cards).
 """
 
 from collections.abc import Sequence
@@ -77,6 +78,23 @@ class Untracked:
 
 
 @dataclass(frozen=True)
+class CategoryLine:
+    subcategory: str
+    plan: float  # вкладка месяца, в сумах
+    fact: float  # строки fact месяца, в сумах
+
+
+@dataclass(frozen=True)
+class Category:
+    """План-факт группы: план — вкладка месяца, факт — строки fact с 1-го по сегодня."""
+
+    name: str
+    plan: float
+    fact: float
+    items: tuple[CategoryLine, ...]  # от больших трат к меньшим, без трат — по плану
+
+
+@dataclass(frozen=True)
 class Dashboard:
     status: str  # ok | no_forecast
     budget: DayBudget | None
@@ -87,6 +105,7 @@ class Dashboard:
     spent: tuple[SpentGroup, ...] = ()
     untracked: tuple[Untracked, ...] = ()
     cards: tuple[CardBalance, ...] = ()
+    categories: tuple[Category, ...] = ()
 
 
 def group_plans(spend: list[PlanLine]) -> tuple[GroupPlan, ...]:
@@ -127,6 +146,37 @@ def spent_groups(frame: pd.DataFrame, today: date) -> tuple[SpentGroup, ...]:
         )
         found.append(SpentGroup(str(name), amount, items))
     return tuple(sorted(found, key=lambda group: group.amount, reverse=True))
+
+
+def _by_spending(line: CategoryLine | Category) -> tuple[float, float]:
+    return -line.fact, -line.plan
+
+
+def categories(
+    groups: Sequence[GroupPlan], spent: Sequence[SpentGroup]
+) -> tuple[Category, ...]:
+    """План вкладки и траты по строкам fact — по группам и подкатегориям.
+
+    Всё, у чего есть план или траты: от больших трат к меньшим, без трат — по
+    плану, при равенстве — в порядке вкладки. Траты статьи без плана — с планом 0.
+    """
+    plans = {g.name: {line.subcategory: line.plan for line in g.items} for g in groups}
+    facts = {g.name: {item.subcategory: item.amount for item in g.items} for g in spent}
+    totals = {group.name: group.amount for group in spent}
+    found = []
+    for name in [*plans, *(name for name in facts if name not in plans)]:
+        planned, paid = plans.get(name, {}), facts.get(name, {})
+        lines = [
+            CategoryLine(sub, planned.get(sub, 0.0), paid.get(sub, 0.0))
+            for sub in [*planned, *(sub for sub in paid if sub not in planned)]
+        ]
+        lines = [line for line in lines if line.plan > 0 or abs(line.fact) >= HALF_SUM]
+        plan = sum(line.plan for line in lines)
+        fact = totals.get(name, 0.0)
+        if plan <= 0 and fact < HALF_SUM:
+            continue
+        found.append(Category(name, plan, fact, tuple(sorted(lines, key=_by_spending))))
+    return tuple(sorted(found, key=_by_spending))
 
 
 def untracked(
@@ -192,6 +242,7 @@ def build_dashboard(
     groups = group_plans(spend)
     spent = spent_groups(frame, today)
     missing = untracked(frame, rows, today)
+    joined = categories(groups, spent)
     forecast = read_forecast(rows)
     budget = day_budget(frame, rows, today, rates, frozen_currency, records)
     if forecast is None or budget is None:
@@ -205,6 +256,7 @@ def build_dashboard(
             spent=spent,
             untracked=missing,
             cards=tuple(cards),
+            categories=joined,
         )
     upcoming = budget.ahead
     return Dashboard(
@@ -217,4 +269,5 @@ def build_dashboard(
         spent=spent,
         untracked=missing,
         cards=tuple(cards),
+        categories=joined,
     )

@@ -60,11 +60,12 @@ export interface GroupPlan {
   items: PlanItem[];
 }
 
-/** Траты группы за месяц по строкам fact, в сумах; подкатегории — от большей. */
-export interface SpentGroup {
+/** План-факт группы: план — вкладка месяца, факт — строки fact с 1-го по сегодня. */
+export interface Category {
   name: string;
-  amount: number;
-  items: { name: string; icon: string; amount: number }[];
+  plan: number; // в сумах
+  fact: number; // в сумах
+  items: { name: string; icon: string; plan: number; fact: number }[];
 }
 
 /** Траты статьи без строки во вкладке месяца — в план-факт они не попали. */
@@ -140,14 +141,14 @@ export interface Dashboard {
     uzs: number;
     change: number;
   } | null;
-  groups: GroupPlan[];
   spending: DaySpend[]; // с 1-го числа по сегодня
   upcoming: ForecastItem[];
   subscriptions: Subscription[];
   runway: Runway | null;
-  spent: SpentGroup[]; // расходы по категориям, от большей
+  groups: GroupPlan[]; // план-факт вкладки: остаток по плану на плитках «Ввода»
   untracked: Untracked[];
   cards: CardBalance[];
+  categories: Category[]; // план-факт по категориям, от больших трат
 }
 
 /** Строка списка, которая ещё впереди: сумма — остаток, в валюте строки. */
@@ -163,6 +164,13 @@ export interface ForecastDay {
   day: number;
   plan: number;
   pace: number;
+}
+
+/** Прошедший день по факту: сколько было вечером и изменение за день (доход плюсом). */
+export interface ForecastPast {
+  day: number;
+  evening: number;
+  change: number;
 }
 
 /** Уход в минус: первый день ниже нуля и когда остаток вернётся. */
@@ -203,6 +211,7 @@ export interface ForecastCurrency {
   days: ForecastDay[]; // с сегодня по последний день месяца
   below_zero: ForecastDips;
   records: ForecastRecord[];
+  past: ForecastPast[]; // с 1-го по вчера, по факту
 }
 
 /** Запись для списка и окна: повтор или разовая с сегодня. */
@@ -249,6 +258,8 @@ export interface Forecast {
     uzs: ForecastDay[];
     usd: ForecastDay[]; // пусто — нет курса доллара
     below_zero: ForecastDips;
+    past_uzs: ForecastPast[];
+    past_usd: ForecastPast[];
   } | null;
   rates: Record<string, number>; // к суму, без UZS
   calendar: CalendarRecord[];

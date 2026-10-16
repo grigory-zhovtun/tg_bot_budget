@@ -119,12 +119,24 @@ def test_events_and_dips_are_in_the_answer() -> None:
     assert uzs["below_zero"]["pace"] == {"start": 15, "until": None}
 
 
+def test_past_days_are_in_the_answer() -> None:
+    spent = fact_row(date(2026, 10, 3), "🍔 ЕДА", "кафе", 400_000)
+    found = month_forecast(frame(spent), (), (), DAY, RATES, ["UZS", "USD"])
+    body = forecast_for(found)[0].json()
+    uzs = body["currencies"][0]
+    assert len(uzs["past"]) == 14  # с 1-го по вчера
+    assert uzs["past"][2] == {"day": 3, "evening": 4_600_000, "change": -400_000}
+    assert body["total"]["past_uzs"][2]["evening"] == 4_600_000 + 12_000_000
+    # 17 млн / 12 000 — доллары до центов
+    assert body["total"]["past_usd"][0] == {"day": 1, "evening": 1416.67, "change": 0}
+
+
 def test_a_currency_without_a_rate_is_outside_the_total() -> None:
     euro = fact_row(date(2026, 9, 1), "💰 ДОХОДЫ", "нач остаток", 300, "EUR")
     data = transactions_frame([FACT_HEADER, *OPENING, euro], RATES, keep_unknown=True)
     found = month_forecast(data, (), (), DAY, RATES, ["UZS", "EUR"])
     body = forecast_for(found)[0].json()
-    assert body["currencies"][1] | {"days": [], "events": []} == {
+    assert body["currencies"][1] | {"days": [], "events": [], "past": []} == {
         "code": "EUR",
         "now": 300,
         "per_day_plan": 0,
@@ -135,6 +147,7 @@ def test_a_currency_without_a_rate_is_outside_the_total() -> None:
         "days": [],
         "below_zero": {"plan": None, "pace": None},
         "records": [],
+        "past": [],
     }
 
 

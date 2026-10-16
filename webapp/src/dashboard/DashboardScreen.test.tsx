@@ -84,9 +84,11 @@ describe("DashboardScreen", () => {
   it("opens a group to show its subcategories", async () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi()} />);
-    const plan = await screen.findByRole("region", { name: "План-факт" });
+    const plan = await screen.findByRole("region", {
+      name: "План-факт по категориям",
+    });
     await user.click(within(plan).getByRole("button", { name: /ЕДА/ }));
-    expect(within(plan).getByText(/кафе/)).toBeTruthy();
+    expect(within(plan).getByText("🍽️ кафе")).toBeTruthy();
   });
 
   it("shows the cards now and where the money went this month", async () => {
@@ -99,11 +101,15 @@ describe("DashboardScreen", () => {
       within(cards).getByText("в банке 2 450,00 RUB · сверено 01.10"),
     ).toBeTruthy();
     const spent = screen.getByRole("region", {
-      name: "Расходы по категориям",
+      name: "План-факт по категориям",
     });
-    expect(within(spent).getByText("за 1–10 октября")).toBeTruthy();
     expect(
-      within(spent).getByRole("button", { name: /ЕДА.*3,34 млн · 87 %/ }),
+      within(spent).getByText("за 1–10 октября · план на месяц 5,00 млн"),
+    ).toBeTruthy();
+    expect(
+      within(spent).getByRole("button", {
+        name: /ЕДА.*3,34 млн из 3,00 млн · 87 %/,
+      }),
     ).toBeTruthy();
     expect(
       within(spent).getByText(/не учтено: 🍔 ЕДА \/ кафе \(USD\)/),
@@ -126,8 +132,25 @@ describe("DashboardScreen", () => {
       await screen.findByRole("region", { name: "Остатки на картах" }),
     ).toBeTruthy();
     expect(
-      screen.getByRole("region", { name: "Расходы по категориям" }),
+      screen.getByRole("region", { name: "План-факт по категориям" }),
     ).toBeTruthy();
+  });
+
+  it("puts the daily spending right after the plan vs fact chart", async () => {
+    render(<DashboardScreen api={fakeApi()} />);
+    await screen.findByText("Можно сегодня");
+    // две похожие полосатые диаграммы не стоят рядом: план-факт один, следом — дни
+    expect(
+      screen
+        .getAllByRole("heading", { level: 2 })
+        .map((heading) => heading.textContent),
+    ).toEqual([
+      "Остатки на картах",
+      "План-факт по категориям",
+      "Траты по дням",
+      "Впереди",
+      "Подписки",
+    ]);
   });
 
   it("offers a retry when the sheet does not answer", async () => {

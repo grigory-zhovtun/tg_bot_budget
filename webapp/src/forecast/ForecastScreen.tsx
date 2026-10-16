@@ -98,11 +98,11 @@ function Switches({ data, view, onView }: SwitchesProps) {
   );
 }
 
-/** Выбранный день, если он ещё в прогнозе; иначе сегодня. */
+/** Выбранный день, если он ещё в месяце ответа; иначе сегодня. */
 function shownDay(data: Forecast, selected: number | null): number {
   const today = dayOf(data.today);
   const end = data.end ? dayOf(data.end) : today;
-  return selected !== null && selected >= today && selected <= end
+  return selected !== null && selected >= 1 && selected <= end
     ? selected
     : today;
 }
@@ -176,7 +176,8 @@ function Month({
       </section>
       <RecordsList
         data={data}
-        onAdd={onAdd && (() => onAdd(day))}
+        // в прошлое не планируют: при выбранном прошедшем дне — с сегодня
+        onAdd={onAdd && (() => onAdd(Math.max(day, dayOf(data.today))))}
         onEdit={onEdit}
       />
       <section className="flex flex-col gap-1">

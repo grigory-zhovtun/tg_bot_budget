@@ -4,12 +4,14 @@ import { REPEAT_NAMES, dayRecords, groupTitle, ruleText } from "./records";
 import {
   amount,
   dayEvents,
+  dayOf,
   dayTitle,
   isoDay,
   ordinary,
   signed,
   viewCode,
   viewDays,
+  viewPast,
   type View,
 } from "./view";
 
@@ -21,8 +23,40 @@ interface Props {
   onEdit?: (id: string) => void;
 }
 
+/** Прошедший день по факту: сколько было вечером и сколько за день пришло или ушло. */
+function PastCard({ data, view, day }: Pick<Props, "data" | "view" | "day">) {
+  const point = viewPast(data, view).find((item) => item.day === day);
+  if (!point) return null;
+  const code = viewCode(view);
+  return (
+    <section className="flex flex-col gap-1 rounded-2xl bg-section p-4">
+      <div className="flex items-baseline justify-between gap-2">
+        <h2 className="font-semibold">{dayTitle(isoDay(data.today, day))}</h2>
+        <span className="text-xs text-hint">по факту</span>
+      </div>
+      <p className="flex justify-between gap-2">
+        <span>вечером было</span>
+        <span
+          className={`font-semibold ${point.evening < 0 ? "text-danger" : ""}`}
+        >
+          {amount(point.evening, code)}
+        </span>
+      </p>
+      <p className="flex justify-between gap-2">
+        <span>за день</span>
+        <span className={`font-semibold ${point.change > 0 ? "text-ok" : ""}`}>
+          {signed(point.change, code)}
+        </span>
+      </p>
+    </section>
+  );
+}
+
 /** Выбранный день: остаток на вечер по плану и по темпу, события, записи, обычные траты. */
 export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
+  if (day < dayOf(data.today)) {
+    return <PastCard data={data} view={view} day={day} />;
+  }
   const point = viewDays(data, view).find((item) => item.day === day);
   if (!point) return null;
   const code = viewCode(view);

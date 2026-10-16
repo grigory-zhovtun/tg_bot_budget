@@ -7,6 +7,7 @@ import type {
   ForecastDip,
   ForecastDips,
   ForecastEvent,
+  ForecastPast,
 } from "../api";
 import { longDay, money } from "../format";
 
@@ -94,6 +95,14 @@ export function viewCurrencies(data: Forecast, view: View): ForecastCurrency[] {
 export function viewDays(data: Forecast, view: View): ForecastDay[] {
   if (view.scope !== TOTAL) return viewCurrencies(data, view)[0]?.days ?? [];
   return (view.unit === "usd" ? data.total?.usd : data.total?.uzs) ?? [];
+}
+
+/** Прошедшие дни по факту в числах вида: с 1-го по вчера. */
+export function viewPast(data: Forecast, view: View): ForecastPast[] {
+  if (view.scope !== TOTAL) return viewCurrencies(data, view)[0]?.past ?? [];
+  return (
+    (view.unit === "usd" ? data.total?.past_usd : data.total?.past_uzs) ?? []
+  );
 }
 
 export function viewDips(data: Forecast, view: View): ForecastDips {

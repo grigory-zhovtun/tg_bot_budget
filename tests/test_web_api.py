@@ -421,6 +421,19 @@ def test_dashboard_has_spending_by_group_and_card_balances() -> None:
     ]
 
 
+def test_dashboard_joins_the_plan_with_the_fact_by_category() -> None:
+    spent = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000)
+    found = build_dashboard(frame(spent), tab(), date(2026, 10, 2), RATES, "USD")
+    body = dashboard_for(found).json()
+    assert [c["name"] for c in body["categories"]] == ["🍔 ЕДА", "🏚️ ДОМ"]
+    assert body["categories"][0] == {
+        "name": "🍔 ЕДА",
+        "plan": 2_600_000,
+        "fact": 400_000,
+        "items": [{"name": "кафе", "icon": "", "plan": 2_600_000, "fact": 400_000}],
+    }
+
+
 def test_dashboard_without_the_month_tab() -> None:
     body = dashboard_for(None).json()
     assert (body["status"], body["groups"]) == ("no_month_tab", [])
