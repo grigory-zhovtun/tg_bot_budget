@@ -114,10 +114,10 @@ export default function ForecastChart({
           <text
             key={`${mark.day}-${mark.up ? "up" : "down"}`}
             x={chart.x(mark.day)}
-            y={mark.up ? y - 6 : y + 12}
-            fontSize={9}
+            y={mark.up ? y - 7 : y + 14}
+            fontSize={12}
             textAnchor="middle"
-            fill={mark.up ? "var(--color-ok)" : "var(--color-over)"}
+            fill={mark.up ? "var(--color-earned)" : "var(--color-payment)"}
           >
             {mark.up ? "▲" : "▼"}
           </text>
@@ -146,10 +146,10 @@ export default function ForecastChart({
           key={`label-${day}`}
           x={chart.x(day)}
           y={HEIGHT - 2}
-          fontSize={10}
+          fontSize={12}
           textAnchor={anchor(day)}
           fill={day === first.day ? "var(--color-text)" : "var(--color-hint)"}
-          fontWeight={day === first.day ? 700 : 400}
+          fontWeight={day === first.day ? 800 : 600}
         >
           {day}
         </text>

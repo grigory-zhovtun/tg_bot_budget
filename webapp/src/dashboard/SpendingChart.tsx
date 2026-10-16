@@ -158,9 +158,10 @@ export default function SpendingChart({
         )}
         {peak && (
           <text
-            x={inside(peak.x + peak.width / 2, 22)}
+            x={inside(peak.x + peak.width / 2, 26)}
             y={peak.y - 4}
-            fontSize={10}
+            fontSize={12}
+            fontWeight={700}
             textAnchor="middle"
             fill="var(--color-text)"
             {...HALO}
@@ -172,7 +173,8 @@ export default function SpendingChart({
           <text
             x={aheadLeft ? aheadX + 2 : WIDTH - 2}
             y={ahead ? ahead.y - 5 : SIZE.top + 8}
-            fontSize={10}
+            fontSize={12}
+            fontWeight={700}
             textAnchor={aheadLeft ? "start" : "end"}
             fill={ahead ? "var(--color-text)" : "var(--color-danger)"}
             {...HALO}
@@ -183,18 +185,18 @@ export default function SpendingChart({
         {[...labels, now].map((day) => (
           <text
             key={`day-${day}`}
-            x={inside((day - 0.5) * slot, 6)}
+            x={inside((day - 0.5) * slot, 8)}
             y={HEIGHT - 2}
-            fontSize={10}
+            fontSize={12}
             textAnchor="middle"
             fill={day === now ? "var(--color-text)" : "var(--color-hint)"}
-            fontWeight={day === now ? 700 : 400}
+            fontWeight={day === now ? 800 : 600}
           >
             {day}
           </text>
         ))}
       </svg>
-      <figcaption className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-hint">
+      <figcaption className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-hint">
         <span className="flex items-center gap-1">
           <i className="inline-block size-2 rounded-sm bg-over" />
           сверх лимита дня

@@ -1,32 +1,48 @@
 @import "tailwindcss";
 
-/* Цвета темы Telegram; запасные — для браузера вне Telegram (npm run dev) */
+/* Фон, основной текст и кнопки — из темы Telegram; запасные — для браузера вне
+   Telegram (npm run dev). Цвета надписей — свои, с контрастом от 7:1 к фону и в
+   светлой, и в тёмной теме: у Telegram подсказки бледные (около 3:1), а красный
+   мелкий текст расплывается. Светлые значения — запасные в var(), тёмные — в
+   блоке data-scheme="dark" (его ставит main.tsx по теме Telegram). Контраст
+   проверяет src/theme.test.ts. */
 @theme inline {
   --color-bg: var(--tg-theme-bg-color, #ffffff);
   --color-text: var(--tg-theme-text-color, #1f2328);
-  --color-hint: var(--tg-theme-hint-color, #8a8f98);
-  --color-link: var(--tg-theme-link-color, #2481cc);
   --color-button: var(--tg-theme-button-color, #2481cc);
   --color-button-text: var(--tg-theme-button-text-color, #ffffff);
   --color-section: var(--tg-theme-secondary-bg-color, #f1f3f5);
-  --color-danger: var(--tg-theme-destructive-text-color, #e5484d);
-  /* статусы плана — средние тона, читаются и в светлой, и в тёмной теме */
-  --color-ok: #30a46c;
-  --color-warn: #f5a524;
+  --color-hint: var(--app-hint, #454f5c);
+  --color-link: var(--app-link, #14508a);
+  /* предупреждения — оранжевым, не красным */
+  --color-danger: var(--app-alert, #7f3700);
+  /* статусы плана: текст и полосы; «сверх» — только фигуры, не текст */
+  --color-ok: var(--app-ok, #0a5c30);
+  --color-warn: var(--app-warn, #6b4500);
   --color-over: #e5484d;
   --color-off: #8a8f98;
-  /* календарь «Прогноза» с высоким контрастом: суммы — от 7:1 к фону клетки, без
-     красного текста; минус — красная клетка с белыми цифрами (6,6:1). Светлая
-     тема — тёмные тона, тёмная (data-scheme="dark", main.tsx) — яркие */
+  /* календарь «Прогноза»: траты, доходы, записи, платежи списка; минус — красная
+     клетка с белыми цифрами (6,6:1) */
   --color-spent: var(--calendar-spent, #7a4100);
   --color-earned: var(--calendar-earned, #0a5c30);
   --color-planned: var(--calendar-planned, #0a4a85);
-  --color-payment: var(--calendar-payment, #b35400);
+  --color-payment: var(--calendar-payment, #8f4300);
   --color-outline: var(--calendar-outline, #7d8b9c);
   --color-minus: #b42318;
 }
 
+/* мелкие подписи — 13 px вместо 12 */
+@theme {
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: calc(1.125 / 0.8125);
+}
+
 :root[data-scheme="dark"] {
+  --app-hint: #cfd8e1;
+  --app-link: #7cc0ff;
+  --app-alert: #ffb347;
+  --app-ok: #6ef0a8;
+  --app-warn: #ffd43b;
   --calendar-spent: #ffd43b;
   --calendar-earned: #6ef0a8;
   --calendar-planned: #6cd4ff;

@@ -112,23 +112,27 @@ export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
           >
             <span className="flex gap-1">
               {event.late && <span>⏳</span>}
-              <span className={event.amount > 0 ? "text-ok" : "text-over"}>
+              <span
+                className={`font-bold ${event.amount > 0 ? "text-earned" : "text-payment"}`}
+              >
                 {event.amount > 0 ? "▲" : "▼"}
               </span>
               <span>{event.name}</span>
             </span>
-            <span className={event.amount > 0 ? "text-ok" : ""}>
+            <span
+              className={`font-semibold ${event.amount > 0 ? "text-earned" : ""}`}
+            >
               {signed(event.amount, event.currency)}
             </span>
           </li>
         ))}
       </ul>
       {usual && (
-        <p className="text-xs text-hint">{`обычные траты ${usual} (по плану)`}</p>
+        <p className="text-sm text-hint">{`обычные траты ${usual} (по плану)`}</p>
       )}
       {records.length > 0 && (
         <div className="mt-2 flex flex-col">
-          <h3 className="text-xs text-hint">Записи на день</h3>
+          <h3 className="text-sm font-semibold text-hint">Записи на день</h3>
           <ul className="flex flex-col">
             {records.map((record) => {
               const rule = data.calendar.find((item) => item.id === record.id);
@@ -142,7 +146,9 @@ export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
                   >
                     <span
                       className={
-                        record.repeat === "once" ? "text-over" : "text-link"
+                        record.repeat === "once"
+                          ? "font-bold text-planned"
+                          : "font-bold text-link"
                       }
                       aria-hidden="true"
                     >
@@ -152,7 +158,7 @@ export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
                       <span className="flex flex-wrap items-center gap-1">
                         {record.name}
                         {record.over && (
-                          <span className="rounded-md bg-warn/20 px-1.5 text-xs text-text">
+                          <span className="rounded-md bg-minus px-1.5 text-xs font-semibold text-white">
                             сверх плана
                           </span>
                         )}
@@ -168,8 +174,8 @@ export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
                     <span
                       className={
                         record.done
-                          ? "text-xs text-hint"
-                          : "font-semibold whitespace-nowrap"
+                          ? "text-sm font-semibold text-hint"
+                          : "font-bold whitespace-nowrap text-planned"
                       }
                     >
                       {record.done
