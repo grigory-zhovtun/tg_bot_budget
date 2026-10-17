@@ -2,7 +2,12 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Api, type CalendarRecord, type Forecast } from "../api";
-import { bootstrapFixture, forecastFixture } from "../mocks/fixtures";
+import {
+  bootstrapFixture,
+  dashboardFixture,
+  forecastFixture,
+} from "../mocks/fixtures";
+import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
 import ForecastScreen from "./ForecastScreen";
 import { VIEW_KEY } from "./view";
@@ -452,5 +457,47 @@ describe("ForecastScreen", () => {
     await screen.findByText("Октябрь");
     expect(screen.queryByRole("button", { name: /Запланировать/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "＋ Новая" })).toBeNull();
+  });
+
+  it("shows this launch's forecast at once without asking again", () => {
+    const store = new Store();
+    store.put("forecast", forecastFixture);
+    const api = fakeApi();
+    render(
+      <StoreProvider value={store}>
+        <ForecastScreen api={api} boot={bootstrapFixture} />
+      </StoreProvider>,
+    );
+    expect(screen.getByText("Октябрь")).toBeTruthy();
+    expect(api.forecast).not.toHaveBeenCalled();
+  });
+
+  it("after a record is deleted the summary is asked again", async () => {
+    const store = new Store();
+    store.put("dashboard", dashboardFixture);
+    const user = userEvent.setup();
+    const api = fakeApi();
+    render(
+      <StoreProvider value={store}>
+        <ForecastScreen api={api} boot={bootstrapFixture} />
+      </StoreProvider>,
+    );
+    await screen.findByText("Октябрь");
+    await user.click(
+      screen.getByRole("button", { name: /Продукты на неделю/ }),
+    );
+    const sheet = screen.getByRole("dialog", { name: "Запись" });
+    await user.click(
+      within(sheet).getByRole("button", { name: "Удалить запись" }),
+    );
+    await user.click(
+      within(sheet).getByRole("button", { name: "Удалить насовсем" }),
+    );
+    expect(api.deleteRecord).toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    // лимит дня в «Сводке» учитывает записи календаря
+    expect(store.get("dashboard").at).toBe(0);
   });
 });

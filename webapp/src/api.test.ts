@@ -191,3 +191,28 @@ describe("request", () => {
     );
   });
 });
+
+describe("screens", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("ask the server to read the table anew only when told to", async () => {
+    const fetch = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(new Response("{}")));
+    vi.stubGlobal("fetch", fetch);
+    await api.dashboard();
+    await api.dashboard(true);
+    await api.forecast(true);
+    await api.plan("2026-10");
+    await api.plan("2026-10", true);
+    expect(fetch.mock.calls.map(([url]) => url as string)).toEqual([
+      "/api/dashboard",
+      "/api/dashboard?fresh=1",
+      "/api/forecast?fresh=1",
+      "/api/plan?month=2026-10",
+      "/api/plan?month=2026-10&fresh=1",
+    ]);
+  });
+});

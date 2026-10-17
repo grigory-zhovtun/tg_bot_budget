@@ -32,6 +32,12 @@ export function daysBetween(from: string, to: string): number {
   );
 }
 
+/** Сегодня по часам телефона: «2026-10-17». */
+export function deviceDay(now: Date = new Date()): string {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
 /** «2026-10-10» ± дни → ISO-дата; считаем в UTC, без часовых поясов. */
 export function shiftDay(isoDay: string, days: number): string {
   const date = new Date(`${isoDay}T00:00:00Z`);

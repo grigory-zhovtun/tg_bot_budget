@@ -1,11 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
-import {
-  ApiError,
-  type Api,
-  type Dashboard,
-  type SubscriptionState,
-} from "../api";
+import { useCallback } from "react";
+import type { Api, Dashboard, SubscriptionState } from "../api";
 import { itemAmount, longDay, money, short, withCurrency } from "../format";
+import { useResource, useStore } from "../store";
 import CardBalances from "./CardBalances";
 import CategoryChart from "./CategoryChart";
 import SpendingChart from "./SpendingChart";
@@ -227,39 +223,18 @@ function Content({ data }: { data: Dashboard }) {
 }
 
 export default function DashboardScreen({ api }: { api: Api }) {
-  const [data, setData] = useState<Dashboard | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [version, setVersion] = useState(0);
-
-  useEffect(() => {
-    let alive = true;
-    api.dashboard().then(
-      (result) => {
-        if (!alive) return;
-        setData(result);
-        setError(null);
-        setLoading(false);
-      },
-      (reason: unknown) => {
-        if (!alive) return;
-        setError(
-          reason instanceof ApiError
-            ? reason.message
-            : "Не получилось загрузить сводку",
-        );
-        setLoading(false);
-      },
-    );
-    return () => {
-      alive = false;
-    };
-  }, [api, version]);
-
+  const store = useStore();
+  const load = useCallback((fresh: boolean) => api.dashboard(fresh), [api]);
+  const { data, loading, error, reload } = useResource<Dashboard>(
+    store,
+    "dashboard",
+    load,
+    { failure: "Не получилось загрузить сводку" },
+  );
+  // «Обновить» читает таблицу заново, а не копию листов на сервере
   const refresh = useCallback(() => {
-    setLoading(true);
-    setVersion((current) => current + 1);
-  }, []);
+    reload(true);
+  }, [reload]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -273,7 +248,7 @@ export default function DashboardScreen({ api }: { api: Api }) {
           disabled={loading}
           onClick={refresh}
         >
-          Обновить
+          {loading ? "Обновляю…" : "Обновить"}
         </button>
       </div>
       {loading && !data && <Skeleton />}

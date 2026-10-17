@@ -23,7 +23,7 @@ export interface BackButton {
 
 export interface WebApp {
   initData: string;
-  initDataUnsafe: { start_param?: string };
+  initDataUnsafe: { start_param?: string; user?: { id: number } };
   platform: string;
   ready(): void;
   expand(): void;

@@ -9,6 +9,7 @@ import {
 } from "../api";
 import { groupColor, tint } from "../entry/palette";
 import { itemAmount, money, short, withCurrency } from "../format";
+import { useResource, useStore } from "../store";
 import { haptic, telegram } from "../telegram";
 import { amountValue } from "../entry/amount";
 import AddArticleSheet from "./AddArticleSheet";
@@ -178,9 +179,6 @@ export default function PlanScreen({
   onDraft,
   onRestoredSeen,
 }: Props) {
-  const [plan, setPlan] = useState<MonthPlan | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [version, setVersion] = useState(0);
   const [editing, setEditing] = useState<Editing>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -199,32 +197,36 @@ export default function PlanScreen({
     onDraftRef.current = onDraft;
   });
 
-  useEffect(() => {
-    let alive = true;
-    api.plan(month).then(
-      (data) => {
-        if (!alive) return;
-        setPlan(data);
-        setError(null);
-        if (data.status !== "ok") return;
-        // черновик с прошлого раза ложится на свежий план; что поменялось — подсветить
-        const next = rebase(draftRef.current, data);
-        setConflicts(next.conflicts);
-        onDraftRef.current(next.draft);
-      },
-      (reason: unknown) => {
-        if (!alive) return;
-        setError(
-          reason instanceof ApiError
-            ? reason.message
-            : "Не получилось загрузить план — попробуйте ещё раз",
-        );
-      },
-    );
-    return () => {
-      alive = false;
-    };
-  }, [api, month, version]);
+  const store = useStore();
+  const key = `plan:${month}`;
+  const load = useCallback(
+    (fresh: boolean) => api.plan(month, fresh),
+    [api, month],
+  );
+  // черновик с прошлого раза ложится на свежий план; что поменялось — подсветить
+  const answered = useCallback((data: MonthPlan) => {
+    if (data.status !== "ok") return;
+    const next = rebase(draftRef.current, data);
+    setConflicts(next.conflicts);
+    onDraftRef.current(next.draft);
+  }, []);
+  // копия плана видна сразу, но сервер спрашивается всегда: черновик ложится
+  // только на свежий план
+  const {
+    data: plan,
+    error,
+    reload,
+  } = useResource<MonthPlan>(store, key, load, {
+    failure: "Не получилось загрузить план — попробуйте ещё раз",
+    always: true,
+    onAnswer: answered,
+  });
+  const setPlan = useCallback(
+    (fresh: MonthPlan) => {
+      store.put(key, fresh);
+    },
+    [key, store],
+  );
 
   const count = changeCount(draft);
   const label = `Сохранить ${changesText(count)}`;
@@ -240,6 +242,8 @@ export default function PlanScreen({
         (fresh) => {
           haptic("success");
           setPlan(fresh);
+          // план меняет сводку и прогноз — их вкладки спросят сервер заново
+          store.expire(["dashboard", "forecast"]);
           setConflicts([]);
           // правки, сделанные пока шло сохранение, остаются; записанные совпали
           // со свежим планом и уходят сами
@@ -277,7 +281,7 @@ export default function PlanScreen({
         inFlight.current = false;
         setSaving(false);
       });
-  }, [api, draft, onDraft]);
+  }, [api, draft, onDraft, setPlan, store]);
 
   const create = useCallback(() => {
     if (inFlight.current) return; // второй тап до перерисовки — без второго запроса
@@ -308,7 +312,7 @@ export default function PlanScreen({
         inFlight.current = false;
         setCreating(false);
       });
-  }, [api]);
+  }, [api, setPlan]);
 
   const ask = useCallback(() => {
     if (asking.current) return;
@@ -368,8 +372,7 @@ export default function PlanScreen({
           type="button"
           className="text-link"
           onClick={() => {
-            setError(null);
-            setVersion((current) => current + 1);
+            reload();
           }}
         >
           Повторить

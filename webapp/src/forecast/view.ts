@@ -266,8 +266,8 @@ export function currencyRows(data: Forecast): CurrencyRow[] {
   });
 }
 
-/** Вид из памяти телефона, если он подходит к ответу; иначе «Всего, сум». */
-export function loadView(data: Forecast): View {
+/** Вид из памяти телефона как есть; нет или испорчен — «Всего, сум». */
+export function storedView(): View {
   try {
     const text = localStorage.getItem(VIEW_KEY);
     if (!text) return DEFAULT_VIEW;
@@ -277,13 +277,25 @@ export function loadView(data: Forecast): View {
     }
     const scope: unknown = value.scope;
     const unit: unknown = "unit" in value ? value.unit : "uzs";
-    if (typeof scope !== "string" || !scopes(data).includes(scope)) {
-      return DEFAULT_VIEW;
-    }
-    return { scope, unit: unit === "usd" && hasDollars(data) ? "usd" : "uzs" };
+    if (typeof scope !== "string") return DEFAULT_VIEW;
+    return { scope, unit: unit === "usd" ? "usd" : "uzs" };
   } catch {
     return DEFAULT_VIEW;
   }
+}
+
+/** Вид, подходящий к ответу: нет такой валюты — «Всего», доллары — если есть курс. */
+export function fitView(view: View, data: Forecast): View {
+  if (!scopes(data).includes(view.scope)) return DEFAULT_VIEW;
+  if (view.unit === "usd" && !hasDollars(data)) {
+    return { scope: view.scope, unit: "uzs" };
+  }
+  return view;
+}
+
+/** Вид из памяти телефона, если он подходит к ответу; иначе «Всего, сум». */
+export function loadView(data: Forecast): View {
+  return fitView(storedView(), data);
 }
 
 export function storeView(view: View): void {

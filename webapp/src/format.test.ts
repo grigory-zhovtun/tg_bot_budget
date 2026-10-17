@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   dayLabel,
+  deviceDay,
   daysBetween,
   longDay,
   itemAmount,
@@ -59,5 +60,12 @@ describe("daysBetween", () => {
     expect(daysBetween("2026-10-09", "2026-10-15")).toBe(6);
     expect(daysBetween("2026-10-15", "2026-10-15")).toBe(0);
     expect(daysBetween("2026-09-28", "2026-10-03")).toBe(5);
+  });
+});
+
+describe("deviceDay", () => {
+  it("is the date on the phone clock, not in UTC", () => {
+    expect(deviceDay(new Date(2026, 9, 17, 0, 30))).toBe("2026-10-17");
+    expect(deviceDay(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
   });
 });
