@@ -61,7 +61,7 @@ app/
 │   ├── recurring.py     # Monthly payments from fact: recurring_key, amount clusters, day ±4, /subs text and morning lines
 │   ├── dashboard.py     # Mini App «Сводка»: build_dashboard — DayBudget, plan_lines by group, read_daily (O:R under «Дата»), subscription states, spending by group from fact rows (spent_groups), plan vs fact by category (categories: the tab's plan + spent_groups) and articles without a month-tab row (untracked)
 │   ├── cards.py         # «Сводка»: card balances from the fact balance block (I name, J «Текущий баланс», N «Проверка», Q «Сверено»), the bank check
-│   ├── forecast.py      # Mini App «Прогноз»: money until the month end per currency and in total, plan and pace lines, list rows and calendar records as events; days before today by fact (evening, change)
+│   ├── forecast.py      # Mini App «Прогноз»: money until the month end per currency and in total, plan and pace lines, list rows and calendar records as events; the days by fact up to today — evening, change, spending and income, totals and by article (`PastDay.articles`); today is what already happened
 │   ├── calendar.py      # «Календарь» sheet: records (once, every day, days of the week, once a month), their days, closing by fact, sum hints
 │   ├── runway.py        # «💳 Сумы» card: the forecast's pace line in sums → last day, gap, dollars to exchange
 │   └── day_budget.py    # Daily limit from the month tab forecast block, frozen money, morning text
@@ -79,7 +79,7 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 
 **Mini App dashboard**: `GET /api/dashboard` → `AnalyticsService.dashboard()` → `build_dashboard` (the same `day_budget` as `/today`, `plan_lines` by group, `read_daily` — the month tab's daily table, `find_series` with this month's state, `spent_groups` and `untracked` — this month's fact rows, `categories` — them joined with the tab's plan by group and subcategory, `card_balances` — the fact balance block from the same read of `fact`, no extra request) → `api.dashboard_out`
 
-**Mini App forecast**: `GET /api/forecast` → `AnalyticsService.forecast(today, card currencies)` → `month_forecast` (`fact` with `keep_unknown`, `read_plan(...).articles`, `read_forecast(...).items`; per currency `currency_forecast`: money now, plan per day by the morning reconciliation, pace of 14 days without list payments, events by the reconciliation now, the days before today by fact — evening and change of the day; total at today's rates) → `api.forecast_out`
+**Mini App forecast**: `GET /api/forecast` → `AnalyticsService.forecast(today, card currencies)` → `month_forecast` (`fact` with `keep_unknown`, `read_plan(...).articles`, `read_forecast(...).items`; per currency `currency_forecast`: money now, plan per day by the morning reconciliation, pace of 14 days without list payments, events by the reconciliation now, the days by fact up to today — evening, change, spending and income of the day, totals and by article; total at today's rates) → `api.forecast_out` (icons of the articles from `bot_data["icons"]`)
 
 **Mini App speed**: `GET /api/dashboard|forecast|plan` take sheet copies up to `SCREEN_COPY_AGE` (120 s) old — `read_month_sheets` reads the four sheets in parallel threads; `?fresh=1` reads the table anew; answers right after a write are read anew too. Any write through gspread drops every copy (`GoogleSheetsService._written`), a read that overlapped a write is not kept
 

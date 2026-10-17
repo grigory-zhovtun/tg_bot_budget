@@ -1,8 +1,10 @@
-import type { Forecast } from "../api";
+import type { Forecast, ForecastPast } from "../api";
 import { longDay } from "../format";
 import { REPEAT_NAMES, dayRecords, groupTitle, ruleText } from "./records";
 import {
   amount,
+  articleText,
+  dayArticles,
   dayEvents,
   dayOf,
   dayTitle,
@@ -12,6 +14,7 @@ import {
   viewCode,
   viewDays,
   viewPast,
+  type ShownArticle,
   type View,
 } from "./view";
 
@@ -23,13 +26,85 @@ interface Props {
   onEdit?: (id: string) => void;
 }
 
-/** Прошедший день по факту: сколько было вечером, траты и доходы дня врозь. */
+interface ArticlesProps {
+  label: string; // для скринридера: «Траты по статьям»
+  articles: ShownArticle[];
+}
+
+/** Статьи дня столбиком: значок и подкатегория, справа сумма в своей валюте. */
+function Articles({ label, articles }: ArticlesProps) {
+  if (articles.length === 0) return null;
+  return (
+    <ul className="flex flex-col pl-3" aria-label={label}>
+      {articles.map((article) => (
+        <li
+          key={`${article.currency}-${article.group}-${article.subcategory}`}
+          className="flex justify-between gap-2 py-0.5"
+        >
+          <span className="flex items-center gap-2">
+            {article.icon && <span aria-hidden="true">{article.icon}</span>}
+            <span>{article.subcategory}</span>
+          </span>
+          <span className="font-semibold whitespace-nowrap">
+            {articleText(article)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+interface FactsProps {
+  data: Forecast;
+  view: View;
+  point: ForecastPast;
+  today: boolean;
+}
+
+/** Траты и доходы дня: итог — в числах вида, по статьям — каждая в своей валюте. */
+function DayFacts({ data, view, point, today }: FactsProps) {
+  const code = viewCode(view);
+  const { spent, earned } = dayArticles(data, view, point.day);
+  const spending = spent.length > 0 || Math.round(point.spent) !== 0;
+  const income = earned.length > 0 || Math.round(point.earned) !== 0;
+  if (!spending && !income) {
+    return today ? null : <p>движений не было</p>;
+  }
+  return (
+    <>
+      {spending && (
+        <>
+          <p className="flex justify-between gap-2">
+            <span>{today ? "потрачено сегодня" : "потрачено"}</span>
+            <span className="font-bold text-spent">
+              {point.spent < 0
+                ? `+${amount(-point.spent, code)}`
+                : `−${amount(point.spent, code)}`}
+            </span>
+          </p>
+          <Articles label="Траты по статьям" articles={spent} />
+        </>
+      )}
+      {income && (
+        <>
+          <p className="flex justify-between gap-2">
+            <span>{today ? "пришло сегодня" : "пришло"}</span>
+            <span className="font-bold text-earned">
+              {`+${amount(point.earned, code)}`}
+            </span>
+          </p>
+          <Articles label="Доходы по статьям" articles={earned} />
+        </>
+      )}
+    </>
+  );
+}
+
+/** Прошедший день по факту: сколько было вечером, траты и доходы дня по статьям. */
 function PastCard({ data, view, day }: Pick<Props, "data" | "view" | "day">) {
   const point = viewPast(data, view).find((item) => item.day === day);
   if (!point) return null;
   const code = viewCode(view);
-  const spent = Math.round(point.spent) > 0;
-  const earned = Math.round(point.earned) > 0;
   return (
     <section className="flex flex-col gap-1 rounded-2xl bg-section p-4">
       <div className="flex items-baseline justify-between gap-2">
@@ -46,35 +121,27 @@ function PastCard({ data, view, day }: Pick<Props, "data" | "view" | "day">) {
           {amount(point.evening, code)}
         </span>
       </p>
-      {spent && (
-        <p className="flex justify-between gap-2">
-          <span>потрачено</span>
-          <span className="font-bold text-spent">
-            {`−${amount(point.spent, code)}`}
-          </span>
-        </p>
-      )}
-      {earned && (
-        <p className="flex justify-between gap-2">
-          <span>пришло</span>
-          <span className="font-bold text-earned">
-            {`+${amount(point.earned, code)}`}
-          </span>
-        </p>
-      )}
-      {!spent && !earned && <p>движений не было</p>}
+      <DayFacts data={data} view={view} point={point} today={false} />
     </section>
   );
 }
 
-/** Выбранный день: остаток на вечер по плану и по темпу, события, записи, обычные траты. */
+/**
+ * Выбранный день: остаток на вечер по плану и по темпу; сегодня — что уже
+ * потрачено и пришло по статьям; события, обычные траты, записи.
+ */
 export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
-  if (day < dayOf(data.today)) {
+  const today = dayOf(data.today);
+  if (day < today) {
     return <PastCard data={data} view={view} day={day} />;
   }
   const point = viewDays(data, view).find((item) => item.day === day);
   if (!point) return null;
   const code = viewCode(view);
+  const fact =
+    day === today
+      ? viewPast(data, view).find((item) => item.day === day)
+      : undefined;
   const usual = ordinary(data, view, day);
   const records = dayRecords(data, view, day);
   const iso = isoDay(data.today, day);
@@ -104,6 +171,11 @@ export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
           {amount(point.pace, code)}
         </span>
       </p>
+      {fact && (
+        <div className="mt-2 flex flex-col gap-1">
+          <DayFacts data={data} view={view} point={fact} today />
+        </div>
+      )}
       <ul className="mt-1 flex flex-col gap-0.5 text-sm">
         {dayEvents(data, view, day).map((event, index) => (
           <li
@@ -127,9 +199,7 @@ export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
           </li>
         ))}
       </ul>
-      {usual && (
-        <p className="text-sm text-hint">{`обычные траты ${usual} (по плану)`}</p>
-      )}
+      {usual && <p className="text-sm text-hint">{usual}</p>}
       {records.length > 0 && (
         <div className="mt-2 flex flex-col">
           <h3 className="text-sm font-semibold text-hint">Записи на день</h3>

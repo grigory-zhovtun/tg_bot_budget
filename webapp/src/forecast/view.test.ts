@@ -13,6 +13,8 @@ import {
   loadView,
   marks,
   minusRange,
+  articleText,
+  dayArticles,
   ordinary,
   perDay,
   pillUnit,
@@ -105,16 +107,74 @@ describe("forecast view", () => {
     ]);
   });
 
-  it("lists the ordinary spending of a day by currencies", () => {
+  it("tells the ordinary spending of a day in the numbers of the view", () => {
+    // «Всего» — одной суммой по курсу таблицы: 470 000 + $3 × 12 000 + 300 ₽ × 150
     expect(ordinary(forecastFixture, DEFAULT_VIEW, 17)).toBe(
-      nb("≈ 470 000 сум + $3 + 300 ₽"),
+      nb("обычные траты ≈ 551 000 сум (по плану)"),
+    );
+    expect(ordinary(forecastFixture, DOLLARS, 17)).toBe(
+      "обычные траты ≈ $46 (по плану)",
     );
     const spent = withUzs({ spent_today: 100_000 });
-    expect(ordinary(spent, UZS, 15)).toBe(nb("≈ 370 000 сум"));
-    expect(ordinary(spent, UZS, 16)).toBe(nb("≈ 470 000 сум"));
+    expect(ordinary(spent, UZS, 15)).toBe(
+      nb("на обычные траты осталось ≈ 370 000 сум (по плану)"),
+    );
+    expect(ordinary(spent, UZS, 16)).toBe(
+      nb("обычные траты ≈ 470 000 сум (по плану)"),
+    );
+    // сумы на сегодня потрачены — во «Всего» остаток долларов и рублей в сумах,
+    // а не «≈ 300 ₽» отдельной строкой
+    const over = withUzs({ spent_today: 600_000 });
+    expect(ordinary(over, UZS, 15)).toBe(
+      "обычные траты на сегодня по плану уже потрачены",
+    );
+    expect(ordinary(over, DEFAULT_VIEW, 15)).toBe(
+      nb("на обычные траты осталось ≈ 81 000 сум (по плану)"),
+    );
     expect(perDay(forecastFixture, UZS)).toBe(
       nb("В день: по плану 470 000 сум, по темпу 850 000 сум."),
     );
+  });
+
+  it("lists the articles of a day, each in its currency, the biggest first", () => {
+    const total = dayArticles(forecastFixture, DEFAULT_VIEW, 14);
+    expect(
+      total.spent.map((item) => [item.subcategory, item.currency]),
+    ).toEqual([
+      ["продукты", "UZS"],
+      ["кафе", "UZS"],
+      ["доставка", "USD"], // $5 — 60 000 сум
+      ["подписка", "RUB"], // 300 ₽ — 45 000 сум
+    ]);
+    expect(total.earned).toEqual([]);
+    expect(
+      dayArticles(forecastFixture, UZS, 14).spent.map(
+        (item) => item.subcategory,
+      ),
+    ).toEqual(["продукты", "кафе"]);
+    const [advance] = dayArticles(forecastFixture, UZS, 5).earned;
+    expect(advance?.subcategory).toBe("аванс");
+    // сегодня — то, что уже было
+    expect(
+      dayArticles(forecastFixture, UZS, 15).spent.map((item) => item.amount),
+    ).toEqual([120_000]);
+  });
+
+  it("writes a sum of an article in its currency, a refund as a refund", () => {
+    const [groceries, refund] = dayArticles(forecastFixture, UZS, 9).spent;
+    if (!groceries || !refund) throw new Error("fixture");
+    expect(articleText(groceries)).toBe(nb("500 000 сум"));
+    expect(articleText(refund)).toBe(nb("+50 000 сум возврат"));
+    const [delivery] = dayArticles(
+      forecastFixture,
+      {
+        scope: "USD",
+        unit: "uzs",
+      },
+      14,
+    ).spent;
+    if (!delivery) throw new Error("fixture");
+    expect(articleText(delivery)).toBe("$5");
   });
 
   it("shows every currency now and at the month end", () => {
@@ -173,10 +233,18 @@ describe("forecast view", () => {
     expect(loadView(forecastFixture)).toEqual(DEFAULT_VIEW);
   });
 
-  it("gives the past days by fact in the numbers of the view", () => {
-    expect(viewPast(forecastFixture, UZS)[13]).toEqual({
-      day: 14,
+  it("gives the days by fact in the numbers of the view", () => {
+    // сегодня — то, что уже было: вечер — деньги сейчас
+    expect(viewPast(forecastFixture, UZS)[14]).toMatchObject({
+      day: 15,
       evening: 6_810_000,
+      change: -120_000,
+      spent: 120_000,
+      earned: 0,
+    });
+    expect(viewPast(forecastFixture, UZS)[13]).toMatchObject({
+      day: 14,
+      evening: 6_930_000,
       change: -450_000,
       spent: 450_000,
       earned: 0,
@@ -184,10 +252,11 @@ describe("forecast view", () => {
     // «Всего»: сумы + $1 800 по 12 000 + 20 000 ₽ по 150
     expect(viewPast(forecastFixture, DEFAULT_VIEW)[13]).toEqual({
       day: 14,
-      evening: 31_410_000,
+      evening: 31_530_000,
       change: -555_000,
       spent: 555_000,
       earned: 0,
+      articles: [],
     });
     // 5-го и траты, и аванс — врозь
     expect(viewPast(forecastFixture, DOLLARS)[4]?.spent).toBeCloseTo(

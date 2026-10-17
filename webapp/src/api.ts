@@ -166,13 +166,24 @@ export interface ForecastDay {
   pace: number;
 }
 
-/** Прошедший день по факту: сколько было вечером и изменение за день (доход плюсом). */
+/** Статья дня по факту: траты (возврат — минусом) или доход, в валюте строк. */
+export interface DayArticle {
+  group: string;
+  subcategory: string;
+  icon: string;
+  amount: number;
+  uzs: number; // в сумах по курсу таблицы; 0 — курса нет
+  income: boolean;
+}
+
+/** День по факту: сколько было вечером и изменение за день (доход плюсом). */
 export interface ForecastPast {
   day: number;
-  evening: number;
+  evening: number; // сегодня — деньги сейчас
   change: number;
   spent: number; // траты дня по статьям расходов
   earned: number; // доходы дня
+  articles: DayArticle[]; // по статьям: траты от больших, доходы; у «Всего» — пусто
 }
 
 /** Уход в минус: первый день ниже нуля и когда остаток вернётся. */
@@ -213,7 +224,7 @@ export interface ForecastCurrency {
   days: ForecastDay[]; // с сегодня по последний день месяца
   below_zero: ForecastDips;
   records: ForecastRecord[];
-  past: ForecastPast[]; // с 1-го по вчера, по факту
+  past: ForecastPast[]; // с 1-го по сегодня по факту: сегодня — что уже было
 }
 
 /** Запись для списка и окна: повтор или разовая с сегодня. */

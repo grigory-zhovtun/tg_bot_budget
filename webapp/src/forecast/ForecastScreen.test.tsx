@@ -35,7 +35,12 @@ describe("ForecastScreen", () => {
     expect(today.getAttribute("aria-pressed")).toBe("true");
     expect(today.getAttribute("aria-current")).toBe("date");
     expect(within(today).getByText("33,4")).toBeTruthy();
-    expect(within(today).getByText("−30к")).toBeTruthy();
+    // сегодня — что уже потрачено, а записи дня — в его карточке
+    expect(within(today).getByText("−120к")).toBeTruthy();
+    expect(within(today).queryByText("−30к")).toBeNull();
+    expect(today.getAttribute("aria-label")).toBe(
+      nb("15 октября: вечером 33,4 млн сум, потрачено 120 000 сум"),
+    );
     // 16-е — кофе и кафе; 18-е во «Всего» — ещё и $20 доставки по 12 000
     expect(within(pill(16)).getByText("−180к")).toBeTruthy();
     expect(within(pill(18)).getByText("−270к")).toBeTruthy();
@@ -44,11 +49,11 @@ describe("ForecastScreen", () => {
       "text-planned",
     );
     // прошедшие дни — по факту: сколько было вечером, траты и доходы дня врозь
-    expect(within(pill(14)).getByText("31,4")).toBeTruthy();
+    expect(within(pill(14)).getByText("31,5")).toBeTruthy();
     expect(within(pill(14)).getByText("−555к").className).toContain(
       "text-spent",
     );
-    expect(within(pill(5)).getByText("36,3")).toBeTruthy();
+    expect(within(pill(5)).getByText("36,5")).toBeTruthy();
     expect(within(pill(5)).getByText("−555к").className).toContain(
       "text-spent",
     );
@@ -58,7 +63,7 @@ describe("ForecastScreen", () => {
     // скринридеру — полные суммы, а не сокращения клетки
     expect(pill(5).getAttribute("aria-label")).toBe(
       nb(
-        "5 октября: вечером было 36,3 млн сум, потрачено 555 000 сум, пришло 4 000 000 сум",
+        "5 октября: вечером было 36,5 млн сум, потрачено 555 000 сум, пришло 4 000 000 сум",
       ),
     );
     expect(screen.getAllByRole("button", { name: /октября:/ })).toHaveLength(
@@ -83,11 +88,48 @@ describe("ForecastScreen", () => {
     expect(pill(5).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText("Понедельник, 5 октября")).toBeTruthy();
     expect(screen.getByText("по факту")).toBeTruthy();
-    expect(screen.getByText("36 345 000 сум")).toBeTruthy();
+    expect(screen.getByText("36 465 000 сум")).toBeTruthy();
     expect(screen.getByText("−555 000 сум")).toBeTruthy();
     expect(screen.getByText("+4 000 000 сум")).toBeTruthy();
+    // траты — суммами по статьям, каждая в своей валюте; доходы — отдельно
+    const spent = screen.getByRole("list", { name: "Траты по статьям" });
+    expect(
+      within(spent)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual([nb("🛒продукты450 000 сум"), "🛵доставка$5", "📺подписка300 ₽"]);
+    const earned = screen.getByRole("list", { name: "Доходы по статьям" });
+    expect(within(earned).getByText("аванс")).toBeTruthy();
     // в прошлое не планируют
     expect(screen.queryByRole("button", { name: /Запланировать/ })).toBeNull();
+  });
+
+  it("lists what was spent today in today's card", async () => {
+    show();
+    await screen.findByText("Октябрь");
+    expect(screen.getByText("потрачено сегодня")).toBeTruthy();
+    expect(screen.getByText("−120 000 сум")).toBeTruthy();
+    const spent = screen.getByRole("list", { name: "Траты по статьям" });
+    expect(within(spent).getByText("продукты")).toBeTruthy();
+    expect(within(spent).getByText("120 000 сум")).toBeTruthy();
+  });
+
+  it("shows a refund of a day as a refund", async () => {
+    const user = userEvent.setup();
+    show();
+    await user.click(await screen.findByRole("radio", { name: "UZS" }));
+    await user.click(pill(9));
+    expect(screen.getByText("+50 000 сум возврат")).toBeTruthy();
+  });
+
+  it("colors today's spending when another day is chosen", async () => {
+    const user = userEvent.setup();
+    show();
+    await screen.findByText("Октябрь");
+    await user.click(pill(16));
+    expect(within(pill(15)).getByText("−120к").className).toContain(
+      "text-spent",
+    );
   });
 
   it("marks an evening below zero by the cell, not by red text", async () => {
@@ -123,8 +165,9 @@ describe("ForecastScreen", () => {
     expect(screen.getByText("Суббота, 17 октября")).toBeTruthy();
     expect(screen.getByText("Детский центр")).toBeTruthy();
     expect(screen.getByText("−320 000 сум")).toBeTruthy();
+    // во «Всего» — одной суммой в сумах по курсу таблицы
     expect(
-      screen.getByText("обычные траты ≈ 470 000 сум + $3 + 300 ₽ (по плану)"),
+      screen.getByText("обычные траты ≈ 551 000 сум (по плану)"),
     ).toBeTruthy();
   });
 

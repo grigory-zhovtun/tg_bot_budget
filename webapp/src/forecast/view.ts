@@ -1,6 +1,7 @@
 /** Вид экрана «Прогноз»: что показать, числа и подписи вида, память выбора. */
 
 import type {
+  DayArticle,
   Forecast,
   ForecastCurrency,
   ForecastDay,
@@ -97,7 +98,7 @@ export function viewDays(data: Forecast, view: View): ForecastDay[] {
   return (view.unit === "usd" ? data.total?.usd : data.total?.uzs) ?? [];
 }
 
-/** Прошедшие дни по факту в числах вида: с 1-го по вчера. */
+/** Дни по факту в числах вида: с 1-го по сегодня (сегодня — что уже было). */
 export function viewPast(data: Forecast, view: View): ForecastPast[] {
   if (view.scope !== TOTAL) return viewCurrencies(data, view)[0]?.past ?? [];
   return (
@@ -202,24 +203,77 @@ export function warnings(data: Forecast, view: View): string[] {
   });
 }
 
-/** «≈ 470 000 сум + $3 + 300 ₽» — обычные траты дня по плану; сегодня — остаток дня. */
+/** Сумма валют в числах вида: во «Всего» — по курсу таблицы, без валют без курса. */
+function inView(
+  data: Forecast,
+  view: View,
+  pick: (line: ForecastCurrency) => number,
+): number {
+  const lines = viewCurrencies(data, view);
+  if (view.scope !== TOTAL)
+    return lines.reduce((sum, line) => sum + pick(line), 0);
+  const sums = lines.reduce((sum, line) => {
+    const rate = line.code === "UZS" ? 1 : data.rates[line.code];
+    return line.in_total && rate ? sum + pick(line) * rate : sum;
+  }, 0);
+  const dollar = data.rates.USD;
+  return view.unit === "usd" && dollar ? sums / dollar : sums;
+}
+
+/**
+ * Строка обычных трат дня по плану в числах вида: «обычные траты ≈ 470 000 сум
+ * (по плану)». Сегодня — сколько от них осталось или что они уже потрачены.
+ */
 export function ordinary(
   data: Forecast,
   view: View,
   day: number,
 ): string | null {
-  const today = dayOf(data.today);
-  const parts = viewCurrencies(data, view)
-    .map((line) => ({
-      code: line.code,
-      value:
-        day === today
-          ? Math.max(line.per_day_plan - line.spent_today, 0)
-          : line.per_day_plan,
-    }))
-    .filter((part) => Math.round(part.value) > 0)
-    .map((part) => amount(part.value, part.code));
-  return parts.length > 0 ? `≈ ${parts.join(" + ")}` : null;
+  const code = viewCode(view);
+  const planned = inView(data, view, (line) => line.per_day_plan);
+  if (day !== dayOf(data.today)) {
+    return Math.round(planned) > 0
+      ? `обычные траты ≈ ${amount(planned, code)} (по плану)`
+      : null;
+  }
+  const left = inView(data, view, (line) =>
+    Math.max(line.per_day_plan - line.spent_today, 0),
+  );
+  if (Math.round(left) > 0) {
+    return `на обычные траты осталось ≈ ${amount(left, code)} (по плану)`;
+  }
+  return Math.round(planned) > 0
+    ? "обычные траты на сегодня по плану уже потрачены"
+    : null;
+}
+
+export interface ShownArticle extends DayArticle {
+  currency: string;
+}
+
+/** Статьи дня в виде, каждая в своей валюте: траты от больших (по сумам) и доходы. */
+export function dayArticles(
+  data: Forecast,
+  view: View,
+  day: number,
+): { spent: ShownArticle[]; earned: ShownArticle[] } {
+  const all = viewCurrencies(data, view).flatMap((line) =>
+    (line.past.find((point) => point.day === day)?.articles ?? []).map(
+      (article) => ({ ...article, currency: line.code }),
+    ),
+  );
+  const biggest = (a: ShownArticle, b: ShownArticle) => b.uzs - a.uzs;
+  return {
+    spent: all.filter((article) => !article.income).sort(biggest),
+    earned: all.filter((article) => article.income).sort(biggest),
+  };
+}
+
+/** «120 000 сум», «$5»; возврат — «+50 000 сум возврат». */
+export function articleText(article: ShownArticle): string {
+  return article.amount < 0 && !article.income
+    ? `+${amount(-article.amount, article.currency)} возврат`
+    : amount(article.amount, article.currency);
 }
 
 /** «В день: по плану 470 000 сум, по темпу 850 000 сум.» */
