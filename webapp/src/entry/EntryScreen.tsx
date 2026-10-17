@@ -62,7 +62,9 @@ function Header({
 
 export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
   const fallbackSource = boot.default_source ?? boot.sources[0]?.name ?? "";
-  const [chosenSource, setChosenSource] = useState(fallbackSource);
+  // карта, выбранная на экране; null — по умолчанию из справочника: он мог прийти
+  // из памяти телефона, а свежий — назвать другую карту
+  const [picked, setPicked] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("group");
   const [group, setGroup] = useState<Group | null>(null);
   const [sub, setSub] = useState<Subcategory | null>(null);
@@ -91,9 +93,10 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
   );
 
   // справочник могли перечитать: карту, которой больше нет, не держим
-  const source = boot.sources.some((s) => s.name === chosenSource)
-    ? chosenSource
-    : fallbackSource;
+  const source =
+    picked !== null && boot.sources.some((s) => s.name === picked)
+      ? picked
+      : fallbackSource;
   const currency =
     boot.sources.find((s) => s.name === source)?.currency ?? "UZS";
   const decimals = currency !== "UZS";
@@ -212,7 +215,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
   }, [tg, step, submit]);
 
   function chooseSource(name: string) {
-    setChosenSource(name);
+    setPicked(name);
     setAmount("");
   }
 

@@ -626,4 +626,37 @@ describe("PlanScreen", () => {
     expect(store.get("dashboard").at).toBe(0);
     expect(store.get("forecast").at).toBe(0);
   });
+
+  it("says the plan could not be refreshed when it shows a copy", async () => {
+    const store = new Store();
+    store.put("plan:2026-10", planFixture);
+    const plan = vi
+      .fn<Api["plan"]>()
+      .mockRejectedValue(
+        new ApiError(503, "sheets_unavailable", "Таблица не ответила"),
+      );
+    render(
+      <StoreProvider value={store}>
+        <Harness api={fakeApi({ plan })} />
+      </StoreProvider>,
+    );
+    expect(screen.getByText("Свободно")).toBeTruthy();
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Таблица не ответила",
+    );
+  });
+
+  it("reads the sheet anew when there are unsaved edits", async () => {
+    const store = new Store();
+    // первое чтение запуска уже было — дальше копия на сервере
+    await store.fetch("dashboard", () => Promise.resolve({}));
+    const api = fakeApi();
+    render(
+      <StoreProvider value={store}>
+        <Harness api={api} initial={EDITED} />
+      </StoreProvider>,
+    );
+    // правки ложатся на план без копии: что поменяли руками — подсветится сразу
+    expect(api.plan).toHaveBeenCalledWith("2026-10", true);
+  });
 });

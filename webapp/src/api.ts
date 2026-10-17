@@ -420,6 +420,13 @@ export function authHeader(initData: string, search: string): string | null {
   return launch ? `Launch ${launch}` : null;
 }
 
+/** id пользователя из ссылки кнопки «📱 Приложение» («<id>.<время>.<подпись>»).
+ * Без проверки подписи — только чтобы не показать чужую копию данных. */
+export function launchUser(search: string): number | null {
+  const id = new URLSearchParams(search).get("launch")?.split(".")[0] ?? "";
+  return /^\d+$/.test(id) ? Number(id) : null;
+}
+
 interface ErrorBody {
   error: { code: string; message: string; fields?: Record<string, string> };
 }

@@ -3,11 +3,22 @@ import {
   ApiError,
   api,
   authHeader,
+  launchUser,
   planConflict,
   REQUEST_TIMEOUT_MS,
   request,
 } from "./api";
 import { planFixture } from "./mocks/fixtures";
+
+describe("launchUser", () => {
+  it("takes the user id from the launch link of the keyboard button", () => {
+    expect(launchUser("?launch=42.1792214894.sig")).toBe(42);
+  });
+  it("has no user without the link or with a broken one", () => {
+    expect(launchUser("")).toBeNull();
+    expect(launchUser("?launch=abc.1.sig")).toBeNull();
+  });
+});
 
 describe("authHeader", () => {
   it("prefers Telegram initData", () => {

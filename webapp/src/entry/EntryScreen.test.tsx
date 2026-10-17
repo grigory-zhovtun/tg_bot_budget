@@ -304,4 +304,51 @@ describe("EntryScreen", () => {
     await screen.findByText(/Удалил из таблицы/);
     expect(api.dashboard).toHaveBeenCalledTimes(3);
   });
+
+  it("follows the default card of a fresh catalog until a card is picked", () => {
+    const api = fakeApi();
+    const changed = vi.fn();
+    const { rerender } = render(
+      <EntryScreen
+        api={api}
+        boot={bootstrapFixture}
+        onCatalogChanged={changed}
+      />,
+    );
+    // справочник с прошлого раза, а свежий уже знает другую карту по умолчанию
+    rerender(
+      <EntryScreen
+        api={api}
+        boot={{ ...bootstrapFixture, default_source: "VISA 4058 USD" }}
+        onCatalogChanged={changed}
+      />,
+    );
+    expect(
+      screen.getByRole("radio", { name: "VISA 4058 USD", checked: true }),
+    ).toBeTruthy();
+  });
+
+  it("keeps the card the user picked when the catalog is read again", async () => {
+    const api = fakeApi();
+    const changed = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <EntryScreen
+        api={api}
+        boot={bootstrapFixture}
+        onCatalogChanged={changed}
+      />,
+    );
+    await user.click(screen.getByRole("radio", { name: "VISA 4058 USD" }));
+    rerender(
+      <EntryScreen
+        api={api}
+        boot={{ ...bootstrapFixture }}
+        onCatalogChanged={changed}
+      />,
+    );
+    expect(
+      screen.getByRole("radio", { name: "VISA 4058 USD", checked: true }),
+    ).toBeTruthy();
+  });
 });

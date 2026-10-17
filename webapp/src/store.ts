@@ -123,6 +123,21 @@ export class Store {
     return this.fetch(key, load);
   }
 
+  /** Бот не узнал пользователя: забыть всё — и в памяти, и на телефоне. */
+  forget(): void {
+    for (const key of [...this.states.keys()]) {
+      this.turns.set(key, (this.turns.get(key) ?? 0) + 1);
+      this.flights.delete(key);
+      this.doubtful.delete(key);
+      this.set(key, EMPTY);
+    }
+    try {
+      this.options.storage?.removeItem(CACHE_KEY);
+    } catch {
+      // память закрыта: копии там и нет
+    }
+  }
+
   /** Ответ, пришедший с записью: он новее любого запроса в пути. */
   put(key: string, data: unknown): void {
     this.turns.set(key, (this.turns.get(key) ?? 0) + 1);
@@ -165,7 +180,8 @@ export class Store {
     if (!storage) return;
     const entries: Record<string, { data: unknown; at: number }> = {};
     for (const [key, state] of this.states) {
-      if (ofToday(state.data, this.options.today)) {
+      // цифры, которые после записи ещё не обновились, на телефон не идут
+      if (!this.doubtful.has(key) && ofToday(state.data, this.options.today)) {
         entries[key] = { data: state.data, at: state.at };
       }
     }
@@ -191,7 +207,7 @@ export class Store {
       !("build" in saved) ||
       saved.build !== build ||
       !("user" in saved) ||
-      (user !== null && saved.user !== null && saved.user !== user) ||
+      saved.user !== user ||
       !("entries" in saved) ||
       typeof saved.entries !== "object" ||
       saved.entries === null
@@ -295,7 +311,8 @@ export function useResource<T>(
           : store.ensure(key, load);
     request.then(
       (data) => {
-        if (!alive) return;
+        // ответ, который кэш отбросил (новее пришёл с записью), экрану не нужен
+        if (!alive || store.get(key).data !== data) return;
         setError(null);
         answer.current?.(data);
       },

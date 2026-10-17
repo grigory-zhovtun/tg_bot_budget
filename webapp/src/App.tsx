@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ApiError, type Api, type Bootstrap } from "./api";
+import { ApiError, launchUser, type Api, type Bootstrap } from "./api";
 import DashboardScreen from "./dashboard/DashboardScreen";
 import EntryScreen from "./entry/EntryScreen";
 import { deviceDay } from "./format";
@@ -57,7 +57,9 @@ export default function App({ api }: { api: Api }) {
         storage: phoneStorage(),
         build: import.meta.url, // имя файла сборки меняется с каждым выпуском
         today: deviceDay(),
-        user: telegram()?.initDataUnsafe.user?.id ?? null,
+        user:
+          telegram()?.initDataUnsafe.user?.id ??
+          launchUser(window.location.search),
       }),
   );
   // справочник с прошлого раза (сегодняшний): «Ввод» сразу, свежий — фоном
@@ -97,11 +99,12 @@ export default function App({ api }: { api: Api }) {
       (reason: unknown) => {
         if (!alive) return;
         setError(errorText(reason));
-        // бот не узнал пользователя: справочник с прошлого раза не поможет
+        // бот не узнал пользователя: копия с прошлого раза не его
         if (
           reason instanceof ApiError &&
           (reason.status === 401 || reason.status === 403)
         ) {
+          store.forget();
           setBoot(null);
         }
       },
