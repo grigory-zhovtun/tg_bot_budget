@@ -79,7 +79,9 @@ def service_with(ws: CalendarWorksheet | None) -> GoogleSheetsService:
     service._worksheets = {}
     service._balance_cells = None
     service._calendar = None
-    service._calendar_writes = 0
+    service._values = {}
+    service._rates = None
+    service._generation = 0
     service._authenticate = lambda: None
     return service
 

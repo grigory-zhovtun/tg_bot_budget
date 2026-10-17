@@ -9,6 +9,7 @@ from app import config
 from app.services.analytics_service import AnalyticsService, transactions_frame
 from app.services.day_budget import ForecastItem
 from app.services.forecast import month_forecast
+from app.web import api as web_api
 from tests.test_day_budget import (
     FACT_HEADER,
     OPENING,
@@ -32,9 +33,11 @@ class FakeAnalytics:
     def __init__(self, result: Any = None, error: Exception | None = None) -> None:
         self.result, self.error = result, error
         self.currencies: list[str] = []
+        self.max_age: float | None = None
 
-    def forecast(self, today: date, currencies: Any) -> Any:
+    def forecast(self, today: date, currencies: Any, max_age: float = 0.0) -> Any:
         self.currencies = list(currencies)
+        self.max_age = max_age
         if self.error is not None:
             raise self.error
         return self.result
@@ -44,13 +47,14 @@ def forecast_for(
     found: Any = None,
     error: Exception | None = None,
     sources: list[str] | None = None,
+    query: str = "",
 ) -> tuple[Any, FakeAnalytics]:
     application = make_application()
     if sources is not None:
         application.bot_data["sources"] = sources
     analytics = FakeAnalytics(found, error)
     application.bot_data["analytics_service"] = analytics
-    response = client_for(application).get("/api/forecast", headers=auth())
+    response = client_for(application).get(f"/api/forecast{query}", headers=auth())
     return response, analytics
 
 
@@ -189,3 +193,16 @@ def test_forecast_sheet_failure_is_503() -> None:
 def test_forecast_needs_a_signature() -> None:
     response = client_for(make_application()).get("/api/forecast")
     assert response.status_code == 401
+
+
+def test_the_forecast_may_take_copies_of_the_sheets() -> None:
+    sheets = Sheets({"fact": [FACT_HEADER, *OPENING], "Oct 26": tab()})
+    service = AnalyticsService(sheets)
+    assert service.forecast(date(2026, 10, 2), ["UZS"], max_age=120) is not None
+    assert sheets.ages == [120, 120, 120, 120]
+
+
+def test_the_screen_takes_copies_unless_asked_to_refresh() -> None:
+    assert forecast_for()[1].max_age == web_api.SCREEN_COPY_AGE == 120
+    # «Обновить» и первое открытие за сессию — таблица заново
+    assert forecast_for(query="?fresh=1")[1].max_age == 0

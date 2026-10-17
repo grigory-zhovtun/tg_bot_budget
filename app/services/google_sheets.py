@@ -5,13 +5,16 @@ import os
 import re
 import time
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import Any, TypeVar
+from typing import Any, Protocol, TypeVar
 
 import gspread
 from google.oauth2.service_account import Credentials
+from gspread.http_client import HTTPClient
 from gspread.utils import ValueInputOption, ValueRenderOption
+from requests import Response
 
 from app import config
 from app.domain import Rates, SheetRow, month_bounds, month_title, parse_month_title
@@ -56,6 +59,7 @@ SERIAL_ZERO = date(1899, 12, 30)
 PROFILE_MARK = "О НАС"
 MAX_PROFILE = 2000
 CALENDAR_TTL = 60.0  # секунд: лист «Календарь» перечитываем не чаще раза в минуту
+MONTH_SHEETS = 4  # вкладка месяца, курсы, fact и «Календарь» читаются одновременно
 CALENDAR_HEADER = ["ID", "Дата", "Повтор", "Дни", "Группа", "Подкатегория",
                    "Валюта", "Сумма", "Название", "Кто"]  # fmt: skip
 # секунд: соединение и ответ Google; без таймаута зависший запрос ждёт бесконечно
@@ -123,14 +127,37 @@ def _same_row(cells: list[Any], row: SheetRow) -> bool:
     )
 
 
+class WriteAwareHTTPClient(HTTPClient):
+    """HTTP-клиент gspread, который после каждого запроса на изменение таблицы
+    (POST, PUT, DELETE: запись, вставка, удаление строк, новый лист) зовёт on_write.
+
+    Так копии листов сбрасывает любая запись бота, откуда бы она ни шла.
+    """
+
+    on_write: Callable[[], None] | None = None
+
+    def request(
+        self, method: str, endpoint: str, *args: Any, **kwargs: Any
+    ) -> Response:
+        try:
+            return super().request(method, endpoint, *args, **kwargs)
+        finally:
+            # и после ошибки: ответ мог потеряться, когда Google уже записал
+            if method.lower() != "get" and self.on_write is not None:
+                self.on_write()
+
+
 class GoogleSheetsService:
     def __init__(self) -> None:
         self.client: gspread.Client | None = None
         self.sheet: gspread.Spreadsheet | None = None
         self._worksheets: dict[str, gspread.Worksheet] = {}
         self._balance_cells: dict[str, str] | None = None
+        # копии листов для экранов Mini App: (когда начали читать, значения)
+        self._values: dict[str, tuple[float, list[list[Any]]]] = {}
+        self._rates: tuple[float, Rates] | None = None
         self._calendar: tuple[float, list[list[Any]]] | None = None
-        self._calendar_writes = 0  # сколько раз бот писал в «Календарь»
+        self._generation = 0  # сколько раз бот менял таблицу
         self._authenticate()
 
     def _authenticate(self) -> None:
@@ -140,7 +167,8 @@ class GoogleSheetsService:
                 config.GOOGLE_APPLICATION_CREDENTIALS_PATH
             ):
                 self.client = gspread.service_account(
-                    filename=config.GOOGLE_APPLICATION_CREDENTIALS_PATH
+                    filename=config.GOOGLE_APPLICATION_CREDENTIALS_PATH,
+                    http_client=WriteAwareHTTPClient,
                 )
             elif config.GOOGLE_SERVICE_ACCOUNT_EMAIL and config.GOOGLE_PRIVATE_KEY:
                 email = config.GOOGLE_SERVICE_ACCOUNT_EMAIL
@@ -155,15 +183,19 @@ class GoogleSheetsService:
                     + email.replace("@", "%40"),
                 }
                 creds = Credentials.from_service_account_info(creds_info, scopes=SCOPES)
-                self.client = gspread.authorize(creds)
+                self.client = gspread.authorize(creds, http_client=WriteAwareHTTPClient)
             else:
                 # Fallback to default auth if available (e.g. cloud environment)
                 import google.auth
 
                 creds, _ = google.auth.default(scopes=SCOPES)
-                self.client = gspread.authorize(creds)
+                self.client = gspread.authorize(creds, http_client=WriteAwareHTTPClient)
 
             self.client.set_timeout(SHEETS_TIMEOUT)
+            # нет клиента с отметками записей — копии живут до max_age, не дольше
+            http = getattr(self.client, "http_client", None)
+            if isinstance(http, WriteAwareHTTPClient):
+                http.on_write = self._written
             self.sheet = self.client.open_by_key(config.SPREADSHEET_ID)
             self._worksheets.clear()
             logger.info("Successfully connected to Google Sheets.")
@@ -192,6 +224,14 @@ class GoogleSheetsService:
         """Сбросить кэши (после правок структуры таблицы, команда /reboot)."""
         self._worksheets.clear()
         self._balance_cells = None
+        self._written()
+
+    def _written(self) -> None:
+        """Таблицу изменили: копии листов — сбросить, идущие чтения — не копировать.
+        Звать после ответа на запись: чтение, начатое позже, запись уже видит."""
+        self._generation += 1
+        self._values.clear()
+        self._rates = None
         self._calendar = None
 
     def get_categories_and_sources(
@@ -432,26 +472,39 @@ class GoogleSheetsService:
             lambda: self._worksheet(worksheet_name).get_all_values(),
         )
 
-    def get_values(self, worksheet_name: str) -> list[list[Any]]:
-        """Значения листа как есть: числа — числами, даты — серийными номерами."""
-        return self._with_retry(
+    def get_values(self, worksheet_name: str, max_age: float = 0.0) -> list[list[Any]]:
+        """Значения листа как есть: числа — числами, даты — серийными номерами.
+
+        max_age > 0 — годится копия не старше стольких секунд (экраны Mini App).
+        Копию не менять: её получат и следующие экраны. Любая запись бота копии
+        сбрасывает, а чтение, во время которого бот писал, в копию не попадает.
+        """
+        if max_age > 0:
+            copy = self._values.get(worksheet_name)
+            if copy is not None and time.monotonic() - copy[0] < max_age:
+                return copy[1]
+        started, generation = time.monotonic(), self._generation
+        rows = self._with_retry(
             f"Reading {worksheet_name}",
             lambda: self._worksheet(worksheet_name).get_all_values(
                 value_render_option=ValueRenderOption.unformatted
             ),
         )
+        if generation == self._generation:
+            self._values[worksheet_name] = (started, rows)
+        return rows
 
-    def get_calendar(self) -> list[list[Any]]:
-        """Значения листа «Календарь» (UNFORMATTED); копия живёт CALENDAR_TTL секунд.
+    def get_calendar(self, max_age: float = CALENDAR_TTL) -> list[list[Any]]:
+        """Значения листа «Календарь» (UNFORMATTED); копия живёт max_age секунд.
 
         Листа нет — записей нет. Запись в лист ботом копию сбрасывает, а чтение,
         во время которого бот писал, в копию не попадает: лист мог быть прочитан
         до записи.
         """
         now = time.monotonic()
-        if self._calendar is not None and now - self._calendar[0] < CALENDAR_TTL:
+        if self._calendar is not None and now - self._calendar[0] < max_age:
             return self._calendar[1]
-        writes = self._calendar_writes
+        writes = self._generation
         try:
             worksheet = self._worksheet(config.CALENDAR_SHEET_NAME)
         except gspread.WorksheetNotFound:
@@ -463,15 +516,9 @@ class GoogleSheetsService:
                     value_render_option=ValueRenderOption.unformatted
                 ),
             )
-        if writes == self._calendar_writes:
+        if writes == self._generation:
             self._calendar = (now, rows)
         return rows
-
-    def _calendar_written(self) -> None:
-        """Бот записал в лист: копию — сбросить, идущее чтение — не копировать.
-        Звать после ответа на запись: чтение, начатое позже, запись уже видит."""
-        self._calendar_writes += 1
-        self._calendar = None
 
     def _calendar_sheet(self) -> gspread.Worksheet:
         """Лист «Календарь»; нет — создать его с шапкой."""
@@ -496,7 +543,7 @@ class GoogleSheetsService:
         worksheet.append_rows(
             [list(row)], value_input_option=ValueInputOption.raw, table_range="A:J"
         )
-        self._calendar_written()
+        self._written()
 
     def _calendar_row(self, record_id: str) -> tuple[gspread.Worksheet, int] | None:
         """Лист и номер строки записи record_id; листа или строки нет — None."""
@@ -529,7 +576,7 @@ class GoogleSheetsService:
                 value_input_option=ValueInputOption.raw,
             ),
         )
-        self._calendar_written()
+        self._written()
         return True
 
     def delete_calendar_row(self, record_id: str) -> bool:
@@ -555,7 +602,7 @@ class GoogleSheetsService:
                 ]
             }
         )
-        self._calendar_written()
+        self._written()
         return True
 
     def sheet_id(self, worksheet_name: str) -> int:
@@ -591,12 +638,18 @@ class GoogleSheetsService:
             ),
         )
 
-    def get_rates(self) -> Rates:
+    def get_rates(self, max_age: float = 0.0) -> Rates:
         """Курсы к суму из system!H2:I10: код валюты в H, курс (GOOGLEFINANCE) в I.
 
         Если лист недоступен, остаётся только UZS: операции в другой валюте
-        тогда не записываются, а бот просит внести их вручную.
+        тогда не записываются, а бот просит внести их вручную. max_age > 0 —
+        годится копия не старше стольких секунд; курсы без листа не копируются.
         """
+        if max_age > 0:
+            copy = self._rates
+            if copy is not None and time.monotonic() - copy[0] < max_age:
+                return copy[1]
+        started, generation = time.monotonic(), self._generation
         rates = {"UZS": 1.0}
         try:
             values = self._with_retry(
@@ -613,7 +666,11 @@ class GoogleSheetsService:
                     rates[code] = float(rate)
         except Exception:
             logger.exception("Could not read currency rates from the system sheet")
-        return Rates(rates)
+            return Rates(rates)
+        found = Rates(rates)
+        if generation == self._generation:
+            self._rates = (started, found)
+        return found
 
     def get_table_balances(self) -> dict[str, float]:
         """Остатки карт по таблице (fact, колонка J блока остатков)."""
@@ -961,3 +1018,50 @@ class GoogleSheetsService:
             ),
         )
         return True
+
+
+class MonthSource(Protocol):
+    """Откуда read_month_sheets берёт листы: GoogleSheetsService (в тестах — подделка)."""
+
+    def get_values(
+        self, worksheet_name: str, max_age: float = 0.0
+    ) -> list[list[Any]]: ...
+
+    def get_rates(self, max_age: float = 0.0) -> Rates: ...
+
+    def get_calendar(self, max_age: float = CALENDAR_TTL) -> list[list[Any]]: ...
+
+
+@dataclass(frozen=True)
+class MonthSheets:
+    """Листы экранов Mini App: вкладка месяца (None — её нет), курсы, fact, «Календарь»."""
+
+    month: list[list[Any]] | None
+    rates: Rates
+    fact: list[list[Any]]
+    calendar: list[list[Any]] = field(default_factory=list)
+
+
+def read_month_sheets(
+    gs: MonthSource, title: str, max_age: float = 0.0, calendar: bool = True
+) -> MonthSheets:
+    """Вкладка месяца, курсы, fact и «Календарь» — одновременно: каждое чтение ждёт
+    Google, а не процессор, и экран ждёт самое долгое из них, а не их сумму.
+
+    max_age > 0 — годятся копии листов не старше стольких секунд.
+    """
+    with ThreadPoolExecutor(max_workers=MONTH_SHEETS) as pool:
+        month = pool.submit(gs.get_values, title, max_age)
+        rates = pool.submit(gs.get_rates, max_age)
+        fact = pool.submit(gs.get_values, config.FACT_SHEET_NAME, max_age)
+        records = pool.submit(gs.get_calendar, max_age) if calendar else None
+        try:
+            rows: list[list[Any]] | None = month.result()
+        except gspread.WorksheetNotFound:
+            rows = None
+        return MonthSheets(
+            rows,
+            rates.result(),
+            fact.result(),
+            records.result() if records is not None else [],
+        )

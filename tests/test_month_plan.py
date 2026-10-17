@@ -452,8 +452,10 @@ class PlanSheets:
         self.applied: list[list[dict[str, Any]]] = []
         self.profile = ""  # блок «О нас» листа system
         self.delay = 0.0  # пауза между чтением вкладки и записью — окно гонки
+        self.ages: list[float] = []  # max_age каждого чтения
 
-    def get_values(self, name: str) -> list[list[Any]]:
+    def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
+        self.ages.append(max_age)
         if name not in self.tabs:
             raise WorksheetNotFound(name)
         return [list(row) for row in self.tabs[name]]
@@ -461,10 +463,12 @@ class PlanSheets:
     def get_advisor_profile(self) -> str:
         return self.profile
 
-    def get_calendar(self) -> list[list[Any]]:
+    def get_calendar(self, max_age: float = 60.0) -> list[list[Any]]:
+        self.ages.append(max_age)
         return []
 
-    def get_rates(self) -> Rates:
+    def get_rates(self, max_age: float = 0.0) -> Rates:
+        self.ages.append(max_age)
         time.sleep(
             self.delay
         )  # save_plan: вкладка уже прочитана, запись ещё не сделана
@@ -532,6 +536,13 @@ def test_load_plan_reads_the_tab_rates_and_history() -> None:
 
 def test_load_plan_without_the_tab_is_none() -> None:
     assert load_plan(PlanSheets({}), "Nov 26", date(2026, 10, 11)) is None
+
+
+def test_load_plan_may_take_copies_of_the_sheets() -> None:
+    sheets = PlanSheets({"Oct 26": TAB})
+    assert load_plan(sheets, "Oct 26", date(2026, 10, 11), max_age=120) is not None
+    # вкладка, курсы и fact; «Календарь» плану не нужен
+    assert sheets.ages == [120, 120, 120]
 
 
 def test_save_plan_writes_and_the_tab_shows_the_new_plan() -> None:

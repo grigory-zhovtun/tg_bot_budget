@@ -19,7 +19,7 @@ from matplotlib.figure import Figure
 
 from app import config
 from app.domain import INCOME_GROUP, Rates, local_today, month_title
-from app.services.google_sheets import GoogleSheetsService
+from app.services.google_sheets import GoogleSheetsService, read_month_sheets
 
 if TYPE_CHECKING:
     from app.services.calendar import CalendarRecord
@@ -549,20 +549,24 @@ class AnalyticsService:
             logger.info("No plan sheet for the subscriptions plan")
         return format_subs(found, today, plan)
 
-    def dashboard(self, today: date | None = None) -> "Dashboard | None":
-        """Экран «Сводка» Mini App; None — вкладки месяца нет."""
+    def dashboard(
+        self, today: date | None = None, max_age: float = 0.0
+    ) -> "Dashboard | None":
+        """Экран «Сводка» Mini App; None — вкладки месяца нет.
+
+        max_age > 0 — годятся копии листов не старше стольких секунд.
+        """
+        from app.services.calendar import read_calendar
         from app.services.cards import card_balances
         from app.services.dashboard import build_dashboard
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
         sheet = month_title(today)
-        try:
-            rows = self.gs_service.get_values(sheet)
-        except WorksheetNotFound:
+        sheets = read_month_sheets(self.gs_service, sheet, max_age)
+        if sheets.month is None:
             logger.info("No plan sheet %s", sheet)
             return None
-        rates = self.gs_service.get_rates()
-        fact = self.gs_service.get_values(config.FACT_SHEET_NAME)
+        rates, fact = sheets.rates, sheets.fact
         try:
             cards = card_balances(fact, rates)  # блок остатков — из того же чтения
         except Exception:
@@ -571,42 +575,42 @@ class AnalyticsService:
             cards = ()
         return build_dashboard(
             transactions_frame(fact, rates),
-            rows,
+            sheets.month,
             today,
             rates,
             config.FROZEN_CURRENCY,
-            self._records(),
+            read_calendar(sheets.calendar),
             cards,
         )
 
     def forecast(
-        self, today: date, currencies: Iterable[str]
+        self, today: date, currencies: Iterable[str], max_age: float = 0.0
     ) -> "MonthForecast | None":
-        """Экран «Прогноз» Mini App; None — вкладки месяца нет."""
+        """Экран «Прогноз» Mini App; None — вкладки месяца нет.
+
+        max_age > 0 — годятся копии листов не старше стольких секунд.
+        """
+        from app.services.calendar import read_calendar
         from app.services.day_budget import read_forecast
         from app.services.forecast import month_forecast
         from app.services.plan import read_plan
 
         sheet = month_title(today)
-        try:
-            rows = self.gs_service.get_values(sheet)
-        except WorksheetNotFound:
+        sheets = read_month_sheets(self.gs_service, sheet, max_age)
+        if sheets.month is None:
             logger.info("No plan sheet %s", sheet)
             return None
-        rates = self.gs_service.get_rates()
-        frame = transactions_frame(
-            self.gs_service.get_values(config.FACT_SHEET_NAME), rates, keep_unknown=True
-        )
-        listed = read_forecast(rows)
+        frame = transactions_frame(sheets.fact, sheets.rates, keep_unknown=True)
+        listed = read_forecast(sheets.month)
         items = listed.items if listed is not None else ()
         return month_forecast(
             frame,
-            read_plan(rows).articles,
+            read_plan(sheets.month).articles,
             items,
             today,
-            rates,
+            sheets.rates,
             currencies,
-            self._records(),
+            read_calendar(sheets.calendar),
         )
 
     def weekly_digest(self, today: date | None = None) -> str:
