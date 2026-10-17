@@ -4,6 +4,7 @@ import threading
 from collections.abc import Callable
 from typing import Any
 
+import gspread
 import pytest
 from gspread.exceptions import WorksheetNotFound
 
@@ -318,3 +319,125 @@ def test_sheets_are_read_at_the_same_time() -> None:
 
     sheets = read_month_sheets(Waiting({"Oct 26": [], "fact": FACT}), "Oct 26")
     assert sheets.fact == FACT
+
+
+class JsonResponse:
+    ok = True
+
+    def __init__(self, body: dict[str, Any]) -> None:
+        self.body = body
+
+    def json(self) -> dict[str, Any]:
+        return self.body
+
+
+class BookSession:
+    """Google в памяти: метаданные таблицы с листом fact, на остальное — «{}»."""
+
+    def __init__(self) -> None:
+        self.methods: list[str] = []
+
+    def request(self, method: str, url: str, **options: Any) -> JsonResponse:
+        self.methods.append(method)
+        if method == "get":
+            sheet = {"title": "fact", "sheetId": 0, "index": 0}
+            sheet["gridProperties"] = {"rowCount": 10, "columnCount": 8}
+            return JsonResponse(
+                {"properties": {"title": "budget"}, "sheets": [{"properties": sheet}]}
+            )
+        return JsonResponse({})
+
+
+def test_every_kind_of_write_through_gspread_is_reported() -> None:
+    # настоящий gspread: если его новая версия пойдёт в обход request, тест упадёт
+    session = BookSession()
+    client = gspread.Client(auth=None, session=session, http_client=WriteAwareHTTPClient)  # type: ignore[arg-type]
+    writes: list[str] = []
+    assert isinstance(client.http_client, WriteAwareHTTPClient)
+    client.http_client.on_write = lambda: writes.append("write")
+    book = client.open_by_key("key")
+    sheet = book.worksheet("fact")
+    sheet.append_rows([["a"]], table_range="A:H")
+    sheet.update(values=[["b"]], range_name="A2")
+    book.batch_update({"requests": []})
+    book.values_batch_update({"valueInputOption": "RAW", "data": []})
+    assert len(writes) == 4
+    assert len(writes) == sum(method != "get" for method in session.methods)
+
+
+def connect(monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+    """GoogleSheetsService с поддельным gspread.authorize; made — выданные клиенты."""
+    made: list[Any] = []
+
+    class FakeClient:
+        def __init__(self, http_client: type[Any]) -> None:
+            self.http_client = http_client(auth=None, session=FakeSession())
+
+        def set_timeout(self, timeout: Any) -> None:
+            pass
+
+        def open_by_key(self, key: str) -> Any:
+            return OneSheet(CountingWorksheet(FACT))
+
+    def authorize(creds: Any, http_client: type[Any]) -> Any:
+        made.append(FakeClient(http_client))
+        return made[-1]
+
+    monkeypatch.setattr(google_sheets.config, "GOOGLE_APPLICATION_CREDENTIALS_PATH", "")
+    monkeypatch.setattr(google_sheets.config, "GOOGLE_SERVICE_ACCOUNT_EMAIL", "b@t.iam")
+    monkeypatch.setattr(google_sheets.config, "GOOGLE_PRIVATE_KEY", "k")
+    monkeypatch.setattr(
+        google_sheets.Credentials,
+        "from_service_account_info",
+        lambda info, scopes: object(),
+    )
+    monkeypatch.setattr(google_sheets.gspread, "authorize", authorize)
+    return made
+
+
+def test_a_reconnected_client_reports_writes_too(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    made = connect(monkeypatch)
+    service = GoogleSheetsService()
+    service._authenticate()  # протух токен — новый клиент
+    service._values["fact"] = (0.0, FACT)
+    made[-1].http_client.request("post", "https://sheets.googleapis.com/x")
+    assert service._values == {}
+
+
+def test_a_client_that_cannot_report_writes_is_logged(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    connect(monkeypatch)
+
+    class Plain:
+        """Клиент gspread без отметок записей — например, после смены версии."""
+
+        def set_timeout(self, timeout: Any) -> None:
+            pass
+
+        def open_by_key(self, key: str) -> Any:
+            return OneSheet(CountingWorksheet(FACT))
+
+    monkeypatch.setattr(
+        google_sheets.gspread, "authorize", lambda creds, http_client: Plain()
+    )
+    with caplog.at_level("ERROR"):
+        GoogleSheetsService()
+    assert "does not report writes" in caplog.text
+
+
+def test_a_missing_sheet_is_not_a_reason_to_reconnect() -> None:
+    class NoSheet:
+        def worksheet(self, name: str) -> Any:
+            raise WorksheetNotFound(name)
+
+    service = service_with(CountingWorksheet(FACT))
+    service.sheet = NoSheet()
+    reconnects: list[int] = []
+    service._authenticate = lambda: reconnects.append(1)
+    with pytest.raises(WorksheetNotFound):
+        service.get_values("Nov 26", max_age=120)
+    # «Плана на ноябрь ещё нет» — обычное дело, не протухший токен
+    assert reconnects == []

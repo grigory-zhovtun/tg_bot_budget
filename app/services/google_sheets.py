@@ -196,6 +196,11 @@ class GoogleSheetsService:
             http = getattr(self.client, "http_client", None)
             if isinstance(http, WriteAwareHTTPClient):
                 http.on_write = self._written
+            else:
+                logger.error(
+                    "gspread client does not report writes: "
+                    "sheet copies live up to their max age after a write"
+                )
             self.sheet = self.client.open_by_key(config.SPREADSHEET_ID)
             self._worksheets.clear()
             logger.info("Successfully connected to Google Sheets.")
@@ -212,9 +217,12 @@ class GoogleSheetsService:
         return self._worksheets[name]
 
     def _with_retry(self, action: str, operation: Callable[[], T]) -> T:
-        """Одна повторная попытка после переподключения (протухший токен, сеть)."""
+        """Одна повторная попытка после переподключения (протухший токен, сеть).
+        Листа нет — переподключаться незачем: «вкладки ещё нет» — обычное дело."""
         try:
             return operation()
+        except gspread.WorksheetNotFound:
+            raise
         except Exception:
             logger.warning("%s failed, reconnecting and retrying once", action)
             self._authenticate()

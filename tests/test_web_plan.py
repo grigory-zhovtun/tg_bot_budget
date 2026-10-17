@@ -173,6 +173,13 @@ def test_save_writes_the_cells_and_answers_with_the_fresh_plan() -> None:
     assert sheets.writes == [[{"range": f"'{TITLE}'!D2", "values": [[-1_800_000.0]]}]]
 
 
+def test_after_a_save_the_plan_is_read_afresh() -> None:
+    sheets = sheets_with()
+    assert post_plan(plan_app(sheets), change()).status_code == 200
+    # проверка перед записью и ответ после неё — по таблице, не по копии
+    assert set(sheets.ages) == {0}
+
+
 CAFE = {"group": "🍔 ЕДА", "subcategory": "кафе", "currency": "UZS", "plan": "700000"}
 
 
