@@ -89,7 +89,10 @@ function PastCell({ iso, point, code, on, onSelect }: PastProps) {
   );
 }
 
-/** Месяц с 1-го числа: прошедшие дни по факту, дальше остаток на вечер по плану, записи дня и точки списка. */
+/**
+ * Месяц с 1-го числа: прошедшие дни по факту; сегодня — остаток на вечер по
+ * плану и что уже потрачено и пришло; дальше — по плану, записи дня и точки списка.
+ */
 export default function MonthGrid({ data, view, selected, onSelect }: Props) {
   const today = dayOf(data.today);
   const code = viewCode(view);
@@ -141,10 +144,22 @@ export default function MonthGrid({ data, view, selected, onSelect }: Props) {
             const on = day === selected;
             const minus = evening < 0;
             const plain = on || minus;
-            const records = cellSum(dayRecordSum(data, view, day), code);
-            const label = `${longDay(isoDay(data.today, day))}: вечером ${pillValue(evening, code)} ${pillUnit(code)}${
-              records ? `, записи −${records}` : ""
-            }`;
+            // сегодня — факт: траты дня и запись с одним минусом не спутать
+            const now = day === today ? past.get(day) : undefined;
+            const spent = now ? cellSum(now.spent, code) : null;
+            const earned = now ? cellSum(now.earned, code) : null;
+            const records =
+              day === today
+                ? null
+                : cellSum(dayRecordSum(data, view, day), code);
+            const label = [
+              `${longDay(isoDay(data.today, day))}: вечером ${pillValue(evening, code)} ${pillUnit(code)}`,
+              now && spent && `потрачено ${amount(now.spent, code)}`,
+              now && earned && `пришло ${amount(now.earned, code)}`,
+              records && `записи −${records}`,
+            ]
+              .filter(Boolean)
+              .join(", ");
             return (
               <button
                 key={day}
@@ -162,6 +177,20 @@ export default function MonthGrid({ data, view, selected, onSelect }: Props) {
                 <span className="text-[13px] font-bold">
                   {pillValue(evening, code)}
                 </span>
+                {spent && (
+                  <span
+                    className={`text-sm font-extrabold ${plain ? "" : "text-spent"}`}
+                  >
+                    {`−${spent}`}
+                  </span>
+                )}
+                {earned && (
+                  <span
+                    className={`text-sm font-extrabold ${plain ? "" : "text-earned"}`}
+                  >
+                    {`+${earned}`}
+                  </span>
+                )}
                 {records && (
                   <span
                     className={`text-sm font-extrabold ${plain ? "" : "text-planned"}`}

@@ -3,6 +3,7 @@ import type {
   Bootstrap,
   CalendarRecord,
   Dashboard,
+  DayArticle,
   ExpenseResult,
   Forecast,
   ForecastDay,
@@ -387,28 +388,100 @@ const totalUzs: ForecastDay[] = uzsDays.map((point, index) => ({
     (rubDays[index]?.pace ?? 0) * 150,
 }));
 
-/** Прошедшие дни с 1-го по 14-е: вечер 14-го — деньги сейчас, назад — по движениям дня. */
+/** Траты статьи за день (возврат — минусом) в валюте строк, rate — курс к суму. */
+function spend(
+  subcategory: string,
+  icon: string,
+  amount: number,
+  rate = 1,
+  group = "🍔 ЕДА",
+): DayArticle {
+  return {
+    group,
+    subcategory,
+    icon,
+    amount,
+    uzs: amount * rate,
+    income: false,
+  };
+}
+
+interface Move {
+  spent?: number;
+  earned?: number;
+  articles?: DayArticle[]; // нет — usual(траты) и аванс
+}
+
+/**
+ * Дни с 1-го по сегодня (15-е): вечер сегодня — деньги сейчас, назад — по
+ * движениям дня. Статьи дня — из moves или usual(траты дня) и аванс.
+ */
 function pastDays(
-  evening14: number,
+  now: number,
   spentPerDay: number,
-  moves: Record<number, { spent?: number; earned?: number }>,
+  moves: Record<number, Move>,
+  usual: (spent: number) => DayArticle[],
 ): ForecastPast[] {
   const days: ForecastPast[] = [];
-  let evening = evening14;
-  for (let day = 14; day >= 1; day -= 1) {
-    const spent = moves[day]?.spent ?? spentPerDay;
-    const earned = moves[day]?.earned ?? 0;
+  let evening = now;
+  for (let day = 15; day >= 1; day -= 1) {
+    const move = moves[day];
+    const spent = move?.spent ?? spentPerDay;
+    const earned = move?.earned ?? 0;
     const change = earned - spent;
-    days.unshift({ day, evening, change, spent, earned });
+    const articles = move?.articles ?? [
+      ...(spent ? usual(spent) : []),
+      ...(earned
+        ? [
+            {
+              group: "💰 ДОХОДЫ",
+              subcategory: "аванс",
+              icon: "💼",
+              amount: earned,
+              uzs: earned,
+              income: true,
+            },
+          ]
+        : []),
+    ];
+    days.unshift({ day, evening, change, spent, earned, articles });
     evening -= change;
   }
   return days;
 }
 
-// 5-го пришёл аванс, и в тот же день были траты; 7-го долларами не платили
-const uzsPast = pastDays(6_810_000, 450_000, { 5: { earned: 4_000_000 } });
-const usdPast = pastDays(1_800, 5, { 7: { spent: 0 } });
-const rubPast = pastDays(20_000, 300, {});
+// 5-го пришёл аванс, и в тот же день были траты; 9-го — возврат за кафе;
+// 14-го — продукты и кафе; сегодня — продукты; 7-го и сегодня долларами не платили
+const uzsPast = pastDays(
+  6_810_000,
+  450_000,
+  {
+    5: { earned: 4_000_000 },
+    9: {
+      articles: [
+        spend("продукты", "🛒", 500_000),
+        spend("кафе", "🍽️", -50_000),
+      ],
+    },
+    14: {
+      articles: [
+        spend("продукты", "🛒", 300_000),
+        spend("кафе", "🍽️", 150_000),
+      ],
+    },
+    15: { spent: 120_000, articles: [spend("продукты", "🛒", 120_000)] },
+  },
+  (spent) => [spend("продукты", "🛒", spent)],
+);
+const usdPast = pastDays(
+  1_800,
+  5,
+  { 7: { spent: 0 }, 15: { spent: 0 } },
+  (spent) => [spend("доставка", "🛵", spent, 12_000)],
+);
+const rubPast = pastDays(20_000, 300, { 15: { spent: 0 } }, (spent) => [
+  spend("подписка", "📺", spent, 150, "🌛 ЕЖЕМЕСЯЧНО"),
+]);
 /** Поле прошедшего дня во «Всего»: сумы + доллары по 12 000 + рубли по 150. */
 function inSums(index: number, pick: (point: ForecastPast) => number): number {
   const part = (line: ForecastPast[], rate: number) => {
@@ -423,6 +496,7 @@ const totalPast: ForecastPast[] = uzsPast.map((point, index) => ({
   change: inSums(index, (day) => day.change),
   spent: inSums(index, (day) => day.spent),
   earned: inSums(index, (day) => day.earned),
+  articles: [],
 }));
 
 // записи календаря: кофе каждый день (сверх плана статьи), кафе по пятницам,
@@ -514,7 +588,7 @@ export const forecastFixture: Forecast = {
       now: 6_810_000,
       per_day_plan: 470_000,
       per_day_pace: 850_000,
-      spent_today: 0,
+      spent_today: 120_000, // продукты сегодня: записью не закрыты
       in_total: true,
       events: [
         { day: 15, name: "Аванс", amount: 2_500_000, late: false },
@@ -568,6 +642,7 @@ export const forecastFixture: Forecast = {
       change: point.change / 12_000,
       spent: point.spent / 12_000,
       earned: point.earned / 12_000,
+      articles: [],
     })),
   },
   rates: { USD: 12_000, RUB: 150 },

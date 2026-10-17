@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type Api, type CalendarRecord, type Forecast } from "../api";
+import {
+  ApiError,
+  type Api,
+  type CalendarRecord,
+  type DayArticle,
+  type Forecast,
+  type ForecastPast,
+} from "../api";
 import {
   bootstrapFixture,
   dashboardFixture,
@@ -14,6 +21,46 @@ import { VIEW_KEY } from "./view";
 
 function pill(day: number): HTMLElement {
   return screen.getByRole("button", { name: new RegExp(`^${day} октября`) });
+}
+
+/** Статья дня для подменённого прогноза: траты в сумах, rate — к суму. */
+function article(
+  subcategory: string,
+  amount: number,
+  group = "🍔 ЕДА",
+): DayArticle {
+  return {
+    group,
+    subcategory,
+    icon: "",
+    amount,
+    uzs: amount,
+    income: false,
+  };
+}
+
+/** Прогноз фикстуры с другим днём валюты (и тем же днём «Всего» в сумах). */
+function withPast(
+  code: string,
+  day: number,
+  change: Partial<ForecastPast>,
+): Forecast {
+  const patch = (point: ForecastPast) =>
+    point.day === day
+      ? { ...point, ...change, articles: change.articles ?? point.articles }
+      : point;
+  return {
+    ...forecastFixture,
+    currencies: forecastFixture.currencies.map((line) =>
+      line.code === code ? { ...line, past: line.past.map(patch) } : line,
+    ),
+    total: forecastFixture.total && {
+      ...forecastFixture.total,
+      past_uzs: forecastFixture.total.past_uzs.map((point) =>
+        point.day === day ? { ...patch(point), articles: [] } : point,
+      ),
+    },
+  };
 }
 
 /** Пробелы между разрядами — неразрывные, как в money(). */
@@ -35,7 +82,12 @@ describe("ForecastScreen", () => {
     expect(today.getAttribute("aria-pressed")).toBe("true");
     expect(today.getAttribute("aria-current")).toBe("date");
     expect(within(today).getByText("33,4")).toBeTruthy();
-    expect(within(today).getByText("−30к")).toBeTruthy();
+    // сегодня — что уже потрачено, а записи дня — в его карточке
+    expect(within(today).getByText("−120к")).toBeTruthy();
+    expect(within(today).queryByText("−30к")).toBeNull();
+    expect(today.getAttribute("aria-label")).toBe(
+      nb("15 октября: вечером 33,4 млн сум, потрачено 120 000 сум"),
+    );
     // 16-е — кофе и кафе; 18-е во «Всего» — ещё и $20 доставки по 12 000
     expect(within(pill(16)).getByText("−180к")).toBeTruthy();
     expect(within(pill(18)).getByText("−270к")).toBeTruthy();
@@ -44,11 +96,11 @@ describe("ForecastScreen", () => {
       "text-planned",
     );
     // прошедшие дни — по факту: сколько было вечером, траты и доходы дня врозь
-    expect(within(pill(14)).getByText("31,4")).toBeTruthy();
+    expect(within(pill(14)).getByText("31,5")).toBeTruthy();
     expect(within(pill(14)).getByText("−555к").className).toContain(
       "text-spent",
     );
-    expect(within(pill(5)).getByText("36,3")).toBeTruthy();
+    expect(within(pill(5)).getByText("36,5")).toBeTruthy();
     expect(within(pill(5)).getByText("−555к").className).toContain(
       "text-spent",
     );
@@ -58,7 +110,7 @@ describe("ForecastScreen", () => {
     // скринридеру — полные суммы, а не сокращения клетки
     expect(pill(5).getAttribute("aria-label")).toBe(
       nb(
-        "5 октября: вечером было 36,3 млн сум, потрачено 555 000 сум, пришло 4 000 000 сум",
+        "5 октября: вечером было 36,5 млн сум, потрачено 555 000 сум, пришло 4 000 000 сум",
       ),
     );
     expect(screen.getAllByRole("button", { name: /октября:/ })).toHaveLength(
@@ -83,11 +135,48 @@ describe("ForecastScreen", () => {
     expect(pill(5).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText("Понедельник, 5 октября")).toBeTruthy();
     expect(screen.getByText("по факту")).toBeTruthy();
-    expect(screen.getByText("36 345 000 сум")).toBeTruthy();
+    expect(screen.getByText("36 465 000 сум")).toBeTruthy();
     expect(screen.getByText("−555 000 сум")).toBeTruthy();
     expect(screen.getByText("+4 000 000 сум")).toBeTruthy();
+    // траты — суммами по статьям, каждая в своей валюте; доходы — отдельно
+    const spent = screen.getByRole("list", { name: "Траты по статьям" });
+    expect(
+      within(spent)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual([nb("🛒продукты450 000 сум"), "🛵доставка$5", "📺подписка300 ₽"]);
+    const earned = screen.getByRole("list", { name: "Доходы по статьям" });
+    expect(within(earned).getByText("аванс")).toBeTruthy();
     // в прошлое не планируют
     expect(screen.queryByRole("button", { name: /Запланировать/ })).toBeNull();
+  });
+
+  it("lists what was spent today in today's card", async () => {
+    show();
+    await screen.findByText("Октябрь");
+    expect(screen.getByText("потрачено сегодня")).toBeTruthy();
+    expect(screen.getByText("−120 000 сум")).toBeTruthy();
+    const spent = screen.getByRole("list", { name: "Траты по статьям" });
+    expect(within(spent).getByText("продукты")).toBeTruthy();
+    expect(within(spent).getByText("120 000 сум")).toBeTruthy();
+  });
+
+  it("shows a refund of a day as a refund", async () => {
+    const user = userEvent.setup();
+    show();
+    await user.click(await screen.findByRole("radio", { name: "UZS" }));
+    await user.click(pill(9));
+    expect(screen.getByText("+50 000 сум возврат")).toBeTruthy();
+  });
+
+  it("colors today's spending when another day is chosen", async () => {
+    const user = userEvent.setup();
+    show();
+    await screen.findByText("Октябрь");
+    await user.click(pill(16));
+    expect(within(pill(15)).getByText("−120к").className).toContain(
+      "text-spent",
+    );
   });
 
   it("marks an evening below zero by the cell, not by red text", async () => {
@@ -123,8 +212,9 @@ describe("ForecastScreen", () => {
     expect(screen.getByText("Суббота, 17 октября")).toBeTruthy();
     expect(screen.getByText("Детский центр")).toBeTruthy();
     expect(screen.getByText("−320 000 сум")).toBeTruthy();
+    // во «Всего» — одной суммой в сумах по курсу таблицы
     expect(
-      screen.getByText("обычные траты ≈ 470 000 сум + $3 + 300 ₽ (по плану)"),
+      screen.getByText("обычные траты ≈ 551 000 сум (по плану)"),
     ).toBeTruthy();
   });
 
@@ -499,5 +589,98 @@ describe("ForecastScreen", () => {
     });
     // лимит дня в «Сводке» учитывает записи календаря
     expect(store.get("dashboard").at).toBe(0);
+  });
+
+  it("names the group when a subcategory is in two groups that day", async () => {
+    const user = userEvent.setup();
+    const twice: Forecast = withPast("UZS", 14, {
+      articles: [
+        article("продукты", 300_000, "🍔 ЕДА"),
+        article("продукты", 150_000, "🏚️ ДОМ"),
+      ],
+    });
+    show(
+      fakeApi({ forecast: vi.fn<Api["forecast"]>().mockResolvedValue(twice) }),
+    );
+    await user.click(await screen.findByRole("radio", { name: "UZS" }));
+    await user.click(pill(14));
+    expect(screen.getByText("продукты · ЕДА")).toBeTruthy();
+    expect(screen.getByText("продукты · ДОМ")).toBeTruthy();
+  });
+
+  it("says when a day had only transfers between own cards", async () => {
+    const user = userEvent.setup();
+    const moved = withPast("UZS", 14, {
+      spent: 0,
+      earned: 0,
+      change: -1_200_000,
+      articles: [],
+    });
+    show(
+      fakeApi({ forecast: vi.fn<Api["forecast"]>().mockResolvedValue(moved) }),
+    );
+    await user.click(await screen.findByRole("radio", { name: "UZS" }));
+    await user.click(pill(14));
+    expect(screen.getByText("переводы и выравнивание")).toBeTruthy();
+    expect(screen.getByText("−1 200 000 сум")).toBeTruthy();
+    expect(screen.queryByText("движений не было")).toBeNull();
+  });
+
+  it("shows a day with only a refund as money that came back", async () => {
+    const user = userEvent.setup();
+    const back = withPast("UZS", 14, {
+      spent: -50_000,
+      change: 50_000,
+      articles: [article("кафе", -50_000)],
+    });
+    show(
+      fakeApi({ forecast: vi.fn<Api["forecast"]>().mockResolvedValue(back) }),
+    );
+    await user.click(await screen.findByRole("radio", { name: "UZS" }));
+    await user.click(pill(14));
+    expect(screen.getByText("вернули")).toBeTruthy();
+    // плюс — мятным, как «пришло», а не жёлтым трат
+    expect(screen.getByText("+50 000 сум").className).toContain("text-earned");
+  });
+
+  it("shows nothing spent today without a day's movement", async () => {
+    const quiet = withPast("UZS", 15, { spent: 0, change: 0, articles: [] });
+    show(
+      fakeApi({ forecast: vi.fn<Api["forecast"]>().mockResolvedValue(quiet) }),
+    );
+    await screen.findByText("Октябрь");
+    expect(screen.queryByText("потрачено сегодня")).toBeNull();
+    // сегодня ещё не кончился — «движений не было» рано
+    expect(screen.queryByText("движений не было")).toBeNull();
+  });
+
+  it("shows today's income in today's cell too", async () => {
+    const paid = withPast("UZS", 15, {
+      earned: 2_500_000,
+      change: 2_380_000,
+      articles: [
+        article("продукты", 120_000),
+        { ...article("аванс", 2_500_000, "💰 ДОХОДЫ"), income: true },
+      ],
+    });
+    show(
+      fakeApi({ forecast: vi.fn<Api["forecast"]>().mockResolvedValue(paid) }),
+    );
+    await screen.findByText("Октябрь");
+    expect(within(pill(15)).getByText("+2,5м")).toBeTruthy();
+    expect(pill(15).getAttribute("aria-label")).toBe(
+      nb(
+        "15 октября: вечером 33,4 млн сум, потрачено 120 000 сум, пришло 2 500 000 сум",
+      ),
+    );
+  });
+
+  it("keeps the numbers of the chosen today cell white", async () => {
+    show();
+    await screen.findByText("Октябрь");
+    expect(pill(15).getAttribute("aria-pressed")).toBe("true");
+    expect(within(pill(15)).getByText("−120к").className).not.toContain(
+      "text-spent",
+    );
   });
 });

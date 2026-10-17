@@ -30,7 +30,7 @@ from app.services.analytics_service import TRANSFERS_GROUP, money
 from app.services.calendar import CalendarRecord, new_id, read_calendar, record_row
 from app.services.cards import CardBalance
 from app.services.dashboard import Dashboard
-from app.services.forecast import Dip, Evening, MonthForecast, PastDay
+from app.services.forecast import DayArticle, Dip, Evening, MonthForecast, PastDay
 from app.services.plan import (
     ArticleChange,
     Catalog,
@@ -62,6 +62,7 @@ from app.web.schemas import (
     CategoryLineOut,
     CategoryOut,
     DashboardOut,
+    DayArticleOut,
     DayPointOut,
     DaySpendOut,
     ErrorEnvelope,
@@ -408,7 +409,22 @@ def _days_out(days: Sequence[Evening], code: str) -> list[ForecastDayOut]:
     ]
 
 
-def _past_out(days: Sequence[PastDay], code: str) -> list[ForecastPastOut]:
+def _article_out(
+    article: DayArticle, code: str, icons: Mapping[str, str]
+) -> DayArticleOut:
+    return DayArticleOut(
+        group=article.group,
+        subcategory=article.subcategory,
+        icon=icons.get(article.subcategory, ""),
+        amount=_rounded(article.amount, code),
+        uzs=float(round(article.uzs)),
+        income=article.income,
+    )
+
+
+def _past_out(
+    days: Sequence[PastDay], code: str, icons: Mapping[str, str]
+) -> list[ForecastPastOut]:
     return [
         ForecastPastOut(
             day=point.day,
@@ -416,6 +432,7 @@ def _past_out(days: Sequence[PastDay], code: str) -> list[ForecastPastOut]:
             change=_rounded(point.change, code),
             spent=_rounded(point.spent, code),
             earned=_rounded(point.earned, code),
+            articles=[_article_out(item, code, icons) for item in point.articles],
         )
         for point in days
     ]
@@ -428,8 +445,14 @@ def _dips_out(plan: Dip | None, pace: Dip | None) -> ForecastDipsOut:
     return ForecastDipsOut(plan=one(plan), pace=one(pace))
 
 
-def forecast_out(found: MonthForecast | None, today: date) -> ForecastOut:
-    """Прогноз для экрана; без вкладки месяца — только статус."""
+def forecast_out(
+    found: MonthForecast | None,
+    today: date,
+    icons: Mapping[str, str] | None = None,
+) -> ForecastOut:
+    """Прогноз для экрана; без вкладки месяца — только статус.
+    icons — значки подкатегорий для статей дня."""
+    icons = icons or {}
     if found is None:
         return ForecastOut(status="no_month_tab", month=month_title(today), today=today)
     currencies = [
@@ -452,7 +475,7 @@ def forecast_out(found: MonthForecast | None, today: date) -> ForecastOut:
             days=_days_out(line.days, line.code),
             below_zero=_dips_out(line.plan_dip, line.pace_dip),
             records=_records_out(line.records, line.code),
-            past=_past_out(line.past, line.code),
+            past=_past_out(line.past, line.code, icons),
         )
         for line in found.currencies
     ]
@@ -466,8 +489,8 @@ def forecast_out(found: MonthForecast | None, today: date) -> ForecastOut:
             uzs=_days_out(found.total_uzs, "UZS"),
             usd=_days_out(found.total_usd, "USD"),
             below_zero=_dips_out(found.plan_dip, found.pace_dip),
-            past_uzs=_past_out(found.past_uzs, "UZS"),
-            past_usd=_past_out(found.past_usd, "USD"),
+            past_uzs=_past_out(found.past_uzs, "UZS", icons),
+            past_usd=_past_out(found.past_usd, "USD", icons),
         ),
         rates=dict(found.rates),
         calendar=[
@@ -914,7 +937,9 @@ def routes(application: Application) -> list[Route]:
         except Exception:
             logger.exception("Forecast failed for user_id=%s", user_id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
-        return JSONResponse(forecast_out(found, today).model_dump(mode="json"))
+        icons: dict[str, str] = application.bot_data.get("icons", {})
+        body = forecast_out(found, today, icons)
+        return JSONResponse(body.model_dump(mode="json"))
 
     async def forecast(request: Request) -> JSONResponse:
         user = current_user(request)
