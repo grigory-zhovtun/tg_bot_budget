@@ -116,15 +116,12 @@ describe("ForecastScreen", () => {
     expect(screen.getAllByRole("button", { name: /октября:/ })).toHaveLength(
       31,
     );
-    expect(
-      screen.getByText(
-        "Остаток на вечер, млн сум: прошедшие дни — по факту, в рамке; дальше — по плану",
-      ),
-    ).toBeTruthy();
-    expect(screen.getByText("потрачено за день")).toBeTruthy();
-    expect(screen.getByText("пришло за день")).toBeTruthy();
-    expect(screen.getByText("запланировано на день")).toBeTruthy();
-    expect(screen.getByText("минус на вечер")).toBeTruthy();
+    // без легенды и пояснений под графиком: владелец — «создают шум»
+    expect(screen.queryByText(/Остаток на вечер/)).toBeNull();
+    expect(screen.queryByText("потрачено за день")).toBeNull();
+    expect(screen.queryByText("минус на вечер")).toBeNull();
+    expect(screen.queryByText(/План — остаток плана статей/)).toBeNull();
+    expect(screen.queryByText(/В день: по плану/)).toBeNull();
   });
 
   it("shows a past day by fact", async () => {
@@ -294,12 +291,9 @@ describe("ForecastScreen", () => {
     const user = userEvent.setup();
     show();
     await user.click(await screen.findByRole("radio", { name: "$" }));
-    expect(
-      screen.getByText(
-        "Остаток на вечер, $: прошедшие дни — по факту, в рамке; дальше — по плану",
-      ),
-    ).toBeTruthy();
     expect(within(pill(15)).getByText("2 780")).toBeTruthy();
+    // единица — в подписи клетки для скринридера
+    expect(pill(15).getAttribute("aria-label")).toContain(nb("2 780 $"));
   });
 
   it("selects any day of the month", async () => {
