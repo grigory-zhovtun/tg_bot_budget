@@ -18,6 +18,7 @@ from app.domain import entry_row, local_today
 from app.services.cards import CardBalance
 from app.services.dashboard import build_dashboard
 from app.services.google_sheets import row_values
+from app.web import api as web_api
 from app.web.auth import launch_token
 from app.web.server import create_app
 from tests.test_day_budget import RATES, fact_row, frame, plan_row, tab
@@ -325,8 +326,10 @@ def test_day_defaults_to_the_bots_today() -> None:
 class FakeAnalytics:
     def __init__(self, result: Any = None, error: Exception | None = None) -> None:
         self.result, self.error = result, error
+        self.max_age: float | None = None
 
-    def dashboard(self, today: Any) -> Any:
+    def dashboard(self, today: Any, max_age: float = 0.0) -> Any:
+        self.max_age = max_age
         if self.error is not None:
             raise self.error
         return self.result
@@ -479,3 +482,14 @@ def test_dashboard_has_the_sums_forecast() -> None:
         "until": None,
         "dollars": None,
     }
+
+
+def test_the_dashboard_takes_copies_unless_asked_to_refresh() -> None:
+    application = make_application()
+    analytics = FakeAnalytics()
+    application.bot_data["analytics_service"] = analytics
+    client = client_for(application)
+    client.get("/api/dashboard", headers=auth())
+    assert analytics.max_age == web_api.SCREEN_COPY_AGE
+    client.get("/api/dashboard?fresh=1", headers=auth())
+    assert analytics.max_age == 0

@@ -14,9 +14,7 @@ from datetime import date
 from typing import Any
 
 import pandas as pd
-from gspread.exceptions import WorksheetNotFound
 
-from app import config
 from app.domain import INCOME_GROUP, Rates, month_title
 from app.services.analytics_service import (
     MONTHS_RU,
@@ -32,7 +30,7 @@ from app.services.day_budget import (
     TABLE_HEADER,
     short,
 )
-from app.services.google_sheets import GoogleSheetsService
+from app.services.google_sheets import GoogleSheetsService, read_month_sheets
 from app.services.receipts import Line, Receipt, match_receipts
 
 logger = logging.getLogger(__name__)
@@ -709,15 +707,19 @@ class LoadedPlan:
     receipts: Mapping[int, Receipt] = field(default_factory=dict)  # что пришло
 
 
-def load_plan(gs: GoogleSheetsService, title: str, today: date) -> LoadedPlan | None:
-    """Вкладка месяца, курсы и подсказки (синхронно); None — вкладки нет."""
-    try:
-        rows = gs.get_values(title)
-    except WorksheetNotFound:
+def load_plan(
+    gs: GoogleSheetsService, title: str, today: date, max_age: float = 0.0
+) -> LoadedPlan | None:
+    """Вкладка месяца, курсы и подсказки (синхронно); None — вкладки нет.
+
+    max_age > 0 — годятся копии листов не старше стольких секунд.
+    """
+    sheets = read_month_sheets(gs, title, max_age, calendar=False)
+    if sheets.month is None:
         return None
-    rates = gs.get_rates()
-    frame = transactions_frame(gs.get_values(config.FACT_SHEET_NAME), rates)
-    plan = read_plan(rows)
+    rates = sheets.rates
+    frame = transactions_frame(sheets.fact, rates)
+    plan = read_plan(sheets.month)
     first = today.replace(day=1)
     receipts = (
         match_receipts(frame, list_lines(plan), first, today)

@@ -259,16 +259,20 @@ def test_no_limit_left_and_goal_lines() -> None:
 class Sheets:
     def __init__(self, tabs: dict[str, list[list[Any]]]) -> None:
         self.tabs = tabs
+        self.ages: list[float] = []  # max_age каждого чтения
 
-    def get_values(self, name: str) -> list[list[Any]]:
+    def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
+        self.ages.append(max_age)
         if name not in self.tabs:
             raise WorksheetNotFound(name)
         return self.tabs[name]
 
-    def get_rates(self) -> Rates:
+    def get_rates(self, max_age: float = 0.0) -> Rates:
+        self.ages.append(max_age)
         return RATES
 
-    def get_calendar(self) -> list[list[Any]]:
+    def get_calendar(self, max_age: float = 60.0) -> list[list[Any]]:
+        self.ages.append(max_age)
         return self.tabs.get("Календарь", [])
 
 
@@ -310,7 +314,7 @@ def test_a_one_off_record_in_sums_moves_the_sums_card() -> None:
 
 def test_read_error_is_not_reported_as_a_missing_tab() -> None:
     class Flaky(Sheets):
-        def get_values(self, name: str) -> list[list[Any]]:
+        def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
             raise ConnectionError("Google is down")
 
     with pytest.raises(ConnectionError):

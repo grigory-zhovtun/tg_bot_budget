@@ -239,3 +239,10 @@ def test_a_planned_group_without_spending_stays_at_the_end() -> None:
         ("🍔 ЕДА", 2_600_000, 400_000),
         ("🏚️ ДОМ", 8_300_000, 0),
     ]
+
+
+def test_the_dashboard_may_take_copies_of_the_sheets() -> None:
+    sheets = Sheets({"fact": [FACT_HEADER, *OPENING, CAFE], "Oct 26": tab()})
+    assert AnalyticsService(sheets).dashboard(TODAY, max_age=120) is not None
+    # вкладка, курсы, fact и «Календарь» — из копий не старше двух минут
+    assert sheets.ages == [120, 120, 120, 120]

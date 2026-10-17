@@ -104,7 +104,7 @@ def test_other_months_are_refused(month: str) -> None:
 
 def test_plan_sheet_failure_is_503() -> None:
     class Broken(PlanSheets):
-        def get_values(self, name: str) -> list[list[Any]]:
+        def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
             raise ConnectionError("Google is down")
 
     response = get_plan(Broken({}))
@@ -653,3 +653,13 @@ def test_the_next_month_has_nothing_received_yet(
     body = get_plan(sheets, month="2026-11").json()
     assert {e["status"] for e in body["events"]} == {"future"}
     assert {e["received"] for e in body["events"]} == {None}
+
+
+def test_the_plan_screen_takes_copies_unless_asked_to_refresh() -> None:
+    sheets = sheets_with()
+    client = client_for(make_application(sheets))
+    client.get(f"/api/plan?month={MONTH}", headers=auth())
+    assert set(sheets.ages) == {web_api.SCREEN_COPY_AGE}
+    sheets.ages.clear()
+    client.get(f"/api/plan?month={MONTH}&fresh=1", headers=auth())
+    assert set(sheets.ages) == {0}
