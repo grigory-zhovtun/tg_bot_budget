@@ -147,6 +147,8 @@ describe("DashboardScreen", () => {
         .getAllByRole("heading", { level: 2 })
         .map((heading) => heading.textContent),
     ).toEqual([
+      "🛟 Подушка безопасности",
+      "Норма сбережений",
       "Остатки на картах",
       "План-факт по категориям",
       "Траты по дням",

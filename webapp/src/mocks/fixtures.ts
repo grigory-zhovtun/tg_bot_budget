@@ -61,6 +61,27 @@ export const dashboardFixture: Dashboard = {
   balance: 39_000_000,
   planned_balance: 41_500_000,
   frozen: { amount: 1000, currency: "USD", uzs: 12_000_000, change: -50 },
+  cushion: {
+    amount: 1000,
+    currency: "USD",
+    uzs: 12_000_000,
+    monthly: 40_000_000,
+    months: 0.3,
+    target_months: 6,
+    short_uzs: 228_000_000,
+    short: 19_000,
+  },
+  savings: {
+    rate: -0.1,
+    months: [
+      { month: "2026-04", income: 40_000_000, spent: 30_000_000, rate: 0.25 },
+      { month: "2026-05", income: 0, spent: 35_000_000, rate: null },
+      { month: "2026-06", income: 50_000_000, spent: 48_000_000, rate: 0.04 },
+      { month: "2026-07", income: 30_000_000, spent: 60_000_000, rate: -1 },
+      { month: "2026-08", income: 45_000_000, spent: 36_000_000, rate: 0.2 },
+      { month: "2026-09", income: 45_000_000, spent: 36_000_000, rate: 0.2 },
+    ],
+  },
   groups: [
     {
       name: "🍔 ЕДА",
