@@ -45,11 +45,33 @@ describe("CushionCard", () => {
     expect(screen.getByText("цель в 6 мес. достигнута")).toBeTruthy();
   });
 
-  it("says nothing about months before any spending", () => {
+  it("says why there are no months before any spending", () => {
     render(
       <CushionCard cushion={{ ...fixture(), months: null, monthly: 0 }} />,
     );
     expect(screen.getByText("—")).toBeTruthy();
+    expect(screen.getByText("трат за 3 полных месяца ещё нет")).toBeTruthy();
     expect(screen.queryByRole("progressbar")).toBeNull();
+  });
+
+  it("keeps the bar value within its scale", () => {
+    render(
+      <CushionCard
+        cushion={{ ...fixture(), months: 12, short_uzs: 0, short: 0 }}
+      />,
+    );
+    const bar = screen.getByRole("progressbar");
+    expect(bar.getAttribute("aria-valuenow")).toBe("6");
+    expect(bar.getAttribute("aria-valuetext")).toBe("12,0 из 6 месяцев");
+  });
+
+  it("is not mint until nothing is short of the target", () => {
+    // 5,96 месяца пишется «6,0», но до цели ещё не хватает — жёлтым
+    render(
+      <CushionCard
+        cushion={{ ...fixture(), months: 5.96, short_uzs: 2_400_000 }}
+      />,
+    );
+    expect(screen.getByText("6,0 мес.").className).toContain("text-warn");
   });
 });

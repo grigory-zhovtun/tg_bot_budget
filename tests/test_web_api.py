@@ -496,7 +496,7 @@ def test_the_dashboard_takes_copies_unless_asked_to_refresh() -> None:
 
 
 def test_dashboard_has_the_cushion_and_the_savings_rate() -> None:
-    spent = fact_row(date(2026, 9, 10), "🍔 ЕДА", "кафе", 30_000_000)
+    spent = fact_row(date(2026, 9, 3), "🍔 ЕДА", "кафе", 30_000_000)
     salary = fact_row(date(2026, 9, 1), "💰 ДОХОДЫ", "зарплата", 40_000_000)
     found = build_dashboard(
         frame(spent, salary), tab(), date(2026, 10, 2), RATES, "USD"
@@ -505,6 +505,9 @@ def test_dashboard_has_the_cushion_and_the_savings_rate() -> None:
     cushion = body["cushion"]
     assert (cushion["currency"], cushion["target_months"]) == ("USD", 6)
     assert cushion["monthly"] == 30_000_000  # только сентябрь: раньше строк нет
+    assert cushion["months"] == round(cushion["uzs"] / 30_000_000, 2)
+    assert cushion["short_uzs"] == round(6 * 30_000_000 - cushion["uzs"])
+    assert cushion["short"] == round(cushion["short_uzs"] / 12_000, 2)
     assert set(cushion) == {
         "amount", "currency", "uzs", "monthly", "months", "target_months",
         "short_uzs", "short",

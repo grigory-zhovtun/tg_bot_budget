@@ -11,11 +11,12 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
-from typing import TYPE_CHECKING
+from datetime import date, timedelta
+from typing import TYPE_CHECKING, Protocol
 
 import pandas as pd
 
+from app import config
 from app.domain import INCOME_GROUP, Rates, SheetRow
 from app.services.analytics_service import OPENING_BALANCE, expenses, income
 
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 AVERAGE_MONTHS = 3  # средние траты для подушки — за столько полных месяцев
 RATE_MONTHS = 3  # норма сбережений крупно — за столько последних полных месяцев
 CHART_MONTHS = 6  # столбики нормы — по стольким полным месяцам
+FULL_FROM_DAY = 5  # траты ведут не с начала месяца (позже 5-го) — он не полный
+RATES_AGE = 300.0  # секунд: курс для эквивалента в подсказке — из копии не старше
 
 
 @dataclass(frozen=True)
@@ -113,16 +116,21 @@ def monthly_spending(
 ) -> float:
     """Средние траты в месяц за count полных месяцев, в сумах.
 
-    Месяцы до первой строки fact не в счёт: иначе учёт, начатый недавно,
-    занижал бы траты и завышал подушку.
+    Месяцы до первой траты не в счёт, а месяц, где траты начали вести позже
+    FULL_FROM_DAY-го, — тоже: иначе учёт, начатый недавно, занижал бы траты
+    и завышал подушку.
     """
-    if frame.empty:
+    spending = expenses(frame)
+    if spending.empty:
         return 0.0
-    first = min(frame["day"]).replace(day=1)
+    started = min(spending["day"])
+    first = started.replace(day=1)
+    if started.day > FULL_FROM_DAY:
+        first = (first + timedelta(days=32)).replace(day=1)
     months = [month for month in full_months(today, count) if month >= first]
     if not months:
         return 0.0
-    spent = _by_month(expenses(frame))
+    spent = _by_month(spending)
     return float(sum(spent.get(month, 0.0) for month in months) / len(months))
 
 
@@ -164,24 +172,67 @@ def _amount(value: float, currency: str) -> str:
     return f"{digits.replace(',', ' ')} {currency}"
 
 
-def save_lines(rows: Sequence[SheetRow], share: float) -> list[str]:
-    """«🛟 Отложите 10 % в подушку: 3 000 000 UZS» — к сводке записи поступлений.
+def _rough(value: float, currency: str) -> str:
+    """Эквивалент целыми: «$267», «250 EUR»."""
+    digits = f"{value:,.0f}".replace(",", " ")
+    return f"${digits}" if currency == "USD" else f"{digits} {currency}"
+
+
+def incomes(rows: Sequence[SheetRow]) -> list[SheetRow]:
+    """Поступления: доходы без «нач остаток» (выравнивание, а не деньги)."""
+    return [
+        row
+        for row in rows
+        if row.category == INCOME_GROUP
+        and row.subcategory != OPENING_BALANCE
+        and row.amount > 0
+    ]
+
+
+def save_lines(
+    rows: Sequence[SheetRow],
+    share: float,
+    cushion: str | None = None,
+    rates: Rates | None = None,
+) -> list[str]:
+    """«🛟 Отложите 10 % в подушку: 3 000 000 UZS (≈ $250)» — к поступлениям.
 
     «Сначала заплати себе»: долю поступления откладывают сразу, до трат.
-    share 0 — не напоминать; «нач остаток» — выравнивание, не поступление.
+    cushion — валюта подушки: сумма в другой валюте получает её эквивалент
+    (подушка вырастет, когда их обменяют). share 0 — не напоминать.
     """
     if share <= 0:
         return []
     sums: dict[str, float] = {}
-    for row in rows:
-        if (
-            row.category == INCOME_GROUP
-            and row.subcategory != OPENING_BALANCE
-            and row.amount > 0
-        ):
-            sums[row.currency] = sums.get(row.currency, 0.0) + row.amount * share
+    for row in incomes(rows):
+        sums[row.currency] = sums.get(row.currency, 0.0) + row.amount * share
     if not sums:
         return []
+    rate = rates.to_uzs.get(cushion, 0.0) if rates and cushion else 0.0
+
+    def part(code: str, value: float) -> str:
+        text = _amount(value, code)
+        own = rates.to_uzs.get(code, 0.0) if rates else 0.0
+        if cushion and code != cushion and rate > 0 and own > 0:
+            text += f" (≈ {_rough(value * own / rate, cushion)})"
+        return text
+
     percent = f"{share * 100:g}".replace(".", ",")
-    parts = " и ".join(_amount(value, code) for code, value in sums.items())
-    return [f"🛟 Отложите {percent} % в подушку: {parts}"]
+    where = " в подушку" if cushion else ""
+    parts = " и ".join(part(code, value) for code, value in sums.items())
+    return [f"🛟 Отложите {percent} %{where}: {parts}"]
+
+
+class RatesSource(Protocol):
+    def get_rates(self, max_age: float = 0.0) -> Rates: ...
+
+
+def save_hint(gs: RatesSource, rows: Sequence[SheetRow]) -> list[str]:
+    """Подсказка «Отложите» для записанных строк по настройкам бота.
+
+    Курс — из копии листа, и только если среди строк есть поступление.
+    """
+    if config.SAVE_SHARE <= 0 or not incomes(rows):
+        return []
+    rates = gs.get_rates(RATES_AGE) if config.FROZEN_CURRENCY else None
+    return save_lines(rows, config.SAVE_SHARE, config.FROZEN_CURRENCY, rates)

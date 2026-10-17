@@ -54,7 +54,7 @@ class FakeSheets:
         )
         return list(known)
 
-    def get_rates(self) -> Rates:
+    def get_rates(self, max_age: float = 0.0) -> Rates:
         return Rates({"UZS": 1.0, "USD": 12000.0, "RUB": 150.0})
 
     table_balances: dict[str, float] = {}
@@ -523,7 +523,11 @@ async def test_a_failed_write_does_not_ask_for_it() -> None:
     assert "receipts_dirty" not in context.bot_data
 
 
-async def test_an_income_suggests_setting_a_share_aside() -> None:
+async def test_an_income_suggests_setting_a_share_aside(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(config, "SAVE_SHARE", 0.1)
+    monkeypatch.setattr(config, "FROZEN_CURRENCY", "USD")
     update, context, _ = make_chat("", {})
     today = local_today(config.ANALYTICS_TIMEZONE)
     salary = entry_row(
@@ -532,4 +536,24 @@ async def test_an_income_suggests_setting_a_share_aside() -> None:
     result = await messages.save_rows(
         context, update.effective_chat, [salary], [], "app:3"
     )
-    assert "🛟 Отложите 10 % в подушку: 3 000 000 UZS" in result.lines
+    assert "🛟 Отложите 10 % в подушку: 3 000 000 UZS (≈ $250)" in result.lines
+
+
+async def test_an_income_not_written_suggests_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class BrokenSheets(FakeSheets):
+        def append_transactions(self, rows: list[Any]) -> tuple[int, int]:
+            raise ConnectionError("Google is down")
+
+    monkeypatch.setattr(config, "SAVE_SHARE", 0.1)
+    update, context, _ = make_chat("", {})
+    context.bot_data["gs_service"] = BrokenSheets()
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    salary = entry_row(
+        30_000_000.0, True, "", "VISA 9120 UZS", "💰 ДОХОДЫ", "зарплата", today
+    )
+    result = await messages.save_rows(
+        context, update.effective_chat, [salary], [], "app:4"
+    )
+    assert not any("🛟" in line for line in result.lines)

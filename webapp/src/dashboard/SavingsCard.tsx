@@ -2,21 +2,30 @@ import type { SavingMonth, Savings } from "../api";
 import { short } from "../format";
 import { monthName, monthRange, monthShort } from "../plan/months";
 
-const GOOD_RATE = 0.1; // от 10 % — мятным: «сначала заплати себе»
+const GOOD_PERCENT = 10; // от 10 % — мятным: «сначала заплати себе»
+const MAX_PERCENT = 999; // дальше — «< −999 %»: подпись не ломает колонку
 
-/** 0.25 → «+25 %», −1.41 → «−141 %», null → «—». */
-function rateText(rate: number | null): string {
-  if (rate === null) return "—";
-  const percent = Math.round(Math.abs(rate) * 100);
-  const sign = percent === 0 ? "" : rate > 0 ? "+" : "−";
-  return `${sign}${percent} %`;
+/** Доля в целых процентах, как на экране: 0,096 → 10. */
+function percentOf(rate: number): number {
+  return Math.round(rate * 100);
 }
 
-/** От 10 % — мятный, от нуля — жёлтый, минус — оранжевый (не красный). */
+/** 0.25 → «+25 %», −1.41 → «−141 %», −79 → «< −999 %», null → «—». */
+function rateText(rate: number | null): string {
+  if (rate === null) return "—";
+  const percent = percentOf(rate);
+  if (percent > MAX_PERCENT) return `> +${MAX_PERCENT}\u00a0%`;
+  if (percent < -MAX_PERCENT) return `< −${MAX_PERCENT}\u00a0%`;
+  const sign = percent > 0 ? "+" : percent < 0 ? "−" : "";
+  return `${sign}${Math.abs(percent)}\u00a0%`;
+}
+
+/** По числу на экране: от 10 % — мятный, от нуля — жёлтый, минус — оранжевый. */
 function rateTone(rate: number | null): { text: string; bar: string } {
   if (rate === null) return { text: "", bar: "" };
-  if (rate >= GOOD_RATE) return { text: "text-ok", bar: "bg-ok" };
-  if (rate >= 0) return { text: "text-warn", bar: "bg-warn" };
+  const percent = percentOf(rate);
+  if (percent >= GOOD_PERCENT) return { text: "text-ok", bar: "bg-ok" };
+  if (percent >= 0) return { text: "text-warn", bar: "bg-warn" };
   return { text: "text-danger", bar: "bg-danger" };
 }
 
@@ -24,10 +33,16 @@ function amountText(value: number): string {
   return value > 0 ? short(value) : "0";
 }
 
-/** Столбик месяца: вверх — отложили, вниз — проели запас; дальше ±100 % не растёт. */
+/**
+ * Столбик месяца: вверх — отложили, вниз — проели запас; дальше ±100 % не
+ * растёт, маленькая доля — не тоньше 3 px. Траты без дохода — столбик вниз во
+ * всю высоту: запас проели, это не «нет данных».
+ */
 function MonthBar({ item }: { item: SavingMonth }) {
-  const tone = rateTone(item.rate);
-  const height = item.rate === null ? 0 : Math.min(Math.abs(item.rate), 1) * 50;
+  const eaten = item.rate === null && item.spent > 0;
+  const rate = eaten ? -1 : item.rate;
+  const tone = rateTone(rate);
+  const height = rate === null ? 0 : Math.min(Math.abs(rate), 1) * 50;
   const result = item.rate === null ? "дохода не было" : rateText(item.rate);
   return (
     <div
@@ -35,19 +50,21 @@ function MonthBar({ item }: { item: SavingMonth }) {
       aria-label={`${monthName(item.month)}: пришло ${amountText(item.income)}, потрачено ${amountText(item.spent)}, ${result}`}
       className="flex flex-col items-center gap-1"
     >
-      <span className={`text-[13px] font-bold ${tone.text}`}>
+      <span
+        className={`text-[13px] font-bold whitespace-nowrap ${rateTone(item.rate).text}`}
+      >
         {rateText(item.rate)}
       </span>
       <div className="relative h-16 w-full">
         <div className="absolute inset-x-0 top-1/2 h-0.5 bg-outline" />
-        {item.rate !== null && (
+        {rate !== null && height > 0 && (
           <div
+            data-bar={rate >= 0 ? "up" : "down"}
             className={`absolute inset-x-2 rounded-sm ${tone.bar}`}
-            style={
-              item.rate >= 0
-                ? { bottom: "50%", height: `${height}%` }
-                : { top: "50%", height: `${height}%` }
-            }
+            style={{
+              [rate >= 0 ? "bottom" : "top"]: "50%",
+              height: `max(${height}%, 3px)`,
+            }}
           />
         )}
       </div>

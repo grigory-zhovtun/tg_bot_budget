@@ -3,10 +3,15 @@ import { money, short, withCurrency } from "../format";
 
 const SAFE_MONTHS = 3; // меньше — предупреждение оранжевым
 
-/** Цвет числа и полоски: до трёх месяцев — оранжевый, до цели — жёлтый, цель — мятный. */
-function tone(months: number, target: number): { text: string; bar: string } {
-  if (months >= target) return { text: "text-ok", bar: "bg-ok" };
-  if (months >= SAFE_MONTHS) return { text: "text-warn", bar: "bg-warn" };
+/**
+ * Цвет числа и полоски: цель достигнута — мятный, от трёх месяцев — жёлтый,
+ * меньше — оранжевый; месяцы — как на экране, а не неокруглённые.
+ */
+function tone(cushion: Cushion, months: number): { text: string; bar: string } {
+  if (cushion.short_uzs <= 0) return { text: "text-ok", bar: "bg-ok" };
+  if (Math.round(months * 10) / 10 >= SAFE_MONTHS) {
+    return { text: "text-warn", bar: "bg-warn" };
+  }
   return { text: "text-danger", bar: "bg-danger" };
 }
 
@@ -26,7 +31,7 @@ function inCurrency(value: number, currency: string): string {
 /** «🛟 Подушка безопасности»: «Заморожено» в месяцах средних трат и путь до цели. */
 export default function CushionCard({ cushion }: { cushion: Cushion }) {
   const { months, target_months: target } = cushion;
-  const colors = months === null ? null : tone(months, target);
+  const colors = months === null ? null : tone(cushion, months);
   const spending =
     cushion.monthly > 0
       ? ` — при тратах ${short(cushion.monthly)} в месяц`
@@ -48,8 +53,9 @@ export default function CushionCard({ cushion }: { cushion: Cushion }) {
           aria-label={`Подушка: ${monthsText(months)} из ${target} месяцев`}
           aria-valuemin={0}
           aria-valuemax={target}
-          aria-valuenow={months}
-          className="h-3 overflow-hidden rounded-full bg-bg"
+          aria-valuenow={Math.min(months, target)}
+          aria-valuetext={`${monthsText(months)} из ${target} месяцев`}
+          className="h-3.5 overflow-hidden rounded-full border border-outline"
         >
           <div
             className={`h-full rounded-full ${colors.bar}`}
@@ -60,6 +66,9 @@ export default function CushionCard({ cushion }: { cushion: Cushion }) {
       <p className="text-sm">
         {`${withCurrency(cushion.amount, cushion.currency)} ≈ ${short(cushion.uzs)}${spending}`}
       </p>
+      {months === null && (
+        <p className="text-sm">трат за 3 полных месяца ещё нет</p>
+      )}
       {months !== null &&
         (cushion.short_uzs > 0 ? (
           <p className="text-sm font-semibold">

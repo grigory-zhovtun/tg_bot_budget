@@ -17,11 +17,12 @@ from telegram.error import BadRequest
 from telegram.ext import ContextTypes
 
 from app import config
-from app.domain import INCOME_GROUP, Catalog, currency_of
+from app.domain import INCOME_GROUP, Catalog, currency_of, local_today
 from app.errors import user_message
 from app.handlers.common import LAST_WRITE
 from app.handlers.receipts import mark_dirty
 from app.services.google_sheets import GoogleSheetsService
+from app.services.savings import save_hint
 from app.statements import (
     TEMPORARY_MARK,
     ImportPlan,
@@ -357,6 +358,10 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop(LAST_WRITE, None)
     mark_dirty(context.bot_data)  # операции задним числом — сверка списка
     lines = ["✅ Выписки загружены", *report]
+    # поступления этого месяца — повод отложить долю сейчас, а не старые
+    first = local_today(config.ANALYTICS_TIMEZONE).replace(day=1)
+    fresh = [item.row for item in plan.rows if item.row.day >= first]
+    lines += await asyncio.to_thread(save_hint, gs_service, fresh)
     try:
         balances = await asyncio.to_thread(gs_service.get_table_balances)
     except Exception:

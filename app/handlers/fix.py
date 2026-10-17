@@ -37,6 +37,7 @@ from app.errors import user_message
 from app.handlers.common import LAST_WRITE, premium_icons
 from app.handlers.receipts import mark_dirty
 from app.services.google_sheets import GoogleSheetsService
+from app.services.savings import save_hint
 from app.sms_rows import NEW
 from app.utils.keyboards import (
     LAST_UNDO,
@@ -472,6 +473,10 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     mark_dirty(context.bot_data)  # доход стал тратой или наоборот — сверка списка
     logger.info("Row %s recategorized", number)
     verdict = f"✅ Исправил (строка {number}): {describe(fixed)}"
+    if row.category != INCOME_GROUP and category == INCOME_GROUP:
+        # зарплата по SMS приходит переводом с ❓ — «отложите» звучит здесь
+        hint = await asyncio.to_thread(save_hint, gs_service, [fixed])
+        verdict = "\n".join([verdict, *hint])
     if "mode" in state:
         await _checked(query, context, state, last, verdict, True)
         return
