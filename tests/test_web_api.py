@@ -493,3 +493,30 @@ def test_the_dashboard_takes_copies_unless_asked_to_refresh() -> None:
     assert analytics.max_age == web_api.SCREEN_COPY_AGE
     client.get("/api/dashboard?fresh=1", headers=auth())
     assert analytics.max_age == 0
+
+
+def test_dashboard_has_the_cushion_and_the_savings_rate() -> None:
+    spent = fact_row(date(2026, 9, 10), "🍔 ЕДА", "кафе", 30_000_000)
+    salary = fact_row(date(2026, 9, 1), "💰 ДОХОДЫ", "зарплата", 40_000_000)
+    found = build_dashboard(
+        frame(spent, salary), tab(), date(2026, 10, 2), RATES, "USD"
+    )
+    body = dashboard_for(found).json()
+    cushion = body["cushion"]
+    assert (cushion["currency"], cushion["target_months"]) == ("USD", 6)
+    assert cushion["monthly"] == 30_000_000  # только сентябрь: раньше строк нет
+    assert set(cushion) == {
+        "amount", "currency", "uzs", "monthly", "months", "target_months",
+        "short_uzs", "short",
+    }  # fmt: skip
+    savings = body["savings"]
+    assert [item["month"] for item in savings["months"]] == [
+        "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09",
+    ]  # fmt: skip
+    assert savings["months"][-1] == {
+        "month": "2026-09",
+        "income": 40_000_000,
+        "spent": 30_000_000,
+        "rate": 0.25,
+    }
+    assert savings["rate"] == 0.25

@@ -16,6 +16,7 @@ from typing import Any
 
 import pandas as pd
 
+from app import config
 from app.domain import Rates
 from app.services.analytics_service import PlanLine, expenses, plan_lines
 from app.services.calendar import CalendarRecord
@@ -30,6 +31,13 @@ from app.services.day_budget import (
 )
 from app.services.plan import read_plan
 from app.services.recurring import Series, find_series
+from app.services.savings import (
+    Cushion,
+    Savings,
+    cushion_of,
+    month_savings,
+    monthly_spending,
+)
 
 HALF_SUM = 0.5  # меньше полсума — ноль: остаток возвратов и пересчёта по курсу
 
@@ -106,6 +114,8 @@ class Dashboard:
     untracked: tuple[Untracked, ...] = ()
     cards: tuple[CardBalance, ...] = ()
     categories: tuple[Category, ...] = ()
+    cushion: Cushion | None = None  # подушка — «Заморожено» в месяцах трат
+    savings: Savings | None = None  # норма сбережений по полным месяцам
 
 
 def group_plans(spend: list[PlanLine]) -> tuple[GroupPlan, ...]:
@@ -245,6 +255,7 @@ def build_dashboard(
     joined = categories(groups, spent)
     forecast = read_forecast(rows)
     budget = day_budget(frame, rows, today, rates, frozen_currency, records)
+    savings = month_savings(frame, today)
     if forecast is None or budget is None:
         return Dashboard(
             "no_forecast",
@@ -257,6 +268,7 @@ def build_dashboard(
             untracked=missing,
             cards=tuple(cards),
             categories=joined,
+            savings=savings,
         )
     upcoming = budget.ahead
     return Dashboard(
@@ -270,4 +282,8 @@ def build_dashboard(
         untracked=missing,
         cards=tuple(cards),
         categories=joined,
+        cushion=cushion_of(
+            budget, rates, monthly_spending(frame, today), config.CUSHION_MONTHS
+        ),
+        savings=savings,
     )

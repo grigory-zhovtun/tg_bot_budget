@@ -45,6 +45,7 @@ from app.handlers.common import (
 from app.handlers.receipts import mark_dirty
 from app.services.analytics_service import TRANSFERS_GROUP
 from app.services.google_sheets import GoogleSheetsService
+from app.services.savings import save_lines
 from app.statements import is_kapitalbank_statement, parse_statement, pdf_text
 from app.utils.keyboards import (
     category_prompt,
@@ -464,6 +465,7 @@ async def save_rows(
         ]
 
     lines += await _plan_feedback(context, rows)
+    lines += save_lines(rows, config.SAVE_SHARE)  # «сначала заплати себе»
     lines += [f"⚠️ Не записал: {s.comment} — {s.reason}" for s in skipped]
     lines += notes
     if not lines:

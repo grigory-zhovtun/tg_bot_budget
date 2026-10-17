@@ -521,3 +521,15 @@ async def test_a_failed_write_does_not_ask_for_it() -> None:
     context.bot_data["gs_service"] = BrokenSheets()
     await messages.text_handler(update, context)
     assert "receipts_dirty" not in context.bot_data
+
+
+async def test_an_income_suggests_setting_a_share_aside() -> None:
+    update, context, _ = make_chat("", {})
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    salary = entry_row(
+        30_000_000.0, True, "", "VISA 9120 UZS", "💰 ДОХОДЫ", "зарплата", today
+    )
+    result = await messages.save_rows(
+        context, update.effective_chat, [salary], [], "app:3"
+    )
+    assert "🛟 Отложите 10 % в подушку: 3 000 000 UZS" in result.lines

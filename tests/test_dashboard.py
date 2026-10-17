@@ -4,6 +4,7 @@ from datetime import date
 
 import pytest
 
+from app import config
 from app.services.analytics_service import AnalyticsService
 from app.services.cards import CardBalance
 from app.services.dashboard import build_dashboard, subscriptions
@@ -246,3 +247,23 @@ def test_the_dashboard_may_take_copies_of_the_sheets() -> None:
     assert AnalyticsService(sheets).dashboard(TODAY, max_age=120) is not None
     # вкладка, курсы, fact и «Календарь» — из копий не старше двух минут
     assert sheets.ages == [120, 120, 120, 120]
+
+
+def test_the_dashboard_has_the_cushion_and_the_savings_rate() -> None:
+    found = build_dashboard(frame(CAFE), tab(), TODAY, RATES, "USD")
+    assert found.budget is not None and found.cushion is not None
+    # подушка — «Заморожено», цель — из настроек
+    assert (found.cushion.amount, found.cushion.currency) == (
+        found.budget.frozen,
+        "USD",
+    )
+    assert found.cushion.target_months == config.CUSHION_MONTHS == 6
+    assert len(found.savings.months) == 6
+
+
+def test_without_the_forecast_block_the_savings_rate_stays() -> None:
+    rows = [row[:14] for row in tab()]
+    found = build_dashboard(frame(CAFE), rows, TODAY, RATES, "USD")
+    assert found.status == "no_forecast"
+    assert found.cushion is None
+    assert len(found.savings.months) == 6

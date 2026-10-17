@@ -97,6 +97,10 @@ CELEBRATE_EFFECT_ID = None if _EFFECT.lower() in ("", "off") else _EFFECT
 # списка вкладки месяца; пусто или «off» — не показывать
 _FROZEN = os.getenv("FROZEN_CURRENCY", "USD").strip().upper()
 FROZEN_CURRENCY = None if _FROZEN in ("", "OFF") else _FROZEN
+# Подушка безопасности — «Заморожено»; цель — столько месяцев средних трат
+CUSHION_MONTHS = int(os.getenv("CUSHION_MONTHS", "6"))
+# «Сначала заплати себе»: какую долю поступления бот предлагает отложить; 0 — молчать
+SAVE_SHARE = float(os.getenv("SAVE_SHARE", "0.10"))
 
 # Access control: Telegram user IDs allowed to use the bot ("123, 456").
 # Falls back to ANALYTICS_CHAT_ID (the owner's private chat id == user id).

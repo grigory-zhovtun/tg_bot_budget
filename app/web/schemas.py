@@ -200,6 +200,31 @@ class FrozenOut(ApiModel):
     change: float
 
 
+class CushionOut(ApiModel):
+    """Подушка безопасности: «Заморожено» в месяцах средних трат."""
+
+    amount: float  # в валюте подушки
+    currency: str
+    uzs: float
+    monthly: float  # средние траты в месяц за 3 полных месяца, сумы
+    months: float | None  # на сколько месяцев хватит; None — трат ещё нет
+    target_months: int
+    short_uzs: float  # сколько не хватает до цели, сумы; 0 — цель достигнута
+    short: float  # то же в валюте подушки
+
+
+class SavingMonthOut(ApiModel):
+    month: str  # «2026-09»
+    income: float  # сумы, без «нач остаток»
+    spent: float  # сумы, без переводов между своими картами
+    rate: float | None  # доля дохода, которая осталась; None — дохода не было
+
+
+class SavingsOut(ApiModel):
+    rate: float | None  # за 3 последних полных месяца
+    months: list[SavingMonthOut]  # 6 полных месяцев, от старых
+
+
 class RunwayOut(ApiModel):
     """Прогноз по сумам: когда кончатся и сколько долларов обменять до поступления."""
 
@@ -235,6 +260,8 @@ class DashboardOut(ApiModel):
     untracked: list[UntrackedOut] = []
     cards: list[CardOut] = []
     categories: list[CategoryOut] = []  # план-факт по категориям, от больших трат
+    cushion: CushionOut | None = None
+    savings: SavingsOut | None = None
 
 
 class ForecastEventOut(ApiModel):
