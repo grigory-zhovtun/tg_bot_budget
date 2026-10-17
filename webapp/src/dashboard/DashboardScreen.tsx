@@ -4,6 +4,8 @@ import { itemAmount, longDay, money, short, withCurrency } from "../format";
 import { useResource, useStore } from "../store";
 import CardBalances from "./CardBalances";
 import CategoryChart from "./CategoryChart";
+import CushionCard from "./CushionCard";
+import SavingsCard from "./SavingsCard";
 import SpendingChart from "./SpendingChart";
 
 const STATE_TEXT: Record<SubscriptionState, string> = {
@@ -146,6 +148,8 @@ function Content({ data }: { data: Dashboard }) {
       <Today data={data} />
       <Cards data={data} />
       <Sums data={data} />
+      {data.cushion && <CushionCard cushion={data.cushion} />}
+      {data.savings && <SavingsCard savings={data.savings} />}
       {data.cards.length > 0 && (
         <CardBalances cards={data.cards} today={data.today} />
       )}

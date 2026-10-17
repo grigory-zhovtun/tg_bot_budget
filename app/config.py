@@ -98,6 +98,35 @@ CELEBRATE_EFFECT_ID = None if _EFFECT.lower() in ("", "off") else _EFFECT
 _FROZEN = os.getenv("FROZEN_CURRENCY", "USD").strip().upper()
 FROZEN_CURRENCY = None if _FROZEN in ("", "OFF") else _FROZEN
 
+
+def parse_months(text: str, default: int = 6) -> int:
+    """Цель подушки в месяцах; не число или не больше нуля — default."""
+    try:
+        months = int(text.strip())
+    except ValueError:
+        return default
+    return months if months > 0 else default
+
+
+def parse_share(text: str) -> float:
+    """Доля: «0.10», «0,1», «10», «12.5%» → 0.1…; пусто, «off», не число — 0."""
+    value = text.strip().lower().rstrip("%").strip().replace(",", ".")
+    if value in ("", "off"):
+        return 0.0
+    try:
+        share = float(value)
+    except ValueError:
+        return 0.0
+    if share > 1:
+        share /= 100  # написали проценты, а не долю
+    return min(max(share, 0.0), 1.0)
+
+
+# Подушка безопасности — «Заморожено»; цель — столько месяцев средних трат
+CUSHION_MONTHS = parse_months(os.getenv("CUSHION_MONTHS", "6"))
+# «Сначала заплати себе»: какую долю поступления бот предлагает отложить; 0 — молчать
+SAVE_SHARE = parse_share(os.getenv("SAVE_SHARE", "0.10"))
+
 # Access control: Telegram user IDs allowed to use the bot ("123, 456").
 # Falls back to ANALYTICS_CHAT_ID (the owner's private chat id == user id).
 # Empty → the bot answers nobody.

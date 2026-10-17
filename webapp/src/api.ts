@@ -88,6 +88,31 @@ export interface CardBalance {
   stale: boolean; // сверке больше недели
 }
 
+/** Подушка безопасности: «Заморожено» в месяцах средних трат за 3 полных месяца. */
+export interface Cushion {
+  amount: number; // в валюте подушки
+  currency: string;
+  uzs: number;
+  monthly: number; // средние траты в месяц, сумы
+  months: number | null; // на сколько месяцев хватит; null — трат ещё нет
+  target_months: number;
+  short_uzs: number; // сколько не хватает до цели; 0 — цель достигнута
+  short: number; // то же в валюте подушки
+}
+
+/** Полный месяц: доход без «нач остаток» и траты без переводов, в сумах. */
+export interface SavingMonth {
+  month: string; // «2026-09»
+  income: number;
+  spent: number;
+  rate: number | null; // доля дохода, которая осталась; null — дохода не было
+}
+
+export interface Savings {
+  rate: number | null; // за 3 последних полных месяца
+  months: SavingMonth[]; // 6 полных месяцев, от старых
+}
+
 /** День месяца: траты без платежей из списка и лимит, с которым день начался. */
 export interface DaySpend {
   day: string;
@@ -149,6 +174,8 @@ export interface Dashboard {
   untracked: Untracked[];
   cards: CardBalance[];
   categories: Category[]; // план-факт по категориям, от больших трат
+  cushion?: Cushion | null; // нет — заморозку не считаем
+  savings?: Savings | null;
 }
 
 /** Строка списка, которая ещё впереди: сумма — остаток, в валюте строки. */

@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock
 import pytest
 from telegram.error import BadRequest
 
-from app.domain import INCOME_GROUP, SheetRow
+from app import config
+from app.domain import INCOME_GROUP, Rates, SheetRow
 from app.handlers import fix
 from app.handlers.common import LAST_WRITE
 
@@ -47,6 +48,9 @@ class FixSheets:
         if isinstance(self.changed, Exception):
             raise self.changed
         return self.changed
+
+    def get_rates(self, max_age: float = 0.0) -> Rates:
+        return Rates({"UZS": 1.0, "USD": 12_000.0})
 
 
 class HistoryAI:
@@ -263,3 +267,16 @@ async def test_expense_cannot_become_income() -> None:
     assert text.startswith("Это списание — в доходы его не перенести.")
     assert "строку 4190" in text
     assert context.bot_data["gs_service"].calls == []
+
+
+async def test_money_moved_into_income_suggests_setting_a_share_aside(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # зарплата по SMS приходит переводом с ❓ — в доходы её переносят /fix
+    monkeypatch.setattr(config, "SAVE_SHARE", 0.1)
+    monkeypatch.setattr(config, "FROZEN_CURRENCY", "USD")
+    context = chat([row(amount=-30_000_000.0, comment="SMS: зачисление")])
+    await command(context)
+    await press(context, "fix:c:1")  # ДОХОДЫ
+    text, _ = await press(context, "fix:s:0")  # зарплата
+    assert "🛟 Отложите 10 % в подушку: 3 000 000 UZS (≈ $250)" in text

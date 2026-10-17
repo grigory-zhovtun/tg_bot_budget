@@ -60,6 +60,7 @@ app/
 │   ├── analytics_service.py # AnalyticsService - reports with matplotlib charts
 │   ├── recurring.py     # Monthly payments from fact: recurring_key, amount clusters, day ±4, /subs text and morning lines
 │   ├── dashboard.py     # Mini App «Сводка»: build_dashboard — DayBudget, plan_lines by group, read_daily (O:R under «Дата»), subscription states, spending by group from fact rows (spent_groups), plan vs fact by category (categories: the tab's plan + spent_groups) and articles without a month-tab row (untracked)
+│   ├── savings.py       # «Сводка»: the emergency fund («Заморожено» in months of the average spending of 3 full months, target CUSHION_MONTHS) and the savings rate (income − spending) / income of 6 full months; save_lines — «🛟 Отложите N %» in the write summary of an income
 │   ├── cards.py         # «Сводка»: card balances from the fact balance block (I name, J «Текущий баланс», N «Проверка», Q «Сверено»), the bank check
 │   ├── forecast.py      # Mini App «Прогноз»: money until the month end per currency and in total, plan and pace lines, list rows and calendar records as events; the days by fact up to today — evening, change, spending and income, totals and by article (`PastDay.articles`); today is what already happened
 │   ├── calendar.py      # «Календарь» sheet: records (once, every day, days of the week, once a month), their days, closing by fact, sum hints
@@ -116,7 +117,7 @@ Optional:
 - `GEMINI_API_KEY` - Enables AI features; `GEMINI_MODEL` (default `gemini-flash-latest`), `GEMINI_FALLBACK_MODELS` (default `gemini-flash-lite-latest`, tried on 503/429)
 - `ANALYTICS_CHAT_ID`, `ANALYTICS_TIME`, `ANALYTICS_TIMEZONE` - daily report (JobQueue); the time zone also defines "today"
 - `IGNORED_CARDS` - last 4 digits of cards the screenshot check skips (e.g. a child's card)
-- `MORNING_TIME` - morning message with the daily limit to the owner, default `08:00`, `off` disables it; `FROZEN_CURRENCY` (default `USD`, `off` — none) - cards in this currency are savings
+- `MORNING_TIME` - morning message with the daily limit to the owner, default `08:00`, `off` disables it; `FROZEN_CURRENCY` (default `USD`, `off` — none) - cards in this currency are savings; `CUSHION_MONTHS` (default `6`) - emergency fund target in months of spending; `SAVE_SHARE` (default `0.10`, `0` — off) - share of an income the write summary suggests setting aside
 - `WEEKLY_DIGEST_TIME` - Sunday digest to the owner (`ANALYTICS_CHAT_ID` or the first allowed id), default `20:00`, `off` disables it
 - `WEBHOOK_URL` (or Render's `RENDER_EXTERNAL_URL`) — web service mode; `WEBHOOK_SECRET` (default: derived from the bot token), `PORT`, `LOCAL_RUN=True` (poll locally), `FORCE_POLLING=True` (poll even while a webhook is set — takes the bot over from the web service)
 

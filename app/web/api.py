@@ -51,6 +51,7 @@ from app.services.plan import (
 )
 from app.services.plan_advice import advice_numbers, checked_points, gather_advice
 from app.services.receipts import NOTHING, Line, Receipt, receipt_status
+from app.services.savings import Cushion, Savings
 from app.web.auth import WebUser, authenticate
 from app.web.schemas import (
     AdviceApplyOut,
@@ -61,6 +62,7 @@ from app.web.schemas import (
     CardOut,
     CategoryLineOut,
     CategoryOut,
+    CushionOut,
     DashboardOut,
     DayArticleOut,
     DayPointOut,
@@ -98,6 +100,8 @@ from app.web.schemas import (
     PlanSaveIn,
     RowsOut,
     RunwayOut,
+    SavingMonthOut,
+    SavingsOut,
     SourceOut,
     SpentGroupOut,
     SpentItemOut,
@@ -243,6 +247,39 @@ def card_out(card: CardBalance, today: date) -> CardOut:
     )
 
 
+def savings_out(savings: Savings | None) -> SavingsOut | None:
+    if savings is None:
+        return None
+    return SavingsOut(
+        rate=None if savings.rate is None else round(savings.rate, 4),
+        months=[
+            SavingMonthOut(
+                month=f"{item.month:%Y-%m}",
+                income=float(round(item.income)),
+                spent=float(round(item.spent)),
+                rate=None if item.rate is None else round(item.rate, 4),
+            )
+            for item in savings.months
+        ],
+    )
+
+
+def cushion_out(cushion: Cushion | None) -> CushionOut | None:
+    if cushion is None:
+        return None
+    months = cushion.months
+    return CushionOut(
+        amount=_rounded(cushion.amount, cushion.currency),
+        currency=cushion.currency,
+        uzs=float(round(cushion.uzs)),
+        monthly=float(round(cushion.monthly)),
+        months=None if months is None else round(months, 2),
+        target_months=cushion.target_months,
+        short_uzs=float(round(cushion.short_uzs)),
+        short=_rounded(cushion.short, cushion.currency),
+    )
+
+
 def dashboard_out(
     found: Dashboard | None, today: date, icons: dict[str, str]
 ) -> DashboardOut:
@@ -320,6 +357,7 @@ def dashboard_out(
             untracked=untracked,
             cards=cards,
             categories=joined,
+            savings=savings_out(found.savings),
         )
     runway = None
     if budget.runway is not None:
@@ -388,6 +426,8 @@ def dashboard_out(
         untracked=untracked,
         cards=cards,
         categories=joined,
+        cushion=cushion_out(found.cushion),
+        savings=savings_out(found.savings),
     )
 
 
