@@ -55,7 +55,7 @@ app/
 │   ├── balances.py      # Bank main-screen screenshots: «Проверка» + «Сверено», «Выровнять» buttons
 │   └── analytics.py     # /advice, /analytics, daily report
 ├── services/
-│   ├── google_sheets.py # GoogleSheetsService — synchronous gspread wrapper
+│   ├── google_sheets.py # GoogleSheetsService — synchronous gspread wrapper; copies of sheets for Mini App screens (`get_values`/`get_rates(max_age)`), dropped by any write of the bot (`WriteAwareHTTPClient` reports every POST/PUT/DELETE); `read_month_sheets` reads the month tab, rates, fact and «Календарь» in parallel
 │   ├── ai_service.py    # GeminiService (google-genai, JSON schema output, merchant hints from fact)
 │   ├── analytics_service.py # AnalyticsService - reports with matplotlib charts
 │   ├── recurring.py     # Monthly payments from fact: recurring_key, amount clusters, day ±4, /subs text and morning lines
@@ -67,7 +67,7 @@ app/
 │   └── day_budget.py    # Daily limit from the month tab forecast block, frozen money, morning text
 └── utils/
     └── keyboards.py     # Keyboards: icons from system!D (`with_icon`), prompts naming card/choice (inline buttons are as wide as the message), `action(..., style)` coloured buttons
-webapp/                  # Mini App: React + TS + Tailwind (Vite), served at /app/; src/entry — entry screen, src/api.ts — API client; src/index.css — background, text and buttons from the Telegram theme, all other text colors our own high-contrast palette (≥7:1 on light and dark themes, dark values under data-scheme="dark" set by telegram.followScheme; no red text — warnings orange, below zero a red cell/chip with white numbers), checked by src/theme.test.ts
+webapp/                  # Mini App: React + TS + Tailwind (Vite), served at /app/; src/entry — entry screen, src/api.ts — API client; src/store.ts — answers of the launch and today's copy of them in the phone (`app-cache`, per build and Telegram user): a screen shows them at once and asks the server in the background, the first request of a launch and «Обновить» with `?fresh=1`, App loads «Сводка», then «Прогноз» and the month's plan in the background, writes expire what they change; src/index.css — background, text and buttons from the Telegram theme, all other text colors our own high-contrast palette (≥7:1 on light and dark themes, dark values under data-scheme="dark" set by telegram.followScheme; no red text — warnings orange, below zero a red cell/chip with white numbers), checked by src/theme.test.ts
 tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 ```
 
@@ -80,6 +80,8 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 **Mini App dashboard**: `GET /api/dashboard` → `AnalyticsService.dashboard()` → `build_dashboard` (the same `day_budget` as `/today`, `plan_lines` by group, `read_daily` — the month tab's daily table, `find_series` with this month's state, `spent_groups` and `untracked` — this month's fact rows, `categories` — them joined with the tab's plan by group and subcategory, `card_balances` — the fact balance block from the same read of `fact`, no extra request) → `api.dashboard_out`
 
 **Mini App forecast**: `GET /api/forecast` → `AnalyticsService.forecast(today, card currencies)` → `month_forecast` (`fact` with `keep_unknown`, `read_plan(...).articles`, `read_forecast(...).items`; per currency `currency_forecast`: money now, plan per day by the morning reconciliation, pace of 14 days without list payments, events by the reconciliation now, the days before today by fact — evening and change of the day; total at today's rates) → `api.forecast_out`
+
+**Mini App speed**: `GET /api/dashboard|forecast|plan` take sheet copies up to `SCREEN_COPY_AGE` (120 s) old — `read_month_sheets` reads the four sheets in parallel threads; `?fresh=1` reads the table anew; answers right after a write are read anew too. Any write through gspread drops every copy (`GoogleSheetsService._written`), a read that overlapped a write is not kept
 
 **Calendar records**: the record window → `POST /api/calendar` (idempotent by `entry_id`), `PUT|DELETE /api/calendar/{id}` → `check_record` → `GoogleSheetsService.add_calendar_row|update_calendar_row|delete_calendar_row` (one write at a time — `CALENDAR_LOCK` in `bot_data`; row A:J RAW, found by ID in column A) → a fresh `forecast_out` and a note to the other user. Reading: `get_calendar()` (a copy for 60 s, reset by the bot's writes; a read during which the bot wrote is not kept) → `read_calendar` → `AnalyticsService._records()` → `month_forecast(..., records)` and `day_budget(..., records)`: `calendar_state` closes records by fact in the morning and now, `_book` reserves them in their articles, the open part goes out on its day (one-offs in both lines, repeats by plan only)
 
@@ -100,7 +102,7 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
   - Balance formula: `google_sheets.BALANCE_FORMULA` uses `INDEX(...;ROW())`, no row numbers.
   - Balance block `I2:Q…`: I = source name, J = balance by the sheet, N = bank balance («Проверка», from SMS or a screenshot), O = N − J, P = −O, Q = «Сверено» (when N was written). The bot finds the row by source name.
 - **`system` sheet**: Column A: Categories, Column B: Subcategories, Column F: Sources (last 3 chars = currency code), G: statements loaded up to this day (written by the bot), H:I currency rates to UZS.
-- **`Календарь` sheet** (created by the bot with the first record): A ID (6 chars `a–z0–9`, a letter first), B date (`ДД.ММ.ГГГГ` text — the day of a one-off or the first day of a repeat), C repeat (`нет`, `каждый день`, `по дням недели`, `раз в месяц`), D days (`пн ср`), E group, F subcategory, G currency, H sum (> 0), I name, J who. Written RAW; can be edited by hand — the bot re-reads it at least once a minute, broken rows (and a row repeating an ID above it, e.g. a copied row) are skipped with a warning in the log.
+- **`Календарь` sheet** (created by the bot with the first record): A ID (6 chars `a–z0–9`, a letter first), B date (`ДД.ММ.ГГГГ` text — the day of a one-off or the first day of a repeat), C repeat (`нет`, `каждый день`, `по дням недели`, `раз в месяц`), D days (`пн ср`), E group, F subcategory, G currency, H sum (> 0), I name, J who. Written RAW; can be edited by hand — the bot re-reads it at least once a minute (Mini App screens — within two minutes, at once on «Обновить» or a new launch), broken rows (and a row repeating an ID above it, e.g. a copied row) are skipped with a warning in the log.
 - **Monthly sheets** ("Oct 26", `domain.month_title`): plan vs fact by Subcategory + Currency (`SUMIFS` on `fact` between the dates in `M1:M2`), used by `/advice`. Created by `GoogleSheetsService.ensure_month_tab` (duplicate of the latest month, new `M1:M2`, past months hidden).
 
 ## Environment Variables

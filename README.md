@@ -149,6 +149,8 @@ On Render the bot runs as a **web service**: Render sets `RENDER_EXTERNAL_URL`, 
 
 React + TypeScript + Tailwind, built by Vite into `webapp/dist` and served by the bot at `/app/`. The page calls `/api/*` with Telegram's `initData` or — when it is opened from the keyboard button, where Telegram passes no `initData` — with the signed launch link the bot puts into the button (30 days, renewed with every cards keyboard).
 
+Screens open at once: the app keeps the answers it got and today's copy of them in the phone, shows them immediately and asks the server in the background («Обновляю…» on the button meanwhile); after «Ввод» it loads «Сводка», then «Прогноз» and the month's plan, so switching tabs does not wait. The server reads the month tab, rates, `fact` and «Календарь» at the same time and keeps a copy for two minutes; any write of the bot drops it, and a new launch and «Обновить» always read the table anew — edits made by hand in the table show up there.
+
 Home screen: set the bot's Main Mini App in @BotFather (Bot Settings → Configure Mini App → the service URL with `/app/`); the app opened from the bot profile or by `t.me/<bot>?startapp=home` gets Telegram's `initData`, and «📌 На экран телефона» on «Сводка» adds the icon (Bot API 8.0+).
 
 ```bash

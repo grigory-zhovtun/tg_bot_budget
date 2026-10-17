@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Api } from "./api";
@@ -96,5 +96,54 @@ describe("App", () => {
     expect(
       await screen.findByLabelText("есть несохранённые правки"),
     ).toBeTruthy();
+  });
+
+  it("asks the summary once for the entry tiles and the summary tab", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(<App api={api} />);
+    expect(await screen.findByText("сверх на 300 000")).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Сводка" }));
+    expect(screen.getByText("Можно сегодня")).toBeTruthy();
+    expect(api.dashboard).toHaveBeenCalledTimes(1);
+    // первое чтение запуска — по таблице заново: правки руками видны сразу
+    expect(api.dashboard).toHaveBeenCalledWith(true);
+  });
+
+  it("loads the forecast and the plan in the background", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(<App api={api} />);
+    await waitFor(() => {
+      expect(api.plan).toHaveBeenCalledWith("2026-10", false);
+    });
+    expect(api.forecast).toHaveBeenCalledWith(false);
+    await user.click(screen.getByRole("tab", { name: "Прогноз" }));
+    expect(screen.getByText("Октябрь")).toBeTruthy();
+    expect(api.forecast).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens with today's numbers from the phone while it asks for fresh ones", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-10T09:00:00"));
+    const first = render(<App api={fakeApi()} />);
+    expect(await screen.findByText("сверх на 300 000")).toBeTruthy();
+    first.unmount();
+    const waiting = () => new Promise<never>(() => undefined);
+    const user = userEvent.setup();
+    render(
+      <App
+        api={fakeApi({
+          bootstrap: vi.fn<Api["bootstrap"]>(waiting),
+          dashboard: vi.fn<Api["dashboard"]>(waiting),
+        })}
+      />,
+    );
+    // справочник и остатки на плитках — из памяти телефона, без ожидания
+    expect(screen.getByText("сверх на 300 000")).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Сводка" }));
+    expect(screen.getByText("Можно сегодня")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Обновляю…" })).toBeTruthy();
+    vi.useRealTimers();
   });
 });

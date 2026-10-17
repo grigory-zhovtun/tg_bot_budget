@@ -9,6 +9,7 @@ import {
   type Subcategory,
 } from "../api";
 import { dayLabel, shiftDay, withCurrency } from "../format";
+import { useResource, useStore } from "../store";
 import { haptic, telegram } from "../telegram";
 import {
   amountValue,
@@ -25,6 +26,8 @@ import { GroupTiles, SubTiles } from "./Tiles";
 
 const MAX_DAYS_BACK = 31;
 const CATALOG_FIELDS = ["source", "category", "subcategory"];
+// трата и её отмена меняют сводку, прогноз и факт плана
+const CHANGED_BY_WRITES = ["dashboard", "forecast", "plan:"];
 
 type Step = "group" | "sub" | "amount";
 
@@ -74,8 +77,18 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
   const [undoing, setUndoing] = useState(false);
   const inFlight = useRef(false); // второй тап до перерисовки не шлёт второй запрос
   const undoInFlight = useRef(false);
-  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
-  const planRequest = useRef(0); // поздний ответ старого запроса не затирает свежий
+  const store = useStore();
+  const loadDashboard = useCallback(
+    (fresh: boolean) => api.dashboard(fresh),
+    [api],
+  );
+  // Остаток по плану на плитках — подсказка: таблица не ответила, плитки без неё
+  const { data: dashboard, reload: reloadDashboard } = useResource<Dashboard>(
+    store,
+    "dashboard",
+    loadDashboard,
+    {},
+  );
 
   // справочник могли перечитать: карту, которой больше нет, не держим
   const source = boot.sources.some((s) => s.name === chosenSource)
@@ -90,23 +103,12 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
 
   const plan = useMemo(() => planIndex(dashboard), [dashboard]);
 
-  // Остаток по плану на плитках — подсказка: таблица не ответила, плитки без неё
+  // после записи: остатки — заново (не вышло — плитки без них), прогноз и план —
+  // при следующем открытии их вкладки
   const loadPlan = useCallback(() => {
-    const request = ++planRequest.current;
-    api.dashboard().then(
-      (next) => {
-        if (request === planRequest.current) setDashboard(next);
-      },
-      () => {
-        // старые цифры после записи врали бы — лучше без них
-        if (request === planRequest.current) setDashboard(null);
-      },
-    );
-  }, [api]);
-
-  useEffect(() => {
-    loadPlan();
-  }, [loadPlan]);
+    store.expire(CHANGED_BY_WRITES);
+    reloadDashboard();
+  }, [reloadDashboard, store]);
 
   const back = useCallback(() => {
     setError(null);

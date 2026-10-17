@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type Api } from "../api";
 import { dashboardFixture } from "../mocks/fixtures";
+import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
 import DashboardScreen from "./DashboardScreen";
 
@@ -217,5 +218,36 @@ describe("DashboardScreen", () => {
     });
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
     expect(await screen.findByText("⏳ 05 — ЗП")).toBeTruthy();
+  });
+
+  it("shows this launch's summary at once without asking again", () => {
+    const store = new Store();
+    store.put("dashboard", dashboardFixture);
+    const api = fakeApi();
+    render(
+      <StoreProvider value={store}>
+        <DashboardScreen api={api} />
+      </StoreProvider>,
+    );
+    expect(screen.getByText("Можно сегодня")).toBeTruthy();
+    expect(api.dashboard).not.toHaveBeenCalled();
+  });
+
+  it("reads the table anew on «Обновить» and keeps the numbers meanwhile", async () => {
+    const store = new Store();
+    store.put("dashboard", dashboardFixture);
+    const dashboard = vi
+      .fn<Api["dashboard"]>()
+      .mockReturnValue(new Promise(() => undefined));
+    const user = userEvent.setup();
+    render(
+      <StoreProvider value={store}>
+        <DashboardScreen api={fakeApi({ dashboard })} />
+      </StoreProvider>,
+    );
+    await user.click(screen.getByRole("button", { name: "Обновить" }));
+    expect(dashboard).toHaveBeenCalledWith(true);
+    expect(screen.getByRole("button", { name: "Обновляю…" })).toBeTruthy();
+    expect(screen.getByText("Можно сегодня")).toBeTruthy();
   });
 });
