@@ -472,22 +472,55 @@ def test_past_days_are_the_evenings_by_fact_and_the_change_of_each_day() -> None
         fact_row(date(2026, 10, 5), "💰 ДОХОДЫ", "зарплата", 2_000_000),
         fact_row(date(2026, 10, 5), "🍔 ЕДА", "кофе", 30_000),
         fact_row(date(2026, 10, 9), "🍔 ЕДА", "кафе", -50_000),  # возврат
-        fact_row(TODAY, "🍔 ЕДА", "кофе", 20_000),  # сегодня — ещё не прошёл
+        fact_row(TODAY, "🍔 ЕДА", "кофе", 20_000),  # сегодня — то, что уже было
         fact_row(date(2026, 10, 4), "🍔 ЕДА", "кафе", 70, "USD"),  # другая валюта
     ]
     past = uzs(rows).past
-    assert [day.day for day in past] == list(range(1, 15))
+    assert [day.day for day in past] == list(range(1, 16))
     evenings = {day.day: (day.evening, day.change) for day in past}
     assert evenings[1] == (9_900_000, 0)
     assert evenings[2] == (9_500_000, -400_000)
     assert evenings[5] == (11_470_000, 1_970_000)  # зарплата минус кофе
     assert evenings[9] == (11_520_000, 50_000)
     assert evenings[14] == (11_520_000, 0)
+    assert evenings[15] == (11_500_000, -20_000)  # сегодня: деньги сейчас
     # расход и доход дня — врозь, не одним числом
     moves = {day.day: (day.spent, day.earned) for day in past}
     assert moves[2] == (400_000, 0)
     assert moves[5] == (30_000, 2_000_000)
     assert moves[9] == (-50_000, 0)  # возврат уменьшает траты дня
+    assert moves[15] == (20_000, 0)
+
+
+def test_each_day_has_its_spending_and_income_by_article() -> None:
+    rows = [
+        fact_row(date(2026, 10, 2), "🍔 ЕДА", "кофе", 30_000),
+        fact_row(date(2026, 10, 2), "🍔 ЕДА", "кафе", 400_000),
+        fact_row(date(2026, 10, 2), "🍔 ЕДА", "кафе", 100_000),
+        fact_row(date(2026, 10, 2), "💰 ДОХОДЫ", "зарплата", 2_000_000),
+        fact_row(date(2026, 10, 2), "💳 СЧЕТА", "перевод", 1_000_000),
+        fact_row(date(2026, 10, 2), "💰 ДОХОДЫ", "нач остаток", 5_000),
+        fact_row(date(2026, 10, 9), "🍔 ЕДА", "кафе", -50_000),  # возврат
+        fact_row(TODAY, "🍔 ЕДА", "кофе", 20_000),
+    ]
+    past = uzs(rows).past
+    # траты — суммами по статьям, от больших; доходы — отдельно; переводы
+    # между своими картами и «нач остаток» — ни то, ни другое
+    assert [(a.group, a.subcategory, a.amount, a.income) for a in past[1].articles] == [
+        ("🍔 ЕДА", "кафе", 500_000, False),
+        ("🍔 ЕДА", "кофе", 30_000, False),
+        ("💰 ДОХОДЫ", "зарплата", 2_000_000, True),
+    ]
+    assert [(a.subcategory, a.amount) for a in past[8].articles] == [("кафе", -50_000)]
+    assert [(a.subcategory, a.amount) for a in past[14].articles] == [("кофе", 20_000)]
+    assert past[0].articles == ()
+
+
+def test_articles_of_a_day_carry_their_sum_in_sums() -> None:
+    rows = [fact_row(date(2026, 10, 4), "🍔 ЕДА", "кафе", 70, "USD")]
+    dollars = currency_forecast(facts(*rows), (), (), TODAY, "USD")
+    [cafe] = dollars.past[3].articles
+    assert (cafe.amount, cafe.uzs) == (70, 70 * 12_000)
 
 
 def test_a_transfer_between_own_cards_is_neither_spending_nor_income() -> None:
@@ -501,8 +534,8 @@ def test_a_transfer_between_own_cards_is_neither_spending_nor_income() -> None:
     assert (third.change, third.spent, third.earned) == (500_000, 0, 0)
 
 
-def test_on_the_first_day_no_day_has_passed() -> None:
-    assert uzs(today=date(2026, 10, 1)).past == ()
+def test_on_the_first_day_the_past_is_only_today() -> None:
+    assert [day.day for day in uzs(today=date(2026, 10, 1)).past] == [1]
 
 
 def test_past_days_in_total_are_every_currency_at_todays_rate() -> None:
@@ -512,8 +545,10 @@ def test_past_days_in_total_are_every_currency_at_todays_rate() -> None:
         fact_row(date(2026, 10, 3), "🍔 ЕДА", "кафе", 300_000),
     ]
     found = month_forecast(facts(*rows), (), (), TODAY, RATES, ["UZS", "USD"])
-    assert [day.day for day in found.past_uzs] == list(range(1, 15))
+    assert [day.day for day in found.past_uzs] == list(range(1, 16))
     third = found.past_uzs[2]
+    # статьи — у каждой валюты в её деньгах, у «Всего» их нет
+    assert third.articles == ()
     assert third.evening == pytest.approx(9_700_000 + 990 * 12_000)
     assert third.change == pytest.approx(-300_000 - 10 * 12_000)
     assert found.past_usd[2].evening == pytest.approx(third.evening / 12_000)

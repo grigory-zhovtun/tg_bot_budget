@@ -128,13 +128,23 @@ def test_past_days_are_in_the_answer() -> None:
     found = month_forecast(frame(spent), (), (), DAY, RATES, ["UZS", "USD"])
     body = forecast_for(found)[0].json()
     uzs = body["currencies"][0]
-    assert len(uzs["past"]) == 14  # с 1-го по вчера
+    assert len(uzs["past"]) == 15  # с 1-го по сегодня
     assert uzs["past"][2] == {
         "day": 3,
         "evening": 4_600_000,
         "change": -400_000,
         "spent": 400_000,
         "earned": 0,
+        "articles": [
+            {
+                "group": "🍔 ЕДА",
+                "subcategory": "кафе",
+                "icon": "",
+                "amount": 400_000,
+                "uzs": 400_000,
+                "income": False,
+            }
+        ],
     }
     assert body["total"]["past_uzs"][2]["evening"] == 4_600_000 + 12_000_000
     # 17 млн / 12 000 — доллары до центов
@@ -144,7 +154,19 @@ def test_past_days_are_in_the_answer() -> None:
         "change": 0,
         "spent": 0,
         "earned": 0,
+        "articles": [],
     }
+
+
+def test_articles_of_a_day_have_the_icons_of_the_catalog() -> None:
+    spent = fact_row(date(2026, 10, 3), "🍔 ЕДА", "кафе", 400_000)
+    application = make_application()
+    application.bot_data["icons"] = {"кафе": "🍽️"}
+    application.bot_data["analytics_service"] = FakeAnalytics(
+        month_forecast(frame(spent), (), (), DAY, RATES, ["UZS"])
+    )
+    body = client_for(application).get("/api/forecast", headers=auth()).json()
+    assert body["currencies"][0]["past"][2]["articles"][0]["icon"] == "🍽️"
 
 
 def test_a_currency_without_a_rate_is_outside_the_total() -> None:

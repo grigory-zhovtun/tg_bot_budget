@@ -250,12 +250,22 @@ class ForecastDayOut(ApiModel):
     pace: float  # остаток на вечер по темпу
 
 
+class DayArticleOut(ApiModel):
+    group: str
+    subcategory: str
+    icon: str
+    amount: float  # в валюте строк; трата — плюсом, возврат — минусом
+    uzs: float  # в сумах по курсу таблицы; 0 — курса нет
+    income: bool
+
+
 class ForecastPastOut(ApiModel):
     day: int
-    evening: float  # сколько было вечером по факту
+    evening: float  # сколько было вечером по факту; сегодня — сейчас
     change: float  # изменение за день: доход плюсом, расход минусом
     spent: float = 0  # траты дня по статьям расходов
     earned: float = 0  # доходы дня
+    articles: list[DayArticleOut] = []  # по статьям; у «Всего» — пусто
 
 
 class ForecastDipOut(ApiModel):

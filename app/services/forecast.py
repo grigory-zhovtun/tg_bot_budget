@@ -84,14 +84,27 @@ class Evening:
 
 
 @dataclass(frozen=True)
+class DayArticle:
+    """Статья дня по факту: сумма трат (возврат — минусом) или дохода."""
+
+    group: str
+    subcategory: str
+    amount: float  # в валюте строк
+    uzs: float  # в сумах по курсу таблицы; 0 — курса нет
+    income: bool
+
+
+@dataclass(frozen=True)
 class PastDay:
-    """Прошедший день по факту: деньги на вечер и изменение за день (доход плюсом)."""
+    """День по факту: деньги на вечер и изменение за день (доход плюсом).
+    Сегодня — то, что уже было: деньги сейчас и сегодняшние операции."""
 
     day: int
     evening: float
     change: float
     spent: float = 0.0  # траты дня по статьям расходов; возвраты вычитаются
     earned: float = 0.0  # доходы дня без «нач остаток»
+    articles: tuple[DayArticle, ...] = ()  # траты по статьям от больших, доходы
 
 
 @dataclass(frozen=True)
@@ -152,7 +165,7 @@ class CurrencyForecast:
     pace_dip: Dip | None
     records: tuple[RecordDay, ...] = ()
     articles: tuple[ArticleState, ...] = ()
-    past: tuple[PastDay, ...] = ()  # с 1-го по вчера
+    past: tuple[PastDay, ...] = ()  # с 1-го по сегодня — то, что уже было
 
 
 @dataclass(frozen=True)
@@ -203,18 +216,47 @@ def _money_now(frame: pd.DataFrame, code: str, today: date) -> float:
     return float(flow.sum())
 
 
+def _by_article(rows: pd.DataFrame, earned: bool) -> dict[date, list[DayArticle]]:
+    """Суммы статей по дням, от больших к меньшим."""
+    found: dict[date, list[DayArticle]] = {}
+    if rows.empty:
+        return found
+    sums = (
+        rows.groupby(["day", "group", "subcategory"], sort=False)[
+            ["amount", "amount_uzs"]
+        ]
+        .sum()
+        .reset_index()
+        .sort_values(["day", "amount"], ascending=[True, False], kind="stable")
+    )
+    for row in sums.itertuples(index=False):
+        found.setdefault(row.day, []).append(
+            DayArticle(
+                str(row.group),
+                str(row.subcategory),
+                float(row.amount),
+                float(row.amount_uzs),
+                earned,
+            )
+        )
+    return found
+
+
 def _past(frame: pd.DataFrame, code: str, today: date) -> tuple[PastDay, ...]:
-    """Дни месяца до сегодня: деньги на вечер, как «сейчас», их изменение за день,
-    траты и доходы дня."""
+    """Дни месяца по сегодня: деньги на вечер, как «сейчас», их изменение за день,
+    траты и доходы дня — итогом и по статьям. Сегодня — то, что уже было."""
     own = frame[frame["currency"] == code]
     flow = own["amount"].where(own["group"] == INCOME_GROUP, -own["amount"])
     by_day = flow.groupby(own["day"]).sum()
-    spent = expenses(own).groupby("day")["amount"].sum()
-    earned = income(own).groupby("day")["amount"].sum()
+    spending, incomes = expenses(own), income(own)
+    spent = spending.groupby("day")["amount"].sum()
+    earned = incomes.groupby("day")["amount"].sum()
+    spent_by = _by_article(spending, earned=False)
+    earned_by = _by_article(incomes, earned=True)
     first = today.replace(day=1)
     evening = float(by_day[by_day.index < first].sum())
     found = []
-    for number in range(1, today.day):
+    for number in range(1, today.day + 1):
         day = first.replace(day=number)
         change = float(by_day.get(day, 0.0))
         evening += change
@@ -225,6 +267,7 @@ def _past(frame: pd.DataFrame, code: str, today: date) -> tuple[PastDay, ...]:
                 change,
                 float(spent.get(day, 0.0)),
                 float(earned.get(day, 0.0)),
+                tuple(spent_by.get(day, []) + earned_by.get(day, [])),
             )
         )
     return tuple(found)
@@ -553,7 +596,7 @@ def month_forecast(
         if dollar
         else ()
     )
-    sums = [[0.0, 0.0, 0.0, 0.0] for _ in range(today.day - 1)]
+    sums = [[0.0, 0.0, 0.0, 0.0] for _ in range(today.day)]
     for line, rate in rated:
         for index, past in enumerate(line.past):
             for slot, value in enumerate(
