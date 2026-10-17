@@ -304,7 +304,7 @@ class ForecastCurrencyOut(ApiModel):
     days: list[ForecastDayOut]
     below_zero: ForecastDipsOut
     records: list[ForecastRecordOut] = []
-    past: list[ForecastPastOut] = []  # с 1-го по вчера, по факту
+    past: list[ForecastPastOut] = []  # с 1-го по сегодня: сегодня — что уже было
 
 
 class ForecastTotalOut(ApiModel):

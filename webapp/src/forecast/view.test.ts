@@ -160,6 +160,28 @@ describe("forecast view", () => {
     ).toEqual([120_000]);
   });
 
+  it("keeps to the currencies of the total in «Всего»", () => {
+    const noRubles: Forecast = {
+      ...forecastFixture,
+      currencies: forecastFixture.currencies.map((line) =>
+        line.code === "RUB" ? { ...line, in_total: false } : line,
+      ),
+    };
+    // рубли без курса не входят ни в итог дня, ни в его статьи, ни в обычные траты
+    expect(
+      dayArticles(noRubles, DEFAULT_VIEW, 14).spent.map(
+        (item) => item.currency,
+      ),
+    ).toEqual(["UZS", "UZS", "USD"]);
+    expect(ordinary(noRubles, DEFAULT_VIEW, 17)).toBe(
+      nb("обычные траты ≈ 506 000 сум (по плану)"),
+    );
+    const noRate: Forecast = { ...forecastFixture, rates: { USD: 12_000 } };
+    expect(ordinary(noRate, DEFAULT_VIEW, 17)).toBe(
+      nb("обычные траты ≈ 506 000 сум (по плану)"),
+    );
+  });
+
   it("writes a sum of an article in its currency, a refund as a refund", () => {
     const [groceries, refund] = dayArticles(forecastFixture, UZS, 9).spent;
     if (!groceries || !refund) throw new Error("fixture");

@@ -248,12 +248,14 @@ def _past(frame: pd.DataFrame, code: str, today: date) -> tuple[PastDay, ...]:
     own = frame[frame["currency"] == code]
     flow = own["amount"].where(own["group"] == INCOME_GROUP, -own["amount"])
     by_day = flow.groupby(own["day"]).sum()
-    spending, incomes = expenses(own), income(own)
+    first = today.replace(day=1)
+    # траты и статьи — только за месяц: остаток на его начало берётся из by_day
+    month = own[(own["day"] >= first) & (own["day"] <= today)]
+    spending, incomes = expenses(month), income(month)
     spent = spending.groupby("day")["amount"].sum()
     earned = incomes.groupby("day")["amount"].sum()
     spent_by = _by_article(spending, earned=False)
     earned_by = _by_article(incomes, earned=True)
-    first = today.replace(day=1)
     evening = float(by_day[by_day.index < first].sum())
     found = []
     for number in range(1, today.day + 1):

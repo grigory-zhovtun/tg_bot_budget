@@ -1,7 +1,14 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type Api, type CalendarRecord, type Forecast } from "../api";
+import {
+  ApiError,
+  type Api,
+  type CalendarRecord,
+  type DayArticle,
+  type Forecast,
+  type ForecastPast,
+} from "../api";
 import {
   bootstrapFixture,
   dashboardFixture,
@@ -14,6 +21,46 @@ import { VIEW_KEY } from "./view";
 
 function pill(day: number): HTMLElement {
   return screen.getByRole("button", { name: new RegExp(`^${day} октября`) });
+}
+
+/** Статья дня для подменённого прогноза: траты в сумах, rate — к суму. */
+function article(
+  subcategory: string,
+  amount: number,
+  group = "🍔 ЕДА",
+): DayArticle {
+  return {
+    group,
+    subcategory,
+    icon: "",
+    amount,
+    uzs: amount,
+    income: false,
+  };
+}
+
+/** Прогноз фикстуры с другим днём валюты (и тем же днём «Всего» в сумах). */
+function withPast(
+  code: string,
+  day: number,
+  change: Partial<ForecastPast>,
+): Forecast {
+  const patch = (point: ForecastPast) =>
+    point.day === day
+      ? { ...point, ...change, articles: change.articles ?? point.articles }
+      : point;
+  return {
+    ...forecastFixture,
+    currencies: forecastFixture.currencies.map((line) =>
+      line.code === code ? { ...line, past: line.past.map(patch) } : line,
+    ),
+    total: forecastFixture.total && {
+      ...forecastFixture.total,
+      past_uzs: forecastFixture.total.past_uzs.map((point) =>
+        point.day === day ? { ...patch(point), articles: [] } : point,
+      ),
+    },
+  };
 }
 
 /** Пробелы между разрядами — неразрывные, как в money(). */
@@ -542,5 +589,98 @@ describe("ForecastScreen", () => {
     });
     // лимит дня в «Сводке» учитывает записи календаря
     expect(store.get("dashboard").at).toBe(0);
+  });
+
+  it("names the group when a subcategory is in two groups that day", async () => {
+    const user = userEvent.setup();
+    const twice: Forecast = withPast("UZS", 14, {
+      articles: [
+        article("продукты", 300_000, "🍔 ЕДА"),
+        article("продукты", 150_000, "🏚️ ДОМ"),
+      ],
+    });
+    show(
+      fakeApi({ forecast: vi.fn<Api["forecast"]>().mockResolvedValue(twice) }),
+    );
+    await user.click(await screen.findByRole("radio", { name: "UZS" }));
+    await user.click(pill(14));
+    expect(screen.getByText("продукты · ЕДА")).toBeTruthy();
+    expect(screen.getByText("продукты · ДОМ")).toBeTruthy();
+  });
+
+  it("says when a day had only transfers between own cards", async () => {
+    const user = userEvent.setup();
+    const moved = withPast("UZS", 14, {
+      spent: 0,
+      earned: 0,
+      change: -1_200_000,
+      articles: [],
+    });
+    show(
+      fakeApi({ forecast: vi.fn<Api["forecast"]>().mockResolvedValue(moved) }),
+    );
+    await user.click(await screen.findByRole("radio", { name: "UZS" }));
+    await user.click(pill(14));
+    expect(screen.getByText("переводы и выравнивание")).toBeTruthy();
+    expect(screen.getByText("−1 200 000 сум")).toBeTruthy();
+    expect(screen.queryByText("движений не было")).toBeNull();
+  });
+
+  it("shows a day with only a refund as money that came back", async () => {
+    const user = userEvent.setup();
+    const back = withPast("UZS", 14, {
+      spent: -50_000,
+      change: 50_000,
+      articles: [article("кафе", -50_000)],
+    });
+    show(
+      fakeApi({ forecast: vi.fn<Api["forecast"]>().mockResolvedValue(back) }),
+    );
+    await user.click(await screen.findByRole("radio", { name: "UZS" }));
+    await user.click(pill(14));
+    expect(screen.getByText("вернули")).toBeTruthy();
+    // плюс — мятным, как «пришло», а не жёлтым трат
+    expect(screen.getByText("+50 000 сум").className).toContain("text-earned");
+  });
+
+  it("shows nothing spent today without a day's movement", async () => {
+    const quiet = withPast("UZS", 15, { spent: 0, change: 0, articles: [] });
+    show(
+      fakeApi({ forecast: vi.fn<Api["forecast"]>().mockResolvedValue(quiet) }),
+    );
+    await screen.findByText("Октябрь");
+    expect(screen.queryByText("потрачено сегодня")).toBeNull();
+    // сегодня ещё не кончился — «движений не было» рано
+    expect(screen.queryByText("движений не было")).toBeNull();
+  });
+
+  it("shows today's income in today's cell too", async () => {
+    const paid = withPast("UZS", 15, {
+      earned: 2_500_000,
+      change: 2_380_000,
+      articles: [
+        article("продукты", 120_000),
+        { ...article("аванс", 2_500_000, "💰 ДОХОДЫ"), income: true },
+      ],
+    });
+    show(
+      fakeApi({ forecast: vi.fn<Api["forecast"]>().mockResolvedValue(paid) }),
+    );
+    await screen.findByText("Октябрь");
+    expect(within(pill(15)).getByText("+2,5м")).toBeTruthy();
+    expect(pill(15).getAttribute("aria-label")).toBe(
+      nb(
+        "15 октября: вечером 33,4 млн сум, потрачено 120 000 сум, пришло 2 500 000 сум",
+      ),
+    );
+  });
+
+  it("keeps the numbers of the chosen today cell white", async () => {
+    show();
+    await screen.findByText("Октябрь");
+    expect(pill(15).getAttribute("aria-pressed")).toBe("true");
+    expect(within(pill(15)).getByText("−120к").className).not.toContain(
+      "text-spent",
+    );
   });
 });

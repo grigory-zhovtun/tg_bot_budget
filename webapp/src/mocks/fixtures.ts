@@ -588,7 +588,7 @@ export const forecastFixture: Forecast = {
       now: 6_810_000,
       per_day_plan: 470_000,
       per_day_pace: 850_000,
-      spent_today: 0,
+      spent_today: 120_000, // продукты сегодня: записью не закрыты
       in_total: true,
       events: [
         { day: 15, name: "Аванс", amount: 2_500_000, late: false },

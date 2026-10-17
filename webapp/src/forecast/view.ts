@@ -251,13 +251,19 @@ export interface ShownArticle extends DayArticle {
   currency: string;
 }
 
-/** Статьи дня в виде, каждая в своей валюте: траты от больших (по сумам) и доходы. */
+/**
+ * Статьи дня в виде, каждая в своей валюте: траты от больших (по сумам) и
+ * доходы. Во «Всего» — только валюты итога дня, как его суммы.
+ */
 export function dayArticles(
   data: Forecast,
   view: View,
   day: number,
 ): { spent: ShownArticle[]; earned: ShownArticle[] } {
-  const all = viewCurrencies(data, view).flatMap((line) =>
+  const lines = viewCurrencies(data, view).filter(
+    (line) => view.scope !== TOTAL || line.in_total,
+  );
+  const all = lines.flatMap((line) =>
     (line.past.find((point) => point.day === day)?.articles ?? []).map(
       (article) => ({ ...article, currency: line.code }),
     ),

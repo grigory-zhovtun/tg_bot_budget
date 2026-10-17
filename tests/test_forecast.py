@@ -516,6 +516,13 @@ def test_each_day_has_its_spending_and_income_by_article() -> None:
     assert past[0].articles == ()
 
 
+def test_articles_of_a_currency_without_a_rate_have_no_sum_in_sums() -> None:
+    rows = [fact_row(date(2026, 10, 4), "🍔 ЕДА", "кафе", 30, "EUR")]
+    frame = transactions_frame([FACT_HEADER, OPENING, *rows], RATES, keep_unknown=True)
+    [cafe] = currency_forecast(frame, (), (), TODAY, "EUR").past[3].articles
+    assert (cafe.amount, cafe.uzs) == (30, 0)
+
+
 def test_articles_of_a_day_carry_their_sum_in_sums() -> None:
     rows = [fact_row(date(2026, 10, 4), "🍔 ЕДА", "кафе", 70, "USD")]
     dollars = currency_forecast(facts(*rows), (), (), TODAY, "USD")

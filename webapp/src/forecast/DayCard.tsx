@@ -31,9 +31,16 @@ interface ArticlesProps {
   articles: ShownArticle[];
 }
 
-/** Статьи дня столбиком: значок и подкатегория, справа сумма в своей валюте. */
+/**
+ * Статьи дня столбиком: значок и подкатегория, справа сумма в своей валюте.
+ * Подкатегория в двух группах за день — с группой, иначе строк не различить.
+ */
 function Articles({ label, articles }: ArticlesProps) {
   if (articles.length === 0) return null;
+  const seen = articles.map((article) => article.subcategory);
+  const twice = new Set(
+    seen.filter((name, index) => seen.indexOf(name) !== index),
+  );
   return (
     <ul className="flex flex-col pl-3" aria-label={label}>
       {articles.map((article) => (
@@ -43,7 +50,11 @@ function Articles({ label, articles }: ArticlesProps) {
         >
           <span className="flex items-center gap-2">
             {article.icon && <span aria-hidden="true">{article.icon}</span>}
-            <span>{article.subcategory}</span>
+            <span>
+              {twice.has(article.subcategory)
+                ? `${article.subcategory} · ${groupTitle(article.group)}`
+                : article.subcategory}
+            </span>
           </span>
           <span className="font-semibold whitespace-nowrap">
             {articleText(article)}
@@ -61,23 +72,43 @@ interface FactsProps {
   today: boolean;
 }
 
-/** Траты и доходы дня: итог — в числах вида, по статьям — каждая в своей валюте. */
+/**
+ * Траты и доходы дня: итог — в числах вида, по статьям — каждая в своей валюте.
+ * Без трат и доходов — переводы между своими картами и выравнивание, если были.
+ */
 function DayFacts({ data, view, point, today }: FactsProps) {
   const code = viewCode(view);
   const { spent, earned } = dayArticles(data, view, point.day);
   const spending = spent.length > 0 || Math.round(point.spent) !== 0;
   const income = earned.length > 0 || Math.round(point.earned) !== 0;
   if (!spending && !income) {
+    if (Math.round(point.change) !== 0) {
+      return (
+        <p className="flex justify-between gap-2">
+          <span>переводы и выравнивание</span>
+          <span className="font-bold">{signed(point.change, code)}</span>
+        </p>
+      );
+    }
     return today ? null : <p>движений не было</p>;
   }
+  // одни возвраты: деньги вернулись — плюсом, мятным, как «пришло»
+  const back = point.spent < 0;
+  const spentLabel = back
+    ? "вернули"
+    : today
+      ? "потрачено сегодня"
+      : "потрачено";
   return (
     <>
       {spending && (
         <>
           <p className="flex justify-between gap-2">
-            <span>{today ? "потрачено сегодня" : "потрачено"}</span>
-            <span className="font-bold text-spent">
-              {point.spent < 0
+            <span>{spentLabel}</span>
+            <span
+              className={`font-bold ${back ? "text-earned" : "text-spent"}`}
+            >
+              {back
                 ? `+${amount(-point.spent, code)}`
                 : `−${amount(point.spent, code)}`}
             </span>
