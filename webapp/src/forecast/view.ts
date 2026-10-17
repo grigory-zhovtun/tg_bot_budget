@@ -285,14 +285,6 @@ export function articleText(article: ShownArticle): string {
     : amount(article.amount, article.currency);
 }
 
-/** «В день: по плану 470 000 сум, по темпу 850 000 сум.» */
-export function perDay(data: Forecast, view: View): string {
-  const shown = viewCurrencies(data, view);
-  const list = (pick: (line: ForecastCurrency) => number) =>
-    shown.map((line) => amount(pick(line), line.code)).join(" + ");
-  return `В день: по плану ${list((line) => line.per_day_plan)}, по темпу ${list((line) => line.per_day_pace)}.`;
-}
-
 /** «минус 25–29.10», «минус 25.10» (один день) или «минус с 25.10» (не вернётся). */
 export function minusRange(dip: ForecastDip, today: string): string {
   if (dip.until === null) return `минус с ${shortDate(dip.start, today)}`;

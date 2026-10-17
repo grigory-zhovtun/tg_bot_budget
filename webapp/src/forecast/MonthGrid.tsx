@@ -213,30 +213,6 @@ export default function MonthGrid({ data, view, selected, onSelect }: Props) {
           })}
         </div>
       ))}
-      <div className="mt-1 flex flex-col gap-1 text-[13px] font-semibold">
-        <p>
-          {`Остаток на вечер, ${pillUnit(code)}: прошедшие дни — по факту, в рамке; дальше — по плану`}
-        </p>
-        <ul className="flex flex-wrap gap-x-4 gap-y-1">
-          <li>
-            <b className="font-extrabold text-spent">−</b> потрачено за день
-          </li>
-          <li>
-            <b className="font-extrabold text-earned">+</b> пришло за день
-          </li>
-          <li>
-            <b className="font-extrabold text-planned">−</b> запланировано на
-            день
-          </li>
-          <li>
-            <i
-              className="inline-block size-3 rounded-sm bg-minus align-[-1px]"
-              aria-hidden="true"
-            />{" "}
-            минус на вечер
-          </li>
-        </ul>
-      </div>
     </section>
   );
 }

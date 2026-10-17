@@ -16,7 +16,6 @@ import {
   articleText,
   dayArticles,
   ordinary,
-  perDay,
   pillUnit,
   pillValue,
   storeView,
@@ -134,9 +133,6 @@ describe("forecast view", () => {
     const little = withUzs({ spent_today: 500_000 });
     expect(ordinary(little, DEFAULT_VIEW, 15)).toBe(
       nb("на обычные траты осталось ≈ 51 000 сум (по плану)"),
-    );
-    expect(perDay(forecastFixture, UZS)).toBe(
-      nb("В день: по плану 470 000 сум, по темпу 850 000 сум."),
     );
   });
 

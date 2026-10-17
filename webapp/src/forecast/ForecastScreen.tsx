@@ -15,7 +15,6 @@ import {
   hasDollars,
   fitView,
   marks,
-  perDay,
   scopes,
   shortDate,
   storeView,
@@ -25,9 +24,6 @@ import {
   warnings,
   type View,
 } from "./view";
-
-const EXPLAIN =
-  "План — остаток плана статей, разложенный по дням. Темп — средние траты за 14 дней без переводов и платежей из списка.";
 
 function Skeleton() {
   return (
@@ -207,7 +203,6 @@ function Month({
           ))}
         </ul>
       </section>
-      <p className="text-xs text-hint">{`${EXPLAIN} ${perDay(data, view)}`}</p>
     </>
   );
 }
