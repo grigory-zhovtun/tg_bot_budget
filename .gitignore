@@ -37,5 +37,5 @@ parameters.txt
 .mypy_cache/
 
 # Mini App
-webapp/node_modules/
+webapp/node_modules
 webapp/dist/
