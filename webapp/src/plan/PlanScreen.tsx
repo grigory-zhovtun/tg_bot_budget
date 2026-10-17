@@ -199,8 +199,11 @@ export default function PlanScreen({
 
   const store = useStore();
   const key = `plan:${month}`;
+  // с несохранёнными правками — таблица заново, не копия на сервере: что
+  // поменяли руками, подсветится сразу, а не ошибкой при сохранении
   const load = useCallback(
-    (fresh: boolean) => api.plan(month, fresh),
+    (fresh: boolean) =>
+      api.plan(month, fresh || changeCount(draftRef.current) > 0),
     [api, month],
   );
   // черновик с прошлого раза ложится на свежий план; что поменялось — подсветить
@@ -523,6 +526,23 @@ export default function PlanScreen({
 
   return (
     <div className="flex flex-col gap-4">
+      {error && (
+        <div
+          className="flex items-center justify-between gap-2 rounded-2xl bg-section p-3 text-sm"
+          role="alert"
+        >
+          <p>{`План не обновился: ${error}`}</p>
+          <button
+            type="button"
+            className="shrink-0 text-link"
+            onClick={() => {
+              reload();
+            }}
+          >
+            Повторить
+          </button>
+        </div>
+      )}
       {restored && count > 0 && (
         <div
           className="flex flex-col gap-2 rounded-2xl bg-section p-3 text-sm"

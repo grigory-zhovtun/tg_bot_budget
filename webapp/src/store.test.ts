@@ -1,5 +1,6 @@
+import { act, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CACHE_KEY, FRESH_MS, Store } from "./store";
+import { CACHE_KEY, FRESH_MS, phoneStorage, Store, useResource } from "./store";
 
 const TODAY = "2026-10-17";
 
@@ -168,6 +169,36 @@ describe("Store", () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
+  it("does not hand the screen an answer the cache dropped", async () => {
+    const store = new Store();
+    const old = deferred<object>();
+    const load = () => old.promise;
+    const onAnswer = vi.fn();
+    renderHook(() =>
+      useResource(store, "plan:2026-10", load, { always: true, onAnswer }),
+    );
+    // сохранили план, пока шёл запрос открытия: ответ сохранения новее
+    act(() => {
+      store.put("plan:2026-10", answer(2));
+    });
+    await act(async () => {
+      old.resolve(answer(1));
+      await settle();
+    });
+    expect(onAnswer).not.toHaveBeenCalled();
+    expect(store.get("plan:2026-10").data).toEqual(answer(2));
+  });
+
+  it("forgets everything when the user is not recognised", () => {
+    const store = new Store();
+    store.put("dashboard", answer(1));
+    const listener = vi.fn();
+    store.subscribe("dashboard", listener);
+    store.forget();
+    expect(store.get("dashboard").data).toBeNull();
+    expect(listener).toHaveBeenCalled();
+  });
+
   it("tells the screen when its key changes", () => {
     const store = new Store();
     const forecast = vi.fn();
@@ -209,6 +240,7 @@ describe("Store on the phone", () => {
     ["another day", { ...options, today: "2026-10-18" }],
     ["another build", { ...options, build: "b2" }],
     ["another user", { ...options, user: 8 }],
+    ["an unknown user", { ...options, user: null }],
   ])("forgets answers of %s", (_, other) => {
     new Store(options).put("dashboard", answer(1));
     expect(new Store(other).get("dashboard").data).toBeNull();
@@ -221,6 +253,34 @@ describe("Store on the phone", () => {
     const next = new Store(options);
     expect(next.get("dashboard").data).toBeNull();
     expect(next.get("forecast").data).toEqual(answer(2));
+  });
+
+  it("does not keep numbers a write has made doubtful", () => {
+    const store = new Store(options);
+    store.put("dashboard", answer(1));
+    store.put("forecast", answer(2));
+    store.expire(["forecast"]);
+    store.put("dashboard", answer(3)); // сводку обновили, прогноз — ещё нет
+    const next = new Store(options);
+    expect(next.get("dashboard").data).toEqual(answer(3));
+    expect(next.get("forecast").data).toBeNull();
+  });
+
+  it("removes the copy from the phone when it forgets", () => {
+    const store = new Store(options);
+    store.put("dashboard", answer(1));
+    store.forget();
+    expect(localStorage.getItem(CACHE_KEY)).toBeNull();
+  });
+
+  it("does without the phone memory when the browser closes it", () => {
+    const closed = vi
+      .spyOn(window, "localStorage", "get")
+      .mockImplementation(() => {
+        throw new Error("denied");
+      });
+    expect(phoneStorage()).toBeNull();
+    closed.mockRestore();
   });
 
   it("ignores a damaged copy", () => {
