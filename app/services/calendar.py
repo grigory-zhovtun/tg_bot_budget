@@ -73,6 +73,9 @@ class Occurrence:
     morning: float  # без сегодняшних операций — для резерва статьи
     now: float  # с ними — события прогноза и суммы на экране; 0 — закрыто
     covered: float  # сегодня: засчитано из трат статьи; в другие дни 0
+    # сколько потрачено на самом деле: платёж, закрывший разовую запись, или
+    # сегодня — её доля трат статьи (с перерасходом); иначе 0
+    spent: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -318,14 +321,22 @@ def calendar_state(
         morning_open = 0.0 if record.id in morning else record.amount
         for day in days[record.id]:
             if record.id in now:
-                found.append(Occurrence(record, day, morning_open, 0.0, 0.0))
+                paid = float(spent.loc[now[record.id], "amount"])
+                found.append(Occurrence(record, day, morning_open, 0.0, 0.0, paid))
             elif day != today:
                 found.append(Occurrence(record, day, morning_open, record.amount, 0.0))
             else:
-                part = share.get((record.subcategory, record.currency), 0.0)
+                article = (record.subcategory, record.currency)
+                part = share.get(article, 0.0)
                 covered = record.amount * part
                 left = 0.0 if part >= DONE_SHARE else record.amount - covered
-                found.append(Occurrence(record, day, morning_open, left, covered))
+                # траты статьи за сегодня — между её записями по их суммам
+                really = float(spent_today.get(article, 0.0)) * (
+                    record.amount / due[article] if due.get(article) else 0.0
+                )
+                found.append(
+                    Occurrence(record, day, morning_open, left, covered, really)
+                )
     found.sort(key=lambda item: (item.day, item.record.start, item.record.id))
     return CalendarState(tuple(found), frozenset(morning.values()), closed_now)
 

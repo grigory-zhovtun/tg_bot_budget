@@ -225,7 +225,8 @@ export default function MonthGrid({ data, view, selected, onSelect }: Props) {
             <b className="font-extrabold text-earned">+</b> пришло за день
           </li>
           <li>
-            <b className="font-extrabold text-planned">−</b> запись на день
+            <b className="font-extrabold text-planned">−</b> запланировано на
+            день
           </li>
           <li>
             <i

@@ -567,6 +567,7 @@ function occurrences(record: CalendarRecord, days: number[]): ForecastRecord[] {
     open: record.amount,
     done: false,
     over: record.over,
+    spent: 0,
   }));
 }
 

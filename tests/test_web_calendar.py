@@ -152,7 +152,7 @@ def test_a_new_record_is_written_and_the_forecast_comes_back() -> None:
     assert uzs["records"] == [
         {"id": written[0], "day": TODAY.day, "name": "Детский центр", "group": "🍔 ЕДА",
          "subcategory": "кафе", "repeat": "once", "amount": 320000, "open": 320000,
-         "done": False, "over": True}
+         "done": False, "over": True, "spent": 0}
     ]  # fmt: skip
     note = application.bot.send_message.await_args.kwargs
     assert note["chat_id"] == WIFE

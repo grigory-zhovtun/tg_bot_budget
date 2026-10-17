@@ -211,6 +211,7 @@ export interface ForecastRecord {
   open: number;
   done: boolean; // закрыта фактом: open 0
   over: boolean; // записей статьи больше её остатка
+  spent: number; // потрачено на самом деле: закрывший платёж или доля трат статьи
 }
 
 export interface ForecastCurrency {

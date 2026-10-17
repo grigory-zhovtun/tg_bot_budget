@@ -209,6 +209,31 @@ def test_todays_spending_covers_todays_records() -> None:
     assert (more.now, more.covered) == (0, 30_000)
 
 
+def test_an_occurrence_knows_what_was_really_spent() -> None:
+    coffee = record("daily", date(2026, 10, 1), 50_000, "кофе", "m3a9zt")
+    more = state([fact_row(TODAY, "🍔 ЕДА", "кофе", 150_000)], [coffee])
+    # запланировали 50 000, потратили 150 000: запись закрыта, потрачено — по факту
+    assert (more.occurrences[0].now, more.occurrences[0].spent) == (0, 150_000)
+    assert more.occurrences[1].spent == 0  # завтра — ещё ничего
+    assert state([], [coffee]).occurrences[0].spent == 0
+    # две записи одной статьи делят её траты дня по своим суммам
+    tea = record("daily", date(2026, 10, 1), 30_000, "кофе", "t3a0aa")
+    both = state([fact_row(TODAY, "🍔 ЕДА", "кофе", 160_000)], [coffee, tea])
+    spent = {o.record.id: o.spent for o in both.occurrences if o.day == TODAY}
+    assert spent == {
+        "m3a9zt": pytest.approx(100_000),
+        "t3a0aa": pytest.approx(60_000),
+    }
+
+
+def test_a_one_off_closed_by_a_payment_shows_that_payment() -> None:
+    found = state(
+        [fact_row(TODAY, "👶 ДЕТИ", "развитие", 300_000)], [record(start=TODAY)]
+    )
+    # 300 000 закрыли запись на 320 000 (в пределах 10 %) — потрачено 300 000
+    assert (found.occurrences[0].now, found.occurrences[0].spent) == (0, 300_000)
+
+
 def test_a_one_off_paid_today_is_open_in_the_morning_and_closed_now() -> None:
     found = state(
         [fact_row(TODAY, "👶 ДЕТИ", "развитие", 320_000)], [record(start=TODAY)]

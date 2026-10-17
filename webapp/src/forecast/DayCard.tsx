@@ -233,10 +233,18 @@ export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
       {usual && <p className="text-sm text-hint">{usual}</p>}
       {records.length > 0 && (
         <div className="mt-2 flex flex-col">
-          <h3 className="text-sm font-semibold text-hint">Записи на день</h3>
+          <h3 className="text-sm font-semibold text-hint">
+            Запланировано на день
+          </h3>
           <ul className="flex flex-col">
             {records.map((record) => {
               const rule = data.calendar.find((item) => item.id === record.id);
+              // закрыта фактом: «потрачено» — сколько на самом деле, а не по плану
+              const spent = record.spent > 0 ? record.spent : record.amount;
+              const differs =
+                record.done &&
+                record.spent > 0 &&
+                Math.round(record.spent) !== Math.round(record.amount);
               return (
                 <li key={`${record.currency}-${record.id}`}>
                   <button
@@ -269,6 +277,10 @@ export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
                           rule
                             ? ruleText(rule.repeat, rule.weekdays, rule.date)
                             : REPEAT_NAMES[record.repeat].toLowerCase()
+                        }${
+                          differs
+                            ? ` · по плану ${amount(record.amount, record.currency)}`
+                            : ""
                         }`}
                       </span>
                     </span>
@@ -280,7 +292,7 @@ export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
                       }
                     >
                       {record.done
-                        ? `✓ потрачено ${amount(record.amount, record.currency)}`
+                        ? `✓ потрачено ${amount(spent, record.currency)}`
                         : signed(-record.open, record.currency)}
                     </span>
                   </button>
