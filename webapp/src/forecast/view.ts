@@ -222,7 +222,8 @@ function inView(
 
 /**
  * Строка обычных трат дня по плану в числах вида: «обычные траты ≈ 470 000 сум
- * (по плану)». Сегодня — сколько от них осталось или что они уже потрачены.
+ * (по плану)». Сегодня — сколько от них осталось или что они уже потрачены;
+ * во «Всего» — чистым остатком: перерасход сумов не прячется за остатком рублей.
  */
 export function ordinary(
   data: Forecast,
@@ -236,8 +237,10 @@ export function ordinary(
       ? `обычные траты ≈ ${amount(planned, code)} (по плану)`
       : null;
   }
-  const left = inView(data, view, (line) =>
-    Math.max(line.per_day_plan - line.spent_today, 0),
+  const left = inView(
+    data,
+    view,
+    (line) => line.per_day_plan - line.spent_today,
   );
   if (Math.round(left) > 0) {
     return `на обычные траты осталось ≈ ${amount(left, code)} (по плану)`;

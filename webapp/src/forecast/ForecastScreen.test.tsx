@@ -123,7 +123,7 @@ describe("ForecastScreen", () => {
     ).toBeTruthy();
     expect(screen.getByText("потрачено за день")).toBeTruthy();
     expect(screen.getByText("пришло за день")).toBeTruthy();
-    expect(screen.getByText("запись на день")).toBeTruthy();
+    expect(screen.getByText("запланировано на день")).toBeTruthy();
     expect(screen.getByText("минус на вечер")).toBeTruthy();
   });
 
@@ -225,7 +225,7 @@ describe("ForecastScreen", () => {
     await user.click(pill(16));
     const card = screen.getByText("Пятница, 16 октября").closest("section");
     if (!card) throw new Error("no day card");
-    expect(within(card).getByText("Записи на день")).toBeTruthy();
+    expect(within(card).getByText("Запланировано на день")).toBeTruthy();
     expect(within(card).getByText("ЕДА / кафе · пт")).toBeTruthy();
     expect(within(card).getByText("−150 000 сум")).toBeTruthy();
     expect(within(card).getByText("ЕДА / кофе · каждый день")).toBeTruthy();
@@ -243,14 +243,39 @@ describe("ForecastScreen", () => {
       currencies: forecastFixture.currencies.map((line) => ({
         ...line,
         records: line.records.map((record) =>
-          record.day === 15 ? { ...record, open: 0, done: true } : record,
+          record.day === 15
+            ? { ...record, open: 0, done: true, spent: 30_000 }
+            : record,
         ),
       })),
     };
     const forecast = vi.fn<Api["forecast"]>().mockResolvedValue(paid);
     show(fakeApi({ forecast }));
     expect(await screen.findByText("✓ потрачено 30 000 сум")).toBeTruthy();
+    // потрачено ровно по плану — «по плану» не повторяем
+    expect(screen.getByText("ЕДА / кофе · каждый день")).toBeTruthy();
     expect(within(pill(15)).queryByText("−30к")).toBeNull();
+  });
+
+  it("shows what was really spent on a record and its plan", async () => {
+    // запланировали 30 000 на кофе, потратили 90 000: «потрачено» — по факту
+    const more: Forecast = {
+      ...forecastFixture,
+      currencies: forecastFixture.currencies.map((line) => ({
+        ...line,
+        records: line.records.map((record) =>
+          record.day === 15
+            ? { ...record, open: 0, done: true, spent: 90_000 }
+            : record,
+        ),
+      })),
+    };
+    const forecast = vi.fn<Api["forecast"]>().mockResolvedValue(more);
+    show(fakeApi({ forecast }));
+    expect(await screen.findByText("✓ потрачено 90 000 сум")).toBeTruthy();
+    expect(
+      screen.getByText("ЕДА / кофе · каждый день · по плану 30 000 сум"),
+    ).toBeTruthy();
   });
 
   it("warns when the pace takes the sums below zero", async () => {

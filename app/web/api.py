@@ -546,6 +546,7 @@ def _records_out(records: Sequence[Any], code: str) -> list[ForecastRecordOut]:
                 open=left,
                 done=left == 0,
                 over=day.over,
+                spent=_rounded(day.spent, code),
             )
         )
     return found

@@ -128,6 +128,7 @@ class RecordDay:
     amount: float  # сумма записи
     open: float  # открыто на сейчас; 0 — закрыта фактом
     over: bool  # записей статьи больше её остатка
+    spent: float = 0.0  # сколько потрачено на самом деле (Occurrence.spent)
 
 
 @dataclass(frozen=True)
@@ -508,6 +509,7 @@ def currency_forecast(
                 item.record.amount,
                 item.now,
                 item.record.subcategory in over,
+                item.spent,
             )
             for item in state.occurrences
         ),

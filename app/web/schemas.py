@@ -291,6 +291,9 @@ class ForecastRecordOut(ApiModel):
     open: float
     done: bool
     over: bool  # записей статьи больше её остатка
+    # сколько потрачено на самом деле: платёж, закрывший разовую запись, или
+    # сегодня — её доля трат статьи; иначе 0
+    spent: float = 0
 
 
 class ForecastCurrencyOut(ApiModel):
