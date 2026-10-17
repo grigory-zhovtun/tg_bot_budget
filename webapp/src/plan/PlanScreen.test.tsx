@@ -10,6 +10,7 @@ import {
   type PlanArticle,
 } from "../api";
 import { adviceFixture, nextPlanFixture, planFixture } from "../mocks/fixtures";
+import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
 import { editRow, emptyDraft, type Draft } from "./draft";
 import PlanScreen from "./PlanScreen";
@@ -590,5 +591,72 @@ describe("PlanScreen", () => {
     render(<Harness api={fakeApi({ plan })} />);
     expect(await screen.findByText("✓ пришло 5,00 млн · 15.10")).toBeTruthy();
     expect(screen.getByText("⏳ ждём с 18.10")).toBeTruthy();
+  });
+
+  it("shows the copy of the plan at once while it asks the sheet", () => {
+    const store = new Store();
+    store.put("plan:2026-10", planFixture);
+    const plan = vi
+      .fn<Api["plan"]>()
+      .mockReturnValue(new Promise(() => undefined));
+    render(
+      <StoreProvider value={store}>
+        <Harness api={fakeApi({ plan })} />
+      </StoreProvider>,
+    );
+    expect(screen.getByText("Свободно")).toBeTruthy();
+    // черновик ложится на свежий план, поэтому сервер спрашивается всегда
+    expect(plan).toHaveBeenCalledTimes(1);
+  });
+
+  it("after a save the summary and the forecast are asked again", async () => {
+    const store = new Store();
+    store.put("dashboard", { today: "2026-10-10" });
+    store.put("forecast", { today: "2026-10-10" });
+    const user = userEvent.setup();
+    render(
+      <StoreProvider value={store}>
+        <Harness api={fakeApi()} initial={EDITED} />
+      </StoreProvider>,
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Сохранить 1 изменение" }),
+    );
+    expect(await screen.findByText(/План сохранён/)).toBeTruthy();
+    expect(store.get("dashboard").at).toBe(0);
+    expect(store.get("forecast").at).toBe(0);
+  });
+
+  it("says the plan could not be refreshed when it shows a copy", async () => {
+    const store = new Store();
+    store.put("plan:2026-10", planFixture);
+    const plan = vi
+      .fn<Api["plan"]>()
+      .mockRejectedValue(
+        new ApiError(503, "sheets_unavailable", "Таблица не ответила"),
+      );
+    render(
+      <StoreProvider value={store}>
+        <Harness api={fakeApi({ plan })} />
+      </StoreProvider>,
+    );
+    expect(screen.getByText("Свободно")).toBeTruthy();
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Таблица не ответила",
+    );
+  });
+
+  it("reads the sheet anew when there are unsaved edits", async () => {
+    const store = new Store();
+    // первое чтение запуска уже было — дальше копия на сервере
+    await store.fetch("dashboard", () => Promise.resolve({}));
+    const api = fakeApi();
+    render(
+      <StoreProvider value={store}>
+        <Harness api={api} initial={EDITED} />
+      </StoreProvider>,
+    );
+    // правки ложатся на план без копии: что поменяли руками — подсветится сразу
+    expect(api.plan).toHaveBeenCalledWith("2026-10", true);
   });
 });

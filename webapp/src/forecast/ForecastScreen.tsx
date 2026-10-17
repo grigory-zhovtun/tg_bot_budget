@@ -1,30 +1,25 @@
-import { useCallback, useEffect, useState } from "react";
-import {
-  ApiError,
-  type Api,
-  type Bootstrap,
-  type CalendarRecord,
-  type Forecast,
-} from "../api";
+import { useCallback, useState } from "react";
+import type { Api, Bootstrap, CalendarRecord, Forecast } from "../api";
+import { useResource, useStore } from "../store";
 import DayCard from "./DayCard";
 import ForecastChart from "./ForecastChart";
 import MonthGrid from "./MonthGrid";
 import RecordSheet from "./RecordSheet";
 import RecordsList from "./RecordsList";
 import {
-  DEFAULT_VIEW,
   TOTAL,
   amount,
   chartNote,
   currencyRows,
   dayOf,
   hasDollars,
-  loadView,
+  fitView,
   marks,
   perDay,
   scopes,
   shortDate,
   storeView,
+  storedView,
   viewCode,
   viewDays,
   warnings,
@@ -228,52 +223,37 @@ interface Props {
 }
 
 export default function ForecastScreen({ api, boot }: Props) {
-  const [data, setData] = useState<Forecast | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [version, setVersion] = useState(0);
-  const [view, setView] = useState<View>(DEFAULT_VIEW);
+  const store = useStore();
+  const load = useCallback((fresh: boolean) => api.forecast(fresh), [api]);
+  const { data, loading, error, reload } = useResource<Forecast>(
+    store,
+    "forecast",
+    load,
+    { failure: "Не получилось загрузить прогноз" },
+  );
+  const [chosen, setChosen] = useState<View>(storedView);
   const [selected, setSelected] = useState<number | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
+  const view = data ? fitView(chosen, data) : chosen;
 
-  useEffect(() => {
-    let alive = true;
-    api.forecast().then(
-      (result) => {
-        if (!alive) return;
-        setData(result);
-        setView(loadView(result));
-        setError(null);
-        setLoading(false);
-      },
-      (reason: unknown) => {
-        if (!alive) return;
-        setError(
-          reason instanceof ApiError
-            ? reason.message
-            : "Не получилось загрузить прогноз",
-        );
-        setLoading(false);
-      },
-    );
-    return () => {
-      alive = false;
-    };
-  }, [api, version]);
-
+  // «Обновить» читает таблицу заново, а не копию листов на сервере
   const refresh = useCallback(() => {
-    setLoading(true);
-    setVersion((current) => current + 1);
-  }, []);
+    reload(true);
+  }, [reload]);
   const changeView = useCallback((next: View) => {
-    setView(next);
+    setChosen(next);
     storeView(next);
   }, []);
   const day = data ? shownDay(data, selected) : 0;
-  const saved = useCallback((fresh: Forecast) => {
-    setData(fresh);
-    setEditing(null);
-  }, []);
+  const saved = useCallback(
+    (fresh: Forecast) => {
+      store.put("forecast", fresh);
+      // лимит дня в «Сводке» учитывает записи календаря
+      store.expire(["dashboard"]);
+      setEditing(null);
+    },
+    [store],
+  );
   const add = useCallback((on: number) => {
     setEditing({ record: null, day: on });
   }, []);
@@ -297,7 +277,7 @@ export default function ForecastScreen({ api, boot }: Props) {
           disabled={loading}
           onClick={refresh}
         >
-          Обновить
+          {loading ? "Обновляю…" : "Обновить"}
         </button>
       </div>
       {loading && !data && <Skeleton />}

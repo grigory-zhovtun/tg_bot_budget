@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Api } from "../api";
 import { fakeApi } from "../test/fakeApi";
 import { emptyDraft, type Draft } from "./draft";
@@ -34,7 +34,7 @@ describe("PlanTab", () => {
     expect(await screen.findByText("Свободно")).toBeTruthy();
     await user.click(screen.getByRole("radio", { name: "Ноябрь" }));
     expect(await screen.findByText("Плана на ноябрь ещё нет")).toBeTruthy();
-    expect(api.plan).toHaveBeenLastCalledWith("2026-11");
+    expect(vi.mocked(api.plan).mock.lastCall?.[0]).toBe("2026-11");
   });
 
   it("keeps the drafts of the two months apart", async () => {

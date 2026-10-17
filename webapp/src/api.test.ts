@@ -3,11 +3,22 @@ import {
   ApiError,
   api,
   authHeader,
+  launchUser,
   planConflict,
   REQUEST_TIMEOUT_MS,
   request,
 } from "./api";
 import { planFixture } from "./mocks/fixtures";
+
+describe("launchUser", () => {
+  it("takes the user id from the launch link of the keyboard button", () => {
+    expect(launchUser("?launch=42.1792214894.sig")).toBe(42);
+  });
+  it("has no user without the link or with a broken one", () => {
+    expect(launchUser("")).toBeNull();
+    expect(launchUser("?launch=abc.1.sig")).toBeNull();
+  });
+});
 
 describe("authHeader", () => {
   it("prefers Telegram initData", () => {
@@ -189,5 +200,30 @@ describe("request", () => {
     expect(planConflict(new ApiError(503, "sheets_unavailable", "нет"))).toBe(
       null,
     );
+  });
+});
+
+describe("screens", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("ask the server to read the table anew only when told to", async () => {
+    const fetch = vi
+      .fn()
+      .mockImplementation(() => Promise.resolve(new Response("{}")));
+    vi.stubGlobal("fetch", fetch);
+    await api.dashboard();
+    await api.dashboard(true);
+    await api.forecast(true);
+    await api.plan("2026-10");
+    await api.plan("2026-10", true);
+    expect(fetch.mock.calls.map(([url]) => url as string)).toEqual([
+      "/api/dashboard",
+      "/api/dashboard?fresh=1",
+      "/api/forecast?fresh=1",
+      "/api/plan?month=2026-10",
+      "/api/plan?month=2026-10&fresh=1",
+    ]);
   });
 });

@@ -102,8 +102,10 @@ class CalendarAnalytics:
 
     def __init__(self, sheets: CalendarSheets) -> None:
         self.sheets = sheets
+        self.ages: list[float] = []
 
-    def forecast(self, today: date, currencies: Any) -> Any:
+    def forecast(self, today: date, currencies: Any, max_age: float = 0.0) -> Any:
+        self.ages.append(max_age)
         records = read_calendar(self.sheets.get_calendar())
         return month_forecast(frame(), (), (), today, RATES, currencies, records)
 
@@ -157,6 +159,12 @@ def test_a_new_record_is_written_and_the_forecast_comes_back() -> None:
     assert note["text"] == (
         f"📅 Иван — новая запись: {TODAY:%d.%m} Детский центр 320 000 UZS (ЕДА / кафе)"
     )
+
+
+def test_after_a_change_the_forecast_is_read_afresh() -> None:
+    application, _ = setup()
+    client_for(application).post("/api/calendar", json=body(), headers=auth())
+    assert application.bot_data["analytics_service"].ages == [0]
 
 
 def test_without_a_name_the_note_still_goes() -> None:

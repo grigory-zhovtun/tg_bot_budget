@@ -420,6 +420,13 @@ export function authHeader(initData: string, search: string): string | null {
   return launch ? `Launch ${launch}` : null;
 }
 
+/** id пользователя из ссылки кнопки «📱 Приложение» («<id>.<время>.<подпись>»).
+ * Без проверки подписи — только чтобы не показать чужую копию данных. */
+export function launchUser(search: string): number | null {
+  const id = new URLSearchParams(search).get("launch")?.split(".")[0] ?? "";
+  return /^\d+$/.test(id) ? Number(id) : null;
+}
+
 interface ErrorBody {
   error: { code: string; message: string; fields?: Record<string, string> };
 }
@@ -509,6 +516,11 @@ export function planConflict(error: unknown): PlanConflict | null {
   };
 }
 
+/** «?fresh=1» — сервер читает таблицу заново, а не берёт копию листов. */
+function fresh(read: boolean, joiner = "?"): string {
+  return read ? `${joiner}fresh=1` : "";
+}
+
 export const api = {
   bootstrap: () => request<Bootstrap>("/bootstrap"),
   addExpense: (entry: ExpenseInput) =>
@@ -517,8 +529,8 @@ export const api = {
       body: JSON.stringify(entry),
     }),
   undo: () => request<UndoResult>("/expenses/undo", { method: "POST" }),
-  dashboard: () => request<Dashboard>("/dashboard"),
-  forecast: () => request<Forecast>("/forecast"),
+  dashboard: (read = false) => request<Dashboard>(`/dashboard${fresh(read)}`),
+  forecast: (read = false) => request<Forecast>(`/forecast${fresh(read)}`),
   addRecord: (input: RecordInput) =>
     request<Forecast>("/calendar", {
       method: "POST",
@@ -533,8 +545,10 @@ export const api = {
     request<Forecast>(`/calendar/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
-  plan: (month: string) =>
-    request<MonthPlan>(`/plan?month=${encodeURIComponent(month)}`),
+  plan: (month: string, read = false) =>
+    request<MonthPlan>(
+      `/plan?month=${encodeURIComponent(month)}${fresh(read, "&")}`,
+    ),
   savePlan: (input: PlanSave) =>
     request<MonthPlan>("/plan", {
       method: "POST",

@@ -59,6 +59,10 @@ def make_service(ws: FakeWorksheet) -> GoogleSheetsService:
     service.sheet = FakeSpreadsheet(ws)
     service._worksheets = {}
     service._balance_cells = None
+    service._calendar = None
+    service._values = {}
+    service._rates = None
+    service._generation = 0
     service.reconnects = 0
 
     def reconnect() -> None:
@@ -495,7 +499,9 @@ def test_requests_to_google_have_a_timeout(monkeypatch: pytest.MonkeyPatch) -> N
         "from_service_account_info",
         lambda info, scopes: object(),
     )
-    monkeypatch.setattr(google_sheets.gspread, "authorize", lambda creds: client)
+    monkeypatch.setattr(
+        google_sheets.gspread, "authorize", lambda creds, http_client: client
+    )
     GoogleSheetsService()
     # без таймаута зависший запрос к Google ждёт бесконечно и ничего не пишет в лог
     assert client.timeout == google_sheets.SHEETS_TIMEOUT == (10, 60)

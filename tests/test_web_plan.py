@@ -104,7 +104,7 @@ def test_other_months_are_refused(month: str) -> None:
 
 def test_plan_sheet_failure_is_503() -> None:
     class Broken(PlanSheets):
-        def get_values(self, name: str) -> list[list[Any]]:
+        def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
             raise ConnectionError("Google is down")
 
     response = get_plan(Broken({}))
@@ -171,6 +171,13 @@ def test_save_writes_the_cells_and_answers_with_the_fresh_plan() -> None:
     body = response.json()
     assert (body["saved"], body["rows"][0]["plan"]) == (1, 1_800_000)
     assert sheets.writes == [[{"range": f"'{TITLE}'!D2", "values": [[-1_800_000.0]]}]]
+
+
+def test_after_a_save_the_plan_is_read_afresh() -> None:
+    sheets = sheets_with()
+    assert post_plan(plan_app(sheets), change()).status_code == 200
+    # проверка перед записью и ответ после неё — по таблице, не по копии
+    assert set(sheets.ages) == {0}
 
 
 CAFE = {"group": "🍔 ЕДА", "subcategory": "кафе", "currency": "UZS", "plan": "700000"}
@@ -653,3 +660,13 @@ def test_the_next_month_has_nothing_received_yet(
     body = get_plan(sheets, month="2026-11").json()
     assert {e["status"] for e in body["events"]} == {"future"}
     assert {e["received"] for e in body["events"]} == {None}
+
+
+def test_the_plan_screen_takes_copies_unless_asked_to_refresh() -> None:
+    sheets = sheets_with()
+    client = client_for(make_application(sheets))
+    client.get(f"/api/plan?month={MONTH}", headers=auth())
+    assert set(sheets.ages) == {web_api.SCREEN_COPY_AGE}
+    sheets.ages.clear()
+    client.get(f"/api/plan?month={MONTH}&fresh=1", headers=auth())
+    assert set(sheets.ages) == {0}

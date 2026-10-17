@@ -143,6 +143,10 @@ CALENDAR_ENTRIES = "calendar_entries"  # user_data: entry_id уже записа
 ENTRY_LIMIT = 200
 # Обе модели с повторами — до двух минут; приложение ждёт советника 100 с
 ADVICE_SECONDS = 60
+# секунд: экраны Mini App считаются из копии листов не старше — переход между
+# вкладками не ждёт Google. Запись бота копии сбрасывает, а ?fresh=1 («Обновить»
+# и первое открытие приложения) читает таблицу заново
+SCREEN_COPY_AGE = 120.0
 
 
 def error_response(
@@ -196,6 +200,11 @@ def groups_out(bot_data: dict[str, Any]) -> list[GroupOut]:
         ]
         groups.append(GroupOut(name=name, emoji=emoji, title=title, subcategories=subs))
     return groups
+
+
+def screen_age(request: Request) -> float:
+    """Сколько секунд может быть копии листов: ?fresh=1 — нисколько."""
+    return 0.0 if request.query_params.get("fresh") == "1" else SCREEN_COPY_AGE
 
 
 def check_entry(entry: ExpenseIn, bot_data: dict[str, Any], today: date) -> set[str]:
@@ -884,21 +893,24 @@ def routes(application: Application) -> list[Route]:
         today = local_today(config.ANALYTICS_TIMEZONE)
         analytics = application.bot_data["analytics_service"]
         try:
-            found = await asyncio.to_thread(analytics.dashboard, today)
+            found = await asyncio.to_thread(
+                analytics.dashboard, today, screen_age(request)
+            )
         except Exception:
             logger.exception("Dashboard failed for user_id=%s", user.id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
         icons: dict[str, str] = application.bot_data.get("icons", {})
         return JSONResponse(dashboard_out(found, today, icons).model_dump(mode="json"))
 
-    async def fresh_forecast(user_id: int) -> JSONResponse:
+    async def fresh_forecast(user_id: int, max_age: float = 0.0) -> JSONResponse:
+        """Прогноз ответом: после записи — по таблице заново, экрану — из копии."""
         today = local_today(config.ANALYTICS_TIMEZONE)
         analytics = application.bot_data["analytics_service"]
         sources: list[str] = application.bot_data.get("sources", [])
         # валюты карт бота; без справочника карт — хотя бы сумы
         codes = [currency_of(source) for source in sources] or ["UZS"]
         try:
-            found = await asyncio.to_thread(analytics.forecast, today, codes)
+            found = await asyncio.to_thread(analytics.forecast, today, codes, max_age)
         except Exception:
             logger.exception("Forecast failed for user_id=%s", user_id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
@@ -906,7 +918,7 @@ def routes(application: Application) -> list[Route]:
 
     async def forecast(request: Request) -> JSONResponse:
         user = current_user(request)
-        return await fresh_forecast(user.id)
+        return await fresh_forecast(user.id, screen_age(request))
 
     async def calendar_body(request: Request) -> CalendarIn | JSONResponse:
         try:
@@ -1022,7 +1034,9 @@ def routes(application: Application) -> list[Route]:
             return validation_error({"month"})
         gs = application.bot_data["gs_service"]
         try:
-            loaded = await asyncio.to_thread(load_plan, gs, month_title(first), today)
+            loaded = await asyncio.to_thread(
+                load_plan, gs, month_title(first), today, screen_age(request)
+            )
         except Exception:
             logger.exception("Plan failed for user_id=%s", user.id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)

@@ -1,9 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type Api } from "./api";
+import { ApiError, type Api, type Dashboard } from "./api";
 import App from "./App";
-import { planFixture } from "./mocks/fixtures";
+import { dashboardFixture, planFixture } from "./mocks/fixtures";
+import { CACHE_KEY } from "./store";
 import { editRow, emptyDraft } from "./plan/draft";
 import { fakeApi } from "./test/fakeApi";
 
@@ -96,5 +97,108 @@ describe("App", () => {
     expect(
       await screen.findByLabelText("есть несохранённые правки"),
     ).toBeTruthy();
+  });
+
+  it("asks the summary once for the entry tiles and the summary tab", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(<App api={api} />);
+    expect(await screen.findByText("сверх на 300 000")).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Сводка" }));
+    expect(screen.getByText("Можно сегодня")).toBeTruthy();
+    expect(api.dashboard).toHaveBeenCalledTimes(1);
+    // первое чтение запуска — по таблице заново: правки руками видны сразу
+    expect(api.dashboard).toHaveBeenCalledWith(true);
+  });
+
+  it("loads the forecast and the plan in the background", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(<App api={api} />);
+    await waitFor(() => {
+      expect(api.plan).toHaveBeenCalledWith("2026-10", false);
+    });
+    expect(api.forecast).toHaveBeenCalledWith(false);
+    await user.click(screen.getByRole("tab", { name: "Прогноз" }));
+    expect(screen.getByText("Октябрь")).toBeTruthy();
+    expect(api.forecast).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens with today's numbers from the phone while it asks for fresh ones", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-10T09:00:00"));
+    const first = render(<App api={fakeApi()} />);
+    expect(await screen.findByText("сверх на 300 000")).toBeTruthy();
+    first.unmount();
+    const waiting = () => new Promise<never>(() => undefined);
+    const user = userEvent.setup();
+    render(
+      <App
+        api={fakeApi({
+          bootstrap: vi.fn<Api["bootstrap"]>(waiting),
+          dashboard: vi.fn<Api["dashboard"]>(waiting),
+        })}
+      />,
+    );
+    // справочник и остатки на плитках — из памяти телефона, без ожидания
+    expect(screen.getByText("сверх на 300 000")).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Сводка" }));
+    expect(screen.getByText("Можно сегодня")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Обновляю…" })).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("asks the forecast and the plan only after the summary", async () => {
+    let answer: (value: Dashboard) => void = () => undefined;
+    const dashboard = vi.fn<Api["dashboard"]>().mockReturnValue(
+      new Promise<Dashboard>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    const api = fakeApi({ dashboard });
+    render(<App api={api} />);
+    await screen.findByRole("tab", { name: "Сводка" });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.forecast).not.toHaveBeenCalled();
+    await act(async () => {
+      answer(dashboardFixture);
+      await Promise.resolve();
+    });
+    await waitFor(() => {
+      expect(api.forecast).toHaveBeenCalled();
+    });
+  });
+
+  it("forgets the numbers on the phone when the bot does not know the user", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-10T09:00:00"));
+    const first = render(<App api={fakeApi()} />);
+    expect(await screen.findByText("сверх на 300 000")).toBeTruthy();
+    first.unmount();
+    expect(localStorage.getItem(CACHE_KEY)).not.toBeNull();
+    // подпись не та: сервер отказывает каждому запросу
+    const refused = () =>
+      Promise.reject(
+        new ApiError(401, "unauthorized", "Откройте приложение заново из бота"),
+      );
+    render(
+      <App
+        api={fakeApi({
+          bootstrap: vi.fn<Api["bootstrap"]>(refused),
+          dashboard: vi.fn<Api["dashboard"]>(refused),
+          forecast: vi.fn<Api["forecast"]>(refused),
+          plan: vi.fn<Api["plan"]>(refused),
+        })}
+      />,
+    );
+    expect(
+      await screen.findByText("Откройте приложение заново из бота"),
+    ).toBeTruthy();
+    expect(localStorage.getItem(CACHE_KEY)).toBeNull();
+    // и на экране — не цифры с прошлого раза
+    expect(screen.queryByText("сверх на 300 000")).toBeNull();
+    vi.useRealTimers();
   });
 });
