@@ -520,7 +520,7 @@ def _add_months(month: date, count: int) -> date:
     return date(index // 12, index % 12 + 1, 1)
 
 
-def _next_year(day: date) -> date:
+def next_year(day: date) -> date:
     try:
         return day.replace(year=day.year + 1)
     except ValueError:  # 29 февраля
@@ -666,16 +666,16 @@ def savings_screen(
         if passed and not piggy.yearly:
             continue  # окно «один раз» прошло: копилка ждёт решения об остатке
         if passed:  # срок ещё не перенесли — считаем со следующего года
-            deadline = _next_year(deadline)
+            deadline = next_year(deadline)
         collected = start[piggy.id].left if passed else start[piggy.id].collected
         needs.append(
             _Need(piggy.id, deadline, max(piggy.target - collected, 0.0) * rate, True)
         )
         if piggy.yearly:
-            following = _next_year(deadline)
+            following = next_year(deadline)
             while following < horizon:
                 needs.append(_Need(piggy.id, following, piggy.target * rate, False))
-                following = _next_year(following)
+                following = next_year(following)
     last = max((need.deadline for need in needs), default=month)
     span = max(
         PLAN_MONTHS, (last.year - month.year) * 12 + last.month - month.month + 1

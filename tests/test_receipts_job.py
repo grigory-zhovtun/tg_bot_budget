@@ -40,3 +40,15 @@ async def test_a_failed_reconciliation_stays_in_the_log(
 ) -> None:
     stub(monkeypatch, ConnectionError("Google is down"))
     assert await receipts.sync_now({"gs_service": "sheets"}, date(2026, 10, 16)) == 0
+
+
+async def test_a_piggy_failure_does_not_stop_the_receipts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stub(monkeypatch, 3)
+
+    def broken(gs: Any, today: date, *catalog: Any) -> int:
+        raise ConnectionError("Google is down")
+
+    monkeypatch.setattr(receipts, "sync_piggy", broken)
+    assert await receipts.sync_now({"gs_service": "sheets"}, date(2026, 10, 16)) == 3
