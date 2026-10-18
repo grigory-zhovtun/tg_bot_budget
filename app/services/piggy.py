@@ -11,8 +11,8 @@ import hashlib
 import logging
 import math
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass
-from datetime import date, timedelta
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import pandas as pd
@@ -254,13 +254,36 @@ class Balance:
     saved: float  # плюсовые строки журнала
     spent: float  # минусовые строки журнала и траты открытого окна
     left: float  # saved − spent
-    collected: float  # к ближайшему сроку: остаток и то, что из него уже потратили
+    collected: float  # к сроку deadline: остаток и то, что из него уже потратили
     spends: tuple[Spend, ...]  # траты открытого окна
+    deadline: date | None = None  # срок окна на дату; None — окно ещё не началось
 
 
 def window_key(deadline: date) -> str:
     """Ключ строки журнала с итогом окна: «окно:20.12.2026»."""
     return f"окно:{deadline:%d.%m.%Y}"
+
+
+def _window_for(piggy: Piggy, moves: Sequence[Move], deadline: date) -> Window | None:
+    """Окно срока: «каждый год» — [срок − 60; срок + 30], «один раз» — [первая строка
+    журнала; срок + 30] (без строк окна ещё нет)."""
+    end = deadline + timedelta(days=AFTER_DAYS)
+    if piggy.yearly:
+        return Window(deadline - timedelta(days=BEFORE_DAYS), end, deadline)
+    if not moves:
+        return None
+    return Window(min(move.day for move in moves), end, deadline)
+
+
+def _key_deadline(key: str) -> date | None:
+    """Срок из ключа итога окна «окно:20.12.2026»; другой ключ — None."""
+    prefix, _, value = key.partition(":")
+    if prefix != "окно":
+        return None
+    try:
+        return datetime.strptime(value.strip(), "%d.%m.%Y").date()
+    except ValueError:
+        return None
 
 
 def open_window(piggy: Piggy, moves: Sequence[Move]) -> Window | None:
@@ -270,12 +293,27 @@ def open_window(piggy: Piggy, moves: Sequence[Move]) -> Window | None:
         return None
     if any(move.key == window_key(piggy.deadline) for move in moves):
         return None
-    end = piggy.deadline + timedelta(days=AFTER_DAYS)
-    if piggy.yearly:
-        return Window(piggy.deadline - timedelta(days=BEFORE_DAYS), end, piggy.deadline)
-    if not moves:
+    return _window_for(piggy, moves, piggy.deadline)
+
+
+def _window_at(piggy: Piggy, moves: Sequence[Move], until: date) -> Window | None:
+    """Окно, к сроку которого копилка относится на until: нынешнего срока, если оно
+    уже началось, иначе прежнего, чей итог фон записал позже until (срок «каждый
+    год» уже перенесли, а на until окно ещё шло). Так остаток на прошлую дату не
+    меняется оттого, что фон закрыл окно."""
+    if piggy.error or piggy.deadline is None:
         return None
-    return Window(min(move.day for move in moves), end, piggy.deadline)
+    current = _window_for(piggy, moves, piggy.deadline)
+    if current is not None and current.start <= until:
+        return current
+    for move in moves:
+        deadline = _key_deadline(move.key) if move.kind == WINDOW else None
+        if deadline is None or move.day <= until:
+            continue
+        earlier = _window_for(piggy, moves, deadline)
+        if earlier is not None and earlier.start <= until:
+            return earlier
+    return None
 
 
 def fact_key(
@@ -354,10 +392,17 @@ def balances(
     for move in moves:
         own.setdefault(move.piggy_id, []).append(move)
     piggies = [piggy for piggy in book.piggies if piggy.id]
-    windows: dict[str, Window] = {}
+    cycles: dict[str, Window] = {}
+    windows: dict[str, Window] = {}  # окна, чьи траты считаются из fact
     for piggy in piggies:
-        found = open_window(piggy, book.moves_of(piggy.id))
-        if found is not None and found.start <= until:
+        found = _window_at(piggy, book.moves_of(piggy.id), until)
+        if found is None:
+            continue
+        cycles[piggy.id] = found
+        frozen = any(
+            move.key == window_key(found.deadline) for move in own.get(piggy.id, [])
+        )
+        if piggy.subcategory and not frozen:
             windows[piggy.id] = found
     by_id = {piggy.id: piggy for piggy in piggies}
     room = {
@@ -417,21 +462,31 @@ def balances(
         taken = -sum(move.amount for move in mine if move.amount < 0)
         spends = tuple(drawn.get(piggy.id, []))
         window_spent = max(sum(item.amount for item in spends), 0.0)
-        window = windows.get(piggy.id)
+        cycle = cycles.get(piggy.id)
+        # потрачено к сроку окна руками и итогом окна — «собрано» их помнит
         early = (
             -sum(
                 move.amount
                 for move in mine
                 if move.amount < 0
-                and move.kind in (SPENT, WRITE_OFF)
-                and window.start <= move.day <= window.end
+                and (
+                    move.kind in (SPENT, WRITE_OFF)
+                    and cycle.start <= move.day <= cycle.end
+                    or move.kind == WINDOW
+                    and move.key == window_key(cycle.deadline)
+                )
             )
-            if window is not None
+            if cycle is not None
             else 0.0
         )
         left = saved - taken - window_spent
         found[piggy.id] = Balance(
-            saved, taken + window_spent, left, left + window_spent + early, spends
+            saved,
+            taken + window_spent,
+            left,
+            left + window_spent + early,
+            spends,
+            cycle.deadline if cycle is not None else None,
         )
     return found
 
@@ -582,12 +637,33 @@ def _schedule(
 
 
 def _saved_in(moves: Sequence[Move], month: date) -> float:
-    return sum(
-        move.amount
-        for move in moves
-        if move.amount > 0
-        and (move.day.year, move.day.month) == (month.year, month.month)
+    """Отложено за месяц: «отложил» и «исправление» в обе стороны, не меньше нуля."""
+    return max(
+        sum(
+            move.amount
+            for move in moves
+            if move.kind in (SAVED, FIX)
+            and (move.day.year, move.day.month) == (month.year, month.month)
+        ),
+        0.0,
     )
+
+
+def _deadline_now(piggy: Piggy, today: date) -> date | None:
+    """Срок, к которому копят сейчас: окно «каждый год» прошло, а фон ещё не
+    перенёс срок, — следующий год."""
+    if piggy.deadline is None:
+        return None
+    if piggy.yearly and today > piggy.deadline + timedelta(days=AFTER_DAYS):
+        return next_year(piggy.deadline)
+    return piggy.deadline
+
+
+def _towards(balance: Balance, deadline: date | None) -> float:
+    """Собрано к сроку: с тратами его окна, если остаток посчитан к этому сроку."""
+    if deadline is not None and balance.deadline == deadline:
+        return balance.collected
+    return balance.left
 
 
 def _leftover(moves: Sequence[Move], left: float) -> float:
@@ -661,13 +737,10 @@ def savings_screen(
         rate = rates.to_uzs.get(piggy.currency)
         if not rate or piggy.deadline is None or piggy.target is None:
             continue
-        deadline = piggy.deadline
-        passed = today > deadline + timedelta(days=AFTER_DAYS)
-        if passed and not piggy.yearly:
+        if not piggy.yearly and today > piggy.deadline + timedelta(days=AFTER_DAYS):
             continue  # окно «один раз» прошло: копилка ждёт решения об остатке
-        if passed:  # срок ещё не перенесли — считаем со следующего года
-            deadline = next_year(deadline)
-        collected = start[piggy.id].left if passed else start[piggy.id].collected
+        deadline = _deadline_now(piggy, today) or piggy.deadline
+        collected = _towards(start[piggy.id], deadline)
         needs.append(
             _Need(piggy.id, deadline, max(piggy.target - collected, 0.0) * rate, True)
         )
@@ -773,6 +846,9 @@ def savings_screen(
     for piggy in open_piggies:
         moves = book.moves_of(piggy.id) if piggy.id else ()
         balance = now.get(piggy.id, Balance(0.0, 0.0, 0.0, 0.0, ()))
+        balance = replace(
+            balance, collected=_towards(balance, _deadline_now(piggy, today))
+        )
         rate = rates.to_uzs.get(piggy.currency, 0.0)
         planned_now = plan[0].items.get(piggy.id, 0.0) + plan[0].goals.get(
             piggy.id, 0.0
@@ -787,12 +863,12 @@ def savings_screen(
             status = "done" if reached else "goal"
         elif piggy.target is None:
             status = "no_target"
-        elif (
-            not piggy.yearly
-            and today > piggy.deadline + timedelta(days=AFTER_DAYS)
-            and balance.left > 0
-        ):
-            status, leftover = "leftover", balance.left
+        elif not piggy.yearly and today > piggy.deadline + timedelta(days=AFTER_DAYS):
+            # окно «один раз» прошло: остаток ждёт решения, иначе копилку закрыть
+            if balance.left > 0:
+                status, leftover = "leftover", balance.left
+            else:
+                status = "done"
         elif balance.collected >= piggy.target:
             status = "done"
         elif piggy.id in late:

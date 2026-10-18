@@ -652,3 +652,79 @@ def test_a_goal_gets_no_more_than_it_lacks() -> None:
     assert found.plan[0].goals == {"car001": 240_000}
     assert found.plan[0].cushion == 960_000
     assert state(found, "car001").this_month == 20
+
+
+# --- окно после срока и итог фона (финальное ревью этапа 2) ---
+
+LATER = date(2027, 1, 25)  # окно «Нового года» к 20.12.2026 закрылось 19.01
+GIFTS = (spend(date(2026, 12, 18), 12_000_000),)
+
+
+def window_total(amount: float, day: str = "25.01.2027") -> list[Any]:
+    return move_row(day=day, amount=amount, kind="потрачено в окне", who="бот",
+                    key="окно:20.12.2026")  # fmt: skip
+
+
+def test_freezing_a_window_keeps_the_month_plan() -> None:
+    # фон закрыл окно строкой от 25.01 и перенёс срок — январский взнос тот же
+    saved = move_row(amount=12_000_000)
+    before = screen(piggy_row(), moves=(saved,), fact=GIFTS, today=LATER)
+    after = screen(
+        piggy_row(deadline="20.12.2027"),
+        moves=(saved, window_total(-12_000_000)),
+        fact=GIFTS,
+        today=LATER,
+    )
+    assert before.plan[0].items["p3k9za"] == pytest.approx(12_000_000 / 11)
+    assert after.plan[0].items == before.plan[0].items
+    assert state(after, "p3k9za").this_month == 1_091_000
+
+
+def test_past_its_window_a_yearly_piggy_counts_the_next_year() -> None:
+    saved = move_row(amount=12_000_000)
+    for found in (
+        screen(piggy_row(), moves=(saved,), fact=GIFTS, today=LATER),
+        screen(
+            piggy_row(deadline="20.12.2027"),
+            moves=(saved, window_total(-12_000_000)),
+            fact=GIFTS,
+            today=LATER,
+        ),
+    ):
+        piggy = state(found, "p3k9za")
+        assert (piggy.status, piggy.balance.collected) == ("on_track", 0)
+
+
+def test_a_one_time_piggy_is_done_after_its_window() -> None:
+    once = piggy_row(repeat="один раз")
+    saved = move_row(amount=12_000_000)
+    for moves in ((saved,), (saved, window_total(-12_000_000, "20.01.2027"))):
+        piggy = state(screen(once, moves=moves, fact=GIFTS, today=LATER), "p3k9za")
+        assert (piggy.status, piggy.balance.collected) == ("done", 12_000_000)
+    # собрали не всё и всё потратили — срок прошёл, остаётся закрыть
+    short = (
+        move_row(amount=10_000_000),
+        window_total(-10_000_000, "20.01.2027"),
+    )
+    tickets = (spend(date(2026, 12, 18), 10_000_000),)
+    piggy = state(screen(once, moves=short, fact=tickets, today=LATER), "p3k9za")
+    assert piggy.status == "done"
+
+
+def test_spent_by_hand_near_the_deadline_stays_collected() -> None:
+    moves = (
+        move_row(amount=12_000_000),
+        move_row(day="18.12.2026", amount=-12_000_000, kind="потратил"),
+    )
+    found = screen(piggy_row(group="", sub=""), moves=moves, today=date(2026, 12, 19))
+    piggy = state(found, "p3k9za")
+    assert (piggy.status, piggy.balance.collected) == ("done", 12_000_000)
+
+
+def test_a_correction_lowers_the_month_part() -> None:
+    moves = (
+        move_row(day="05.10.2026", amount=6_000_000),
+        move_row(day="06.10.2026", amount=-6_000_000, kind="исправление"),
+    )
+    piggy = state(screen(piggy_row(), moves=moves), "p3k9za")
+    assert (piggy.this_month, piggy.left_this_month) == (6_000_000, 6_000_000)
