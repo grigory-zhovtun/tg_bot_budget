@@ -6,6 +6,7 @@ import {
   amountText,
   changeCount,
   editEvent,
+  applyGoal,
   editGoal,
   editRow,
   emptyDraft,
@@ -320,5 +321,18 @@ describe("toAdvice", () => {
       ],
       goal: { amount: "3000000", currency: "UZS" },
     });
+  });
+});
+
+describe("applyGoal", () => {
+  it("sets a goal below zero and drops it when it equals the plan", () => {
+    const goal = { amount: 1_000_000, currency: "UZS" };
+    const applied = applyGoal(emptyDraft("2026-10"), goal, -9_800_000);
+    expect(applied.goal).toEqual({
+      base: goal,
+      text: "-9800000",
+      currency: "UZS",
+    });
+    expect(applyGoal(applied, goal, 1_000_000).goal).toBeNull();
   });
 });

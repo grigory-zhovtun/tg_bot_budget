@@ -492,6 +492,26 @@ export interface PlanAddable {
   current: number;
 }
 
+/** «Отложить за месяц» по копилкам для месяца «Плана», сумы. */
+export interface PlanGoalHint {
+  suggested: number;
+  piggies: number;
+  share: number;
+  spent: number; // траты из копилок в месяце
+}
+
+/** Трата из копилки в месяце «Плана»: заложить её в план статьи. */
+export interface PlanPiggyHint {
+  piggy: string;
+  month: string;
+  group: string;
+  subcategory: string;
+  currency: string; // валюта копилки — и статьи
+  amount: number;
+  need: number; // сколько не хватает плану статьи во вкладке
+  key: string | null; // статья вкладки; null — строки нет
+}
+
 export interface MonthPlan {
   month: string;
   title: string;
@@ -504,6 +524,8 @@ export interface MonthPlan {
   goal: PlanGoal | null;
   addable: PlanAddable[];
   saved: number | null;
+  goal_hint?: PlanGoalHint | null; // нет — открытых копилок нет
+  piggy_hints?: PlanPiggyHint[];
 }
 
 export interface EventValue {

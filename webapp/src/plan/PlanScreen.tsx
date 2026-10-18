@@ -6,6 +6,8 @@ import {
   type Api,
   type MonthPlan,
   type PlanArticle,
+  type PlanGoal,
+  type PlanGoalHint,
 } from "../api";
 import { groupColor, tint } from "../entry/palette";
 import { itemAmount, money, short, withCurrency } from "../format";
@@ -20,6 +22,7 @@ import {
   amountText,
   changeCount,
   editEvent,
+  applyGoal,
   editGoal,
   editRow,
   emptyDraft,
@@ -37,6 +40,7 @@ import {
 } from "./draft";
 import EventSheet from "./EventSheet";
 import GoalSheet from "./GoalSheet";
+import PiggyHints from "./PiggyHints";
 import { monthIn, monthName, monthShort, plural } from "./months";
 import { receiptHint } from "./receipt";
 
@@ -58,6 +62,45 @@ interface Props {
 
 const KEPT = "Правки не потеряны — сохраните ещё раз";
 const RING = "rounded-lg ring-2 ring-warn";
+
+const GOAL_STEP = 1000; // «Отложить за месяц» в таблицу — до тысячи
+
+function goalInSums(goal: PlanGoal, rates: Record<string, number>): number {
+  return goal.currency === "UZS"
+    ? goal.amount
+    : goal.amount * (rates[goal.currency] ?? 0);
+}
+
+/** «По копилкам — W: копилки X + 10 % Y − из копилок Z» и «Применить», пока цель
+ * черновика с этим расходится (спека 4.7). */
+function GoalHint({
+  hint,
+  shown,
+  onApply,
+}: {
+  hint: PlanGoalHint;
+  shown: number;
+  onApply: (suggested: number) => void;
+}) {
+  if (Math.abs(shown - hint.suggested) < GOAL_STEP) return null;
+  return (
+    <section
+      aria-label="По копилкам"
+      className="flex flex-col gap-2 rounded-2xl bg-section p-3"
+    >
+      <p className="text-sm">
+        {`По копилкам — ${short(hint.suggested)}: копилки ${short(hint.piggies)} + 10 % ${short(hint.share)} − из копилок ${short(hint.spent)}`}
+      </p>
+      <button
+        type="button"
+        className="self-start font-semibold text-link"
+        onClick={() => onApply(hint.suggested)}
+      >
+        Применить
+      </button>
+    </section>
+  );
+}
 
 function changesText(count: number): string {
   return `${count} ${plural(count, "изменение", "изменения", "изменений")}`;
@@ -715,12 +758,24 @@ export default function PlanScreen({
           className={`flex items-center justify-between rounded-2xl bg-section p-3 text-left ${conflicts.includes("goal") ? "ring-2 ring-warn" : ""}`}
           onClick={() => setEditing({ kind: "goal" })}
         >
-          <span>🎯 Отложить за месяц</span>
+          <span>
+            {goal.amount < 0 ? "💰 Из накоплений" : "🎯 Отложить за месяц"}
+          </span>
           <span className={`font-semibold ${draft.goal ? "text-link" : ""}`}>
-            {withCurrency(goal.amount, goal.currency)}
+            {withCurrency(Math.abs(goal.amount), goal.currency)}
           </span>
         </button>
       )}
+      {goal && plan.goal && plan.goal_hint && (
+        <GoalHint
+          hint={plan.goal_hint}
+          shown={goalInSums(goal, plan.rates)}
+          onApply={(suggested) => {
+            if (plan.goal) onDraft(applyGoal(draft, plan.goal, suggested));
+          }}
+        />
+      )}
+      <PiggyHints plan={plan} draft={draft} onDraft={onDraft} />
       {!tg && count > 0 && (
         <button
           type="button"

@@ -39,6 +39,7 @@ from app.services.piggy import (
     SPENT,
     WRITE_OFF,
     YEARLY,
+    MonthGoal,
     Piggy,
     PiggyState,
     distribute,
@@ -58,6 +59,7 @@ from app.services.plan import (
     NewArticle,
     PlanChanges,
     addable,
+    article_key,
     change_note,
     kind_of,
     load_plan,
@@ -116,10 +118,12 @@ from app.web.schemas import (
     PlanArticleOut,
     PlanConflictOut,
     PlanEventOut,
+    PlanGoalHintOut,
     PlanGoalOut,
     PlanHistoryOut,
     PlanItemOut,
     PlanOut,
+    PlanPiggyHintOut,
     PlanSaveIn,
     RowsOut,
     RunwayOut,
@@ -986,12 +990,43 @@ def event_out(
     )
 
 
+def piggy_hints(
+    goal: MonthGoal, plan: MonthPlan, first: date
+) -> list[PlanPiggyHintOut]:
+    """Траты из копилок со статьёй, которых план статьи ещё не покрывает (4.7)."""
+    articles = {article.key: article for article in plan.articles}
+    found: list[PlanPiggyHintOut] = []
+    for item in goal.from_piggies:
+        if not item.group or not item.subcategory:
+            continue
+        article = articles.get(article_key(item.subcategory, item.currency))
+        if article is not None and not article.editable:
+            continue  # статья во вкладке дважды — её «План» не правит
+        need = item.amount - (article.plan if article is not None else 0.0)
+        if _rounded(need, item.currency) <= 0:
+            continue
+        found.append(
+            PlanPiggyHintOut(
+                piggy=item.name,
+                month=f"{first:%Y-%m}",
+                group=item.group,
+                subcategory=item.subcategory,
+                currency=item.currency,
+                amount=_rounded(item.amount, item.currency),
+                need=_rounded(need, item.currency),
+                key=article.key if article is not None else None,
+            )
+        )
+    return found
+
+
 def plan_out(
     first: date,
     today: date,
     loaded: LoadedPlan | None,
     icons: dict[str, str],
     catalog: Catalog,
+    piggy_goal: MonthGoal | None = None,
 ) -> PlanOut:
     """План месяца для экрана; без вкладки — только статус."""
     month, title = f"{first:%Y-%m}", month_title(first)
@@ -1053,6 +1088,19 @@ def plan_out(
             )
             for item in addable(plan, catalog, loaded.rates.to_uzs.keys(), history)
         ],
+        goal_hint=(
+            None
+            if piggy_goal is None
+            else PlanGoalHintOut(
+                suggested=thousands(piggy_goal.total),
+                piggies=float(round(piggy_goal.piggies)),
+                share=float(round(piggy_goal.share)),
+                spent=float(round(piggy_goal.spent)),
+            )
+        ),
+        piggy_hints=(
+            [] if piggy_goal is None else piggy_hints(piggy_goal, plan, first)
+        ),
     )
 
 
@@ -1379,6 +1427,19 @@ def routes(application: Application) -> list[Route]:
         analytics = application.bot_data["analytics_service"]
         return await asyncio.to_thread(analytics.savings, today, *catalog(), max_age)
 
+    async def plan_goal(first: date, max_age: float) -> MonthGoal | None:
+        """«Отложить за месяц» по копилкам для месяца «Плана»; сбой — без подсказок."""
+        try:
+            found = await read_savings(max_age)
+        except Exception:
+            logger.exception("Piggy hints for the plan failed")
+            return None
+        if found is None or not any(
+            state.status != "broken" for state in found.screen.piggies
+        ):
+            return None
+        return goal_of(found.screen, first)
+
     async def fresh_savings(user_id: int, max_age: float = 0.0) -> JSONResponse:
         """«Накопления» ответом: после записи — по таблице заново, экрану — из копии."""
         today = local_today(config.ANALYTICS_TIMEZONE)
@@ -1694,7 +1755,8 @@ def routes(application: Application) -> list[Route]:
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
         icons: dict[str, str] = application.bot_data.get("icons", {})
         catalog: Catalog = application.bot_data.get("subcategories", {})
-        body = plan_out(first, today, loaded, icons, catalog)
+        goal = await plan_goal(first, SCREEN_COPY_AGE)
+        body = plan_out(first, today, loaded, icons, catalog, goal)
         return JSONResponse(body.model_dump(mode="json"))
 
     async def save_month_plan(request: Request) -> JSONResponse:
@@ -1736,7 +1798,8 @@ def routes(application: Application) -> list[Route]:
                 )
             return validation_error(set(outcome.invalid))
         icons: dict[str, str] = application.bot_data.get("icons", {})
-        fresh = plan_out(first, today, loaded, icons, catalog)
+        goal = await plan_goal(first, SCREEN_COPY_AGE)
+        fresh = plan_out(first, today, loaded, icons, catalog, goal)
         if outcome.conflicts:
             conflict = PlanConflictOut(
                 error=ErrorOut(code="plan_changed", message=CONFLICT),
@@ -1778,7 +1841,8 @@ def routes(application: Application) -> list[Route]:
             logger.info("Plan tab %s created by user_id=%s", tab.title, user.id)
         icons: dict[str, str] = application.bot_data.get("icons", {})
         catalog: Catalog = application.bot_data.get("subcategories", {})
-        body = plan_out(first, today, loaded, icons, catalog)
+        goal = await plan_goal(first, SCREEN_COPY_AGE)
+        body = plan_out(first, today, loaded, icons, catalog, goal)
         return JSONResponse(body.model_dump(mode="json"))
 
     async def plan_advice(request: Request) -> JSONResponse:

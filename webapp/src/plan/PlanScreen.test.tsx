@@ -240,6 +240,131 @@ describe("PlanScreen", () => {
     expect(screen.getByText("11,30 млн")).toBeTruthy();
   });
 
+  it("shows a goal below zero as money taken from the savings", async () => {
+    const plan = vi.fn<Api["plan"]>().mockResolvedValue({
+      ...planFixture,
+      goal: { amount: -9_800_000, currency: "UZS" },
+    });
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi({ plan })} />);
+    const line = await screen.findByRole("button", { name: /Из накоплений/ });
+    expect(within(line).getByText(/^9\s800\s000 UZS$/)).toBeTruthy();
+    await user.click(line);
+    await user.click(screen.getByRole("button", { name: "Готово" }));
+    expect(screen.getByRole("button", { name: /Из накоплений/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Сохранить/ })).toBeNull();
+  });
+
+  it("applies the piggies' «Отложить» to the goal", async () => {
+    const savePlan = vi
+      .fn<Api["savePlan"]>()
+      .mockResolvedValue({ ...planFixture, saved: 1 });
+    const plan = vi.fn<Api["plan"]>().mockResolvedValue({
+      ...planFixture,
+      goal_hint: {
+        suggested: -9_800_000,
+        piggies: 1_000_000,
+        share: 1_200_000,
+        spent: 12_000_000,
+      },
+    });
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi({ plan, savePlan })} />);
+    const hint = await screen.findByRole("region", { name: "По копилкам" });
+    expect(
+      within(hint).getByText(
+        "По копилкам — −9,80 млн: копилки 1,00 млн + 10 % 1,20 млн − из копилок 12,00 млн",
+      ),
+    ).toBeTruthy();
+    await user.click(within(hint).getByRole("button", { name: "Применить" }));
+    expect(screen.getByRole("button", { name: /Из накоплений/ })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "По копилкам" })).toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: "Сохранить 1 изменение" }),
+    );
+    expect(savePlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal: {
+          base: { amount: 2_000_000, currency: "UZS" },
+          value: { amount: "-9800000", currency: "UZS" },
+        },
+      }),
+    );
+  });
+
+  it("puts a piggy's spending into its article and the goal", async () => {
+    const savePlan = vi
+      .fn<Api["savePlan"]>()
+      .mockResolvedValue({ ...planFixture, saved: 2 });
+    const plan = vi.fn<Api["plan"]>().mockResolvedValue({
+      ...planFixture,
+      addable: [
+        ...planFixture.addable,
+        {
+          kind: "spend",
+          group: "🎉 ПРАЗДНИК",
+          subcategory: "сезонный",
+          icon: "🎄",
+          currency: "UZS",
+          average: 0,
+          last: 0,
+          current: 0,
+        },
+      ],
+      goal_hint: {
+        suggested: -9_800_000,
+        piggies: 1_000_000,
+        share: 1_200_000,
+        spent: 12_000_000,
+      },
+      piggy_hints: [
+        {
+          piggy: "Новый год",
+          month: "2026-10",
+          group: "🎉 ПРАЗДНИК",
+          subcategory: "сезонный",
+          currency: "UZS",
+          amount: 12_000_000,
+          need: 12_000_000,
+          key: null,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<Harness api={fakeApi({ plan, savePlan })} />);
+    const hints = await screen.findByRole("region", {
+      name: "Копилки в плане",
+    });
+    expect(
+      within(hints).getByText(
+        "Из копилки «Новый год» в октябре — 12,00 млн: заложите в статью «ПРАЗДНИК / сезонный»",
+      ),
+    ).toBeTruthy();
+    await user.click(within(hints).getByRole("button", { name: "Применить" }));
+    expect(
+      screen.getByRole("button", { name: "сезонный, новая" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("region", { name: "Копилки в плане" }),
+    ).toBeNull();
+    expect(screen.getByRole("button", { name: /Из накоплений/ })).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: "Сохранить 2 изменения" }),
+    );
+    expect(savePlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        new_rows: [
+          {
+            group: "🎉 ПРАЗДНИК",
+            subcategory: "сезонный",
+            currency: "UZS",
+            plan: "12000000",
+          },
+        ],
+      }),
+    );
+  });
+
   it("offers a retry when the plan does not load", async () => {
     const user = userEvent.setup();
     const plan = vi
