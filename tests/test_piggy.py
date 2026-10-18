@@ -427,12 +427,15 @@ def test_fact_keys_number_repeats_and_ignore_ai() -> None:
 
 from types import SimpleNamespace  # noqa: E402
 
+from app.domain import Rates  # noqa: E402
+from app.services.analytics_service import transactions_frame  # noqa: E402
 from app.services.piggy import (  # noqa: E402
     Balance,
     Enough,
     PiggyState,
     Screen,
     distribute,
+    income_cushion,
     money_day,
     savings_screen,
 )
@@ -657,19 +660,27 @@ def test_enough_compares_money_for_life_with_ordinary_spending() -> None:
     )
 
 
-def _state(piggy_id: str, currency: str, left: float, deadline: date | None) -> Any:
+def _state(
+    piggy_id: str,
+    currency: str,
+    left: float,
+    deadline: date | None,
+    order: int | None = None,
+) -> Any:
     piggy = Piggy(piggy_id, 2, piggy_id, None, currency, deadline, True, None, None,
                   "", None)  # fmt: skip
     status = "goal" if deadline is None else "on_track"
-    return PiggyState(piggy, Balance(0, 0, 0, 0, ()), status, left, left, 0, 0, ())
+    return PiggyState(
+        piggy, Balance(0, 0, 0, 0, ()), status, left, left, 0, 0, (), order
+    )
 
 
-def test_distribute_by_deadlines_then_goals() -> None:
+def test_distribute_by_the_order_then_goals() -> None:
     found = Screen(
         TODAY,
         (
-            _state("ny", "UZS", 6_000_000, date(2026, 12, 20)),
-            _state("trip", "USD", 210, date(2027, 6, 1)),
+            _state("ny", "UZS", 6_000_000, date(2026, 12, 20), 1),
+            _state("trip", "USD", 210, date(2027, 6, 1), 2),
             _state("goal", "UZS", 1_500_000, None),
         ),
         (),
@@ -679,6 +690,7 @@ def test_distribute_by_deadlines_then_goals() -> None:
         0,
         "split",
         None,
+        rates=RATES,
     )
     assert distribute(found, 12_000_000, "UZS", RATES) == [
         ("ny", 6_000_000),
@@ -948,3 +960,77 @@ def test_no_income_in_the_list_uses_the_average_income() -> None:
         share=0.1,
     )
     assert found.capacity == pytest.approx(1_000_000)
+
+
+def income_row(day: date, amount: float, currency: str = "UZS") -> list[Any]:
+    return fact_row(day, "💰 ДОХОДЫ", "зарплата", amount, currency)
+
+
+def test_now_follows_the_income_of_the_month() -> None:
+    advance = income_row(date(2026, 10, 15), 4_000_000)
+    found = screen(piggy_row(), fact=(advance,), share=0.1)
+    assert (found.received, found.due) == (
+        pytest.approx(4_000_000),
+        pytest.approx(400_000),
+    )
+    assert state(found, "p3k9za").now == 400_000
+    salary = income_row(date(2026, 10, 17), 8_000_000)
+    more = screen(piggy_row(), fact=(advance, salary), share=0.1)
+    assert state(more, "p3k9za").now == 1_200_000
+
+
+def test_extra_money_tops_up_short_piggies_first() -> None:
+    found = screen(
+        piggy_row(), fact=(income_row(date(2026, 10, 15), 20_000_000),), share=0.1
+    )
+    assert state(found, "p3k9za").now == 2_000_000
+    assert found.cushion_now == pytest.approx(0)
+
+
+def test_an_income_in_rubles_counts_by_the_table_rate() -> None:
+    rates = Rates({"UZS": 1.0, "USD": 12_000.0, "RUB": 150.0})
+    rubles = income_row(date(2026, 10, 15), 60_000, "RUB")
+    found = savings_screen(
+        book(piggy_row()),
+        transactions_frame([FACT_HEADER, rubles], rates),
+        tab(),
+        TODAY,
+        rates,
+        None,
+        0.1,
+        6,
+    )
+    assert (found.received, found.due) == (
+        pytest.approx(9_000_000),
+        pytest.approx(900_000),
+    )
+
+
+def test_the_cushion_part_of_an_income_does_not_repeat() -> None:
+    # копилкам ничего не нужно: всё — подушке, но у второго поступления — только его
+    incomes = (
+        income_row(date(2026, 10, 15), 4_000_000),
+        income_row(date(2026, 10, 17), 8_000_000),
+    )
+    found = screen(fact=incomes, share=0.1)
+    assert found.cushion_now == pytest.approx(1_200_000)
+    assert income_cushion(found, 8_000_000) == pytest.approx(800_000)
+
+
+def test_distribute_follows_the_order_and_tops_up_short_piggies() -> None:
+    found = screen(
+        piggy_row(), piggy_row(**TRIP), share=0.1, order=("tr0001", "p3k9za")
+    )
+    # «Отпуск»: взнос месяца 100 $ и «не хватит» 1 700 $; «Новый год» — 12 млн
+    # «не хватит»; остаток 6,4 млн — подушке, не пишется
+    assert distribute(found, 40_000_000, "UZS", RATES) == [
+        ("tr0001", 1_800.0),
+        ("p3k9za", 12_000_000.0),
+    ]
+
+
+def test_the_month_goal_is_the_capacity_minus_spending() -> None:
+    found = screen(piggy_row(), share=0.1)
+    assert goal_of(found, OCTOBER).total == pytest.approx(1_200_000)
+    # в декабре из «Нового года» уходит то, что он успеет собрать, — 2,4 млн
+    assert goal_of(found, DECEMBER).total == pytest.approx(1_200_000 - 2_400_000)
