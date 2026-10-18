@@ -428,7 +428,6 @@ def test_fact_keys_number_repeats_and_ignore_ai() -> None:
 from types import SimpleNamespace  # noqa: E402
 
 from app.domain import Rates  # noqa: E402
-from app.services.analytics_service import transactions_frame  # noqa: E402
 from app.services.piggy import (  # noqa: E402
     Balance,
     Enough,
