@@ -572,7 +572,7 @@ async def test_an_income_asks_the_piggies_after_the_menu(
     monkeypatch.setattr(messages, "income_prompt", asked)
     today = local_today(config.ANALYTICS_TIMEZONE)
     salary = entry_row(
-        17_000_000.0, True, "", "VISA 1111 UZS", "💰 ДОХОДЫ", "зарплата", today
+        20_000_000.0, True, "", "VISA 1111 UZS", "💰 ДОХОДЫ", "зарплата", today
     )
     await messages.save_rows(context, update.effective_chat, [salary], [], "app:9")
     asked.assert_awaited_once()

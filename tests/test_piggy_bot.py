@@ -42,7 +42,7 @@ def context_with(sheets: PiggySheets) -> SimpleNamespace:
     )
 
 
-def salary(amount: float = 17_000_000) -> SheetRow:
+def salary(amount: float = 20_000_000) -> SheetRow:
     return SheetRow(TODAY, "💰 ДОХОДЫ", "зарплата", amount, "", "UZS", "VISA 1111 UZS")
 
 

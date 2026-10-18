@@ -287,7 +287,7 @@ async def test_money_moved_into_income_asks_the_piggies(
 ) -> None:
     asked = AsyncMock()
     monkeypatch.setattr(fix, "income_prompt", asked)
-    context = chat([row(amount=-17_000_000.0, comment="SMS: зачисление")])
+    context = chat([row(amount=-20_000_000.0, comment="SMS: зачисление")])
     await command(context)
     await press(context, "fix:c:1")  # ДОХОДЫ
     query = SimpleNamespace(
