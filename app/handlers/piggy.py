@@ -8,6 +8,7 @@
 
 import asyncio
 import logging
+import math
 import time
 from collections.abc import Sequence
 from datetime import date
@@ -30,10 +31,11 @@ from app.services.piggy import (
     Screen,
     fact_key,
     fingerprint,
+    income_cushion,
     row_prefix,
 )
 from app.services.piggy_sync import bot_catalog
-from app.services.savings import incomes
+from app.services.savings import TINY_SHARE, incomes
 from app.utils.keyboards import action
 
 logger = logging.getLogger(__name__)
@@ -137,23 +139,31 @@ async def piggy_articles(bot_data: dict[str, Any], gs: Any) -> set[tuple[str, st
 
 
 def _left(screen: Screen | None) -> list[PiggyState]:
-    """Копилки и долгие цели, у которых «осталось в этом месяце» больше нуля."""
+    """Копилки и долгие цели, у которых «отложить сейчас» больше нуля."""
     if screen is None:
         return []
     return [
-        state
-        for state in screen.piggies
-        if state.status != "broken" and state.left_this_month > 0
+        state for state in screen.piggies if state.status != "broken" and state.now > 0
     ]
 
 
 def _sums(items: Sequence[PiggyState], quoted: bool) -> str:
-    """«Новый год» 6 000 000 UZS, «Отпуск» 210 USD — что осталось отложить."""
+    """«Новый год» 6 000 000 UZS, «Отпуск» 210 USD — что отложить сейчас."""
     return ", ".join(
         f"{'«' if quoted else ''}{state.piggy.name}{'»' if quoted else ''} "
-        f"{amount_text(state.left_this_month)} {state.piggy.currency}"
+        f"{amount_text(state.now)} {state.piggy.currency}"
         for state in items
     )
+
+
+def _up_money(value: float, currency: str) -> float:
+    """Вверх: сумы — до тысячи, остальное — до целых (как суммы плана)."""
+    step = 1000 if currency == "UZS" else 1
+    return float(math.ceil(value / step - 1e-6) * step) if value > 0 else 0.0
+
+
+def _percent_text(share: float) -> str:
+    return f"{share * 100:g}".replace(".", ",")
 
 
 def _part_button(user_id: int) -> InlineKeyboardButton | None:
@@ -172,23 +182,60 @@ async def income_prompt(
     user_id: int,
     rows: Sequence[SheetRow],
 ) -> None:
-    """«🐷 В копилки по плану ноября осталось: …» после поступления (спека 7.1);
-    отложить нечего — сообщения нет, сбой — только в лог."""
-    if not incomes(rows):
+    """«🐷 С поступления … — N %: …» после поступления (спека процента 7.1):
+    сколько отложить с него, что отложить сейчас по копилкам и часть подушки
+    именно этого поступления; копилкам ничего не нужно — «всё в подушку» без
+    кнопок; доля меньше 10 000 сумов — сообщения нет; сбой — только в лог."""
+    came = incomes(rows)
+    if not came:
         return
     try:
-        items = _left(await _screen(context.bot_data))
+        found = await _savings(context.bot_data)
+        if found is None:
+            return
+        screen, rates = found.screen, found.rates
+        amount = sum(
+            rates.convert(row.amount, row.currency, "UZS") or 0.0 for row in came
+        )
+        if screen.percent * amount < TINY_SHARE:
+            return
+        percent = _percent_text(screen.percent)
+        currencies = {row.currency for row in came}
+        if len(came) == 1 or len(currencies) == 1:
+            code = came[0].currency
+            total = sum(row.amount for row in came)
+            share = _up_money(total * screen.percent, code)
+            head = (
+                f"🐷 С поступления {amount_text(total)} {code} — {percent} %: "
+                f"{amount_text(share)} {code}"
+            )
+            if code != "UZS":
+                head += (
+                    f" (≈ {amount_text(_up_money(amount * screen.percent, 'UZS'))} UZS)"
+                )
+        else:
+            head = (
+                f"🐷 С поступлений {amount_text(_up_money(amount, 'UZS'))} UZS — "
+                f"{percent} %: {amount_text(_up_money(amount * screen.percent, 'UZS'))} UZS"
+            )
+        items = _left(screen)
         if not items:
+            await context.bot.send_message(
+                chat_id=chat_id, text=f"{head} — всё в подушку"
+            )
             return
         today = local_today(config.ANALYTICS_TIMEZONE)
+        text = f"{head}. За {MONTHS_NAMED[today.month - 1]} отложить: " + _sums(
+            items, quoted=True
+        )
+        cushion = round(income_cushion(screen, amount), -3)
+        if cushion > 0:
+            text += f" · в подушку с этого поступления {amount_text(cushion)} UZS"
         buttons = [action("Отложил всё", f"{ALL}{today:%Y-%m}")]
         if part := _part_button(user_id):
             buttons.append(part)
         await context.bot.send_message(
-            chat_id=chat_id,
-            text=f"🐷 В копилки по плану {MONTHS_OF[today.month - 1]} осталось: "
-            + _sums(items, quoted=True),
-            reply_markup=InlineKeyboardMarkup([buttons]),
+            chat_id=chat_id, text=text, reply_markup=InlineKeyboardMarkup([buttons])
         )
     except Exception:
         logger.exception("Piggy prompt failed for chat_id=%s", chat_id)
@@ -397,7 +444,7 @@ async def _set_all_aside(
             if items:
                 await asyncio.to_thread(
                     context.bot_data["gs_service"].add_piggy_moves,
-                    [move_row(today, state.piggy, state.left_this_month, SAVED, author)
+                    [move_row(today, state.piggy, state.now, SAVED, author)
                      for state in items],  # fmt: skip
                 )
     except Exception:
