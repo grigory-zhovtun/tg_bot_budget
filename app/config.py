@@ -40,6 +40,8 @@ if GOOGLE_PRIVATE_KEY:
 FACT_SHEET_NAME = "fact"
 SYSTEM_SHEET_NAME = "system"
 CALENDAR_SHEET_NAME = "Календарь"
+PIGGY_SHEET_NAME = "Копилки"
+PIGGY_JOURNAL_NAME = "Журнал копилок"
 
 # Defaults
 DEFAULT_CURRENCY = "UZS"
