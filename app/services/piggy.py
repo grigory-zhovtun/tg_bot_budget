@@ -21,6 +21,7 @@ from app.domain import INCOME_GROUP, Rates
 from app.services.analytics_service import TRANSFERS_GROUP, expenses, to_day
 from app.services.day_budget import DayBudget, read_forecast
 from app.services.google_sheets import PIGGY_JOURNAL_HEADER, PIGGY_LIST_HEADER
+from app.services.plan import read_plan
 from app.services.savings import Cushion, month_savings, monthly_spending
 
 logger = logging.getLogger(__name__)
@@ -526,6 +527,32 @@ class PiggyState:
 
 
 @dataclass(frozen=True)
+class FromPiggy:
+    """Траты из копилки в месяце (спека 4.7): amount — в её валюте, uzs — в сумах."""
+
+    piggy_id: str
+    name: str
+    group: str | None
+    subcategory: str | None
+    currency: str
+    amount: float
+    uzs: float
+
+
+@dataclass(frozen=True)
+class MonthGoal:
+    """«🎯 Отложить за месяц» (спека 4.7), в сумах: взносы копилок + доля 10 % −
+    траты из копилок; меньше нуля — месяц тратит накопленное."""
+
+    month: date  # первое число
+    piggies: float
+    share: float
+    spent: float
+    total: float
+    from_piggies: tuple[FromPiggy, ...]
+
+
+@dataclass(frozen=True)
 class Enough:
     """Хватает ли: средние за полные месяцы, в сумах."""
 
@@ -547,6 +574,8 @@ class Screen:
     over: float  # на сколько копилки больше «Заморожено»
     share_to: str  # куда идёт доля 10 % в этом месяце: cushion | split | goals
     enough: Enough | None
+    goals: tuple[MonthGoal, ...] = ()  # «Отложить за месяц» по месяцам плана
+    in_plan: float | None = None  # «Отложить за месяц» вкладки в сумах; нет строки
 
 
 @dataclass(frozen=True)
@@ -555,6 +584,20 @@ class _Need:
     deadline: date
     need: float  # в сумах
     first: bool  # ближайший срок копилки
+
+
+def goal_of(screen: Screen, month: date) -> MonthGoal | None:
+    """«Отложить за месяц» месяца плана; месяца нет в плане — None."""
+    first = month.replace(day=1)
+    return next((goal for goal in screen.goals if goal.month == first), None)
+
+
+def goal_in_plan(rows: list[list[Any]] | None, rates: Rates) -> float | None:
+    """Строка «🎯 Отложить за месяц» вкладки (Q и R) в сумах; None — строки нет."""
+    goal = read_plan(rows).goal if rows else None
+    if goal is None:
+        return None
+    return rates.convert(goal.amount, goal.currency, "UZS")
 
 
 def money_day(rows: list[list[Any]] | None) -> int | None:
@@ -923,7 +966,97 @@ def savings_screen(
         over,
         share_to,
         _enough(frame, today, yearly, plan[0].total if plan else 0.0, share),
+        _month_goals(plan, states, book, today, rates, late),
+        goal_in_plan(rows, rates),
     )
+
+
+def _spent_in_month(state: PiggyState, moves: Sequence[Move], month: date) -> float:
+    """Ушло из копилки в месяце по сегодня: траты окна из fact и «потратил» /
+    «списал остаток» журнала, в валюте копилки."""
+
+    def inside(day: date) -> bool:
+        return (day.year, day.month) == (month.year, month.month)
+
+    from_fact = sum(item.amount for item in state.balance.spends if inside(item.day))
+    by_hand = -sum(
+        move.amount
+        for move in moves
+        if move.amount < 0 and move.kind in (SPENT, WRITE_OFF) and inside(move.day)
+    )
+    return from_fact + by_hand
+
+
+def _month_goals(
+    plan: Sequence[MonthPlan],
+    states: Sequence[PiggyState],
+    book: Book,
+    today: date,
+    rates: Rates,
+    late: Mapping[str, float],
+) -> tuple[MonthGoal, ...]:
+    """«Отложить за месяц» для каждого месяца плана (спека 4.7).
+
+    Траты из копилок: в текущем месяце — уже ушедшее в нём; у копилки со сроком в
+    месяце — ещё и не потраченная часть «собрано к сроку» (цель, у «к сроку не
+    успеть» — собранное). Траты в окне до месяца срока заранее не угадать.
+    """
+    current = today.replace(day=1)
+    last = plan[-1].month if plan else current
+    goals: list[MonthGoal] = []
+    for month_plan in plan:
+        month = month_plan.month
+        found: list[FromPiggy] = []
+        for state in states:
+            piggy = state.piggy
+            rate = rates.to_uzs.get(piggy.currency)
+            if state.status == "broken" or not piggy.id or not rate:
+                continue
+            amount = 0.0
+            if month == current:
+                amount += _spent_in_month(state, book.moves_of(piggy.id), month)
+            first = _deadline_now(piggy, today)
+            if first is not None and not (
+                not piggy.yearly and today > first + timedelta(days=AFTER_DAYS)
+            ):
+                deadline: date | None = first
+                while deadline is not None and deadline.replace(day=1) <= last:
+                    if deadline.replace(day=1) == month:
+                        now = deadline == first  # траты окна этого срока уже были
+                        if now and piggy.id in late:
+                            expected = state.balance.collected
+                        else:
+                            expected = piggy.target or 0.0
+                        spent = (
+                            state.balance.collected - state.balance.left if now else 0.0
+                        )
+                        amount += max(expected - spent, 0.0)
+                    deadline = next_year(deadline) if piggy.yearly else None
+            if amount > 1e-6:
+                found.append(
+                    FromPiggy(
+                        piggy.id,
+                        piggy.name,
+                        piggy.group,
+                        piggy.subcategory,
+                        piggy.currency,
+                        amount,
+                        amount * rate,
+                    )
+                )
+        share = month_plan.cushion + sum(month_plan.goals.values())
+        spent_uzs = sum(item.uzs for item in found)
+        goals.append(
+            MonthGoal(
+                month,
+                month_plan.total,
+                share,
+                spent_uzs,
+                month_plan.total + share - spent_uzs,
+                tuple(found),
+            )
+        )
+    return tuple(goals)
 
 
 def distribute(

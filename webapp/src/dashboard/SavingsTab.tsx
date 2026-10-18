@@ -4,6 +4,7 @@ import type {
   Bootstrap,
   Enough,
   Piggy,
+  SavingsGoal,
   SavingsMonth,
   SavingsScreen,
 } from "../api";
@@ -27,11 +28,25 @@ interface SetAsideProps {
   month: SavingsMonth;
   enough: Enough | null;
   names: Record<string, string>;
+  goal: SavingsGoal | null;
   onSave: (() => void) | null; // null — откладывать нечего
 }
 
+const GOAL_STEP = 1000; // в таблицу цель пишется до тысячи
+
+/** Q20 вкладки разошлась с копилками: «В плане месяца «Отложить» — W, …». */
+function goalText(goal: SavingsGoal | null): string | null {
+  if (!goal) return null;
+  const inPlan = goal.in_plan ?? 0;
+  if (goal.in_plan !== null && Math.abs(inPlan - goal.suggested) < GOAL_STEP) {
+    return null;
+  }
+  return `В плане месяца «Отложить» — ${short(inPlan)}, по копилкам нужно ${short(goal.suggested)}: поправьте в «Плане»`;
+}
+
 /** «В октябре отложить»: взносы копилок, доля 10 % и хватает ли на жизнь. */
-function SetAside({ month, enough, names, onSave }: SetAsideProps) {
+function SetAside({ month, enough, names, goal, onSave }: SetAsideProps) {
+  const differs = goalText(goal);
   const title = `В ${MONTHS_IN[monthIndex(month.month)] ?? month.month} отложить`;
   return (
     <section
@@ -54,6 +69,7 @@ function SetAside({ month, enough, names, onSave }: SetAsideProps) {
           {enoughText(enough)}
         </p>
       )}
+      {differs && <p className="text-sm font-semibold text-warn">{differs}</p>}
       {onSave && (
         <button
           type="button"
@@ -136,6 +152,7 @@ export default function SavingsTab({ api, boot, refresh }: Props) {
           month={data.month}
           enough={data.enough}
           names={names}
+          goal={data.goal ?? null}
           onSave={canSave ? () => setSaving(true) : null}
         />
       )}

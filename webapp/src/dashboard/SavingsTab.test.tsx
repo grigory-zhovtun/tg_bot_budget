@@ -25,6 +25,28 @@ function withSavings(changes: Partial<SavingsScreen>): Api {
 }
 
 describe("SavingsTab", () => {
+  it("tells when the month plan's «Отложить» differs from the piggies", async () => {
+    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
+    expect(
+      await screen.findByText(
+        "В плане месяца «Отложить» — 2,00 млн, по копилкам нужно 7,20 млн: поправьте в «Плане»",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says nothing more when the plan already matches", async () => {
+    const goal = {
+      suggested: 7_200_000,
+      in_plan: 7_200_000,
+      piggies: 6_000_000,
+      share: 4_000_000,
+      spent: 2_800_000,
+    };
+    render(<SavingsTab api={withSavings({ goal })} boot={null} refresh={0} />);
+    await screen.findByText("В октябре отложить");
+    expect(screen.queryByText(/В плане месяца/)).toBeNull();
+  });
+
   it("says how much to set aside this month", async () => {
     render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
     expect(await screen.findByText("В октябре отложить")).toBeTruthy();

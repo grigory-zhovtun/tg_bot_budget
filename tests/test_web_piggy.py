@@ -106,6 +106,7 @@ class PiggyAnalytics:
         self.sheets = sheets
         self.fact = fact
         self.ages: list[float] = []
+        self.rows = tab()  # вкладка месяца
 
     def savings(
         self,
@@ -119,7 +120,7 @@ class PiggyAnalytics:
         piggies, journal = self.sheets.get_piggy(max_age)
         book = read_book(piggies, journal, currencies, groups, subcategories)
         found = frame(*self.fact)
-        rows = tab()
+        rows = self.rows
         budget = day_budget(found, rows, today, RATES, "USD")
         screen = savings_screen(book, found, rows, today, RATES, budget, 0.1, 6)
         return SavingsTab(screen, month_savings(found, today), RATES)
@@ -463,3 +464,23 @@ def test_journal_sums_are_rounded_to_the_currency() -> None:
                  "Тест", None)  # fmt: skip
     zero = move_row(TODAY, sums, -0.0, "закрыта", "Тест")[3]
     assert zero == 0 and str(zero) == "0.0"
+
+
+def test_savings_answer_has_the_goal_and_the_plan_cell() -> None:
+    from tests.test_day_budget import tab as month_tab
+
+    application, _ = setup(PiggySheets([ROW], [saved(6_000_000)]))
+    application.bot_data["analytics_service"].rows = month_tab(goal=2_000_000)
+    found = client_for(application).get("/api/savings", headers=auth()).json()
+    goal = found["goal"]
+    assert goal["in_plan"] == 2_000_000
+    assert goal["suggested"] == round(
+        goal["piggies"] + goal["share"] - goal["spent"], -3
+    )
+    assert goal["share"] == 1_200_000
+
+
+def test_without_piggies_there_is_no_goal() -> None:
+    application, _ = setup(PiggySheets([], []))
+    found = client_for(application).get("/api/savings", headers=auth()).json()
+    assert found["goal"] is None

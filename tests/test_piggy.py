@@ -447,10 +447,12 @@ def screen(
     fact: tuple[list[Any], ...] = (),
     today: date = TODAY,
     budget: Any = None,
+    rows: list[list[Any]] | None = None,
 ) -> Screen:
     # список вкладки: аванс 15-го и ЗП 30-го — день денег 30-е, поступлений 12 млн
+    month = tab() if rows is None else rows
     return savings_screen(
-        book(*piggies, moves=moves), frame(*fact), tab(), today, RATES, budget, 0.1, 6
+        book(*piggies, moves=moves), frame(*fact), month, today, RATES, budget, 0.1, 6
     )
 
 
@@ -728,3 +730,58 @@ def test_a_correction_lowers_the_month_part() -> None:
     )
     piggy = state(screen(piggy_row(), moves=moves), "p3k9za")
     assert (piggy.this_month, piggy.left_this_month) == (6_000_000, 6_000_000)
+
+
+# --- «Отложить за месяц» (этап 3, спека 4.7) ---
+
+from app.services.piggy import goal_of  # noqa: E402
+
+OCTOBER, NOVEMBER, DECEMBER = date(2026, 10, 1), date(2026, 11, 1), date(2026, 12, 1)
+
+
+def test_the_month_goal_adds_the_share_and_takes_the_spending() -> None:
+    found = screen(piggy_row())
+    october = goal_of(found, OCTOBER)
+    assert october is not None
+    assert (october.piggies, october.share, october.spent, october.total) == (
+        pytest.approx(6_000_000),
+        pytest.approx(1_200_000),
+        0,
+        pytest.approx(7_200_000),
+    )
+    assert goal_of(found, NOVEMBER).total == pytest.approx(7_200_000)
+    december = goal_of(found, DECEMBER)
+    assert december.total == pytest.approx(-9_800_000)
+    assert [(item.name, item.uzs) for item in december.from_piggies] == [
+        ("Новый год", pytest.approx(12_000_000))
+    ]
+
+
+def test_gifts_before_the_deadline_month_lower_the_goal() -> None:
+    found = screen(
+        piggy_row(),
+        moves=(move_row(day="30.10.2026", amount=6_000_000),),
+        fact=(spend(date(2026, 11, 10), 2_400_000),),
+        today=date(2026, 11, 15),
+    )
+    november = goal_of(found, NOVEMBER)
+    assert (november.spent, november.total) == (
+        pytest.approx(2_400_000),
+        pytest.approx(4_800_000),
+    )
+    assert goal_of(found, DECEMBER).total == pytest.approx(-7_400_000)
+
+
+def test_a_late_piggy_spends_only_what_it_collected() -> None:
+    # к 25.10 денег не будет (день денег — 30-е): «не успеть», собран 1 млн
+    found = screen(
+        piggy_row(target=5_000_000, deadline="25.10.2026", repeat="один раз"),
+        moves=(move_row(day="05.10.2026", amount=1_000_000),),
+    )
+    assert state(found, "p3k9za").status == "late"
+    assert goal_of(found, OCTOBER).spent == pytest.approx(1_000_000)
+
+
+def test_the_plan_cell_is_read_in_sums() -> None:
+    assert screen(piggy_row(), rows=tab(goal=2_000_000)).in_plan == 2_000_000
+    assert screen(piggy_row()).in_plan is None

@@ -255,10 +255,20 @@ export interface Enough {
   gap: number; // меньше нуля — не хватает
 }
 
+/** «🎯 Отложить за месяц» по копилкам и что сейчас во вкладке, сумы. */
+export interface SavingsGoal {
+  suggested: number;
+  in_plan: number | null; // null — во вкладке нет строки цели
+  piggies: number;
+  share: number;
+  spent: number; // траты из копилок в месяце
+}
+
 export interface SavingsScreen {
   status: "ok" | "no_month_tab";
   today: string;
   month: SavingsMonth | null;
+  goal?: SavingsGoal | null; // нет — открытых копилок нет
   cushion: Cushion | null;
   piggies: Piggy[];
   plan: PiggyPlanMonth[];

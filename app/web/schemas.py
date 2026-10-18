@@ -638,6 +638,16 @@ class MonthPlanOut(ApiModel):
     ready: list[str]  # копилки, собранные к сроку в этом месяце
 
 
+class SavingsGoalOut(ApiModel):
+    """«🎯 Отложить за месяц» по копилкам (спека 4.7) и что сейчас во вкладке, сумы."""
+
+    suggested: float  # до тысячи
+    in_plan: float | None  # строка цели вкладки; None — строки нет
+    piggies: float
+    share: float
+    spent: float  # траты из копилок в месяце
+
+
 class SavingsMonthOut(ApiModel):
     """Первый месяц плана: сколько отложить, сумы."""
 
@@ -663,6 +673,7 @@ class SavingsScreenOut(ApiModel):
     status: Literal["ok", "no_month_tab"]
     today: date
     month: SavingsMonthOut | None = None
+    goal: SavingsGoalOut | None = None  # None — открытых копилок нет
     cushion: CushionOut | None = None
     piggies: list[PiggyOut] = []
     plan: list[MonthPlanOut] = []

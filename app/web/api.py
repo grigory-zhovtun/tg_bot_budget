@@ -42,6 +42,7 @@ from app.services.piggy import (
     Piggy,
     PiggyState,
     distribute,
+    goal_of,
 )
 from app.services.plan import (
     ArticleChange,
@@ -122,6 +123,7 @@ from app.web.schemas import (
     RunwayOut,
     SaveIn,
     SavingMonthOut,
+    SavingsGoalOut,
     SavingsMonthOut,
     SavingsOut,
     SavingsScreenOut,
@@ -465,6 +467,11 @@ def piggy_out(state: PiggyState) -> PiggyOut:
     )
 
 
+def thousands(value: float) -> float:
+    """Сумы до тысячи — как пишем «Отложить за месяц» в таблицу."""
+    return float(round(value / 1000) * 1000)
+
+
 def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOut:
     """«Накопления» для экрана; без вкладки месяца — только статус."""
     if found is None:
@@ -502,10 +509,23 @@ def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOu
                 "over": _rounded(screen.over, cushion.currency),
             }
         )
+    found_goal = goal_of(screen, first.month) if first is not None else None
+    goal = None
+    if found_goal is not None and any(
+        state.status != "broken" for state in screen.piggies
+    ):
+        goal = SavingsGoalOut(
+            suggested=thousands(found_goal.total),
+            in_plan=None if screen.in_plan is None else float(round(screen.in_plan)),
+            piggies=float(round(found_goal.piggies)),
+            share=float(round(found_goal.share)),
+            spent=float(round(found_goal.spent)),
+        )
     return SavingsScreenOut(
         status="ok",
         today=today,
         month=month,
+        goal=goal,
         cushion=cushion,
         piggies=[piggy_out(state) for state in screen.piggies],
         plan=[

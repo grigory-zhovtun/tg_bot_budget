@@ -727,6 +727,13 @@ function piggy(changes: Partial<Piggy>): Piggy {
 export const savingsFixture: SavingsScreen = {
   status: "ok",
   today: "2026-10-10",
+  goal: {
+    suggested: 7_200_000,
+    in_plan: 2_000_000,
+    piggies: 6_000_000,
+    share: 4_000_000,
+    spent: 2_800_000,
+  },
   month: {
     month: "2026-10",
     piggy: 6_000_000,
