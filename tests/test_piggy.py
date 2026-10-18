@@ -477,11 +477,16 @@ def screen(
     today: date = TODAY,
     budget: Any = None,
     rows: list[list[Any]] | None = None,
+    share: float = 1.0,
+    head: list[Any] | None = None,
+    **options: Any,
 ) -> Screen:
-    # список вкладки: аванс 15-го и ЗП 30-го — день денег 30-е, поступлений 12 млн
+    # список вкладки: аванс 15-го и ЗП 30-го — день денег 30-е, поступлений 12 млн;
+    # 100 % по умолчанию — план без ограничения процентом (как до процента)
     month = tab() if rows is None else rows
+    found = book(*piggies, moves=moves, head=head)
     return savings_screen(
-        book(*piggies, moves=moves), frame(*fact), month, today, RATES, budget, 0.1, 6
+        found, frame(*fact), month, today, RATES, budget, share, 6, **options
     )
 
 
@@ -552,19 +557,25 @@ def test_done_when_collected_reaches_the_target() -> None:
 
 
 def test_the_share_goes_to_the_cushion_under_a_month() -> None:
-    found = screen(piggy_row(**GOAL), fact=spending_months(), budget=frozen(500))
+    found = screen(
+        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(500)
+    )
     assert found.share_to == "cushion"  # 6 млн при тратах 10 млн — 0,6 месяца
     assert state(found, "car001").this_month == 0
 
 
 def test_a_goal_without_a_part_is_not_in_the_month_plan() -> None:
     # иначе экран пишет «пополам: подушка и «Машина»», а план года — «Машина 0»
-    found = screen(piggy_row(**GOAL), fact=spending_months(), budget=frozen(500))
+    found = screen(
+        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(500)
+    )
     assert found.plan[0].goals == {}
 
 
 def test_the_share_splits_between_a_month_and_the_target() -> None:
-    found = screen(piggy_row(**GOAL), fact=spending_months(), budget=frozen(2000))
+    found = screen(
+        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(2000)
+    )
     assert found.share_to == "split"  # 24 млн — 2,4 месяца
     # 10 % от поступлений 12 млн — 1,2 млн, половина цели: 600 000 = $50
     assert state(found, "car001").this_month == 50
@@ -573,7 +584,9 @@ def test_the_share_splits_between_a_month_and_the_target() -> None:
 
 
 def test_the_share_goes_to_goals_from_the_target() -> None:
-    found = screen(piggy_row(**GOAL), fact=spending_months(), budget=frozen(6000))
+    found = screen(
+        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(6000)
+    )
     assert found.share_to == "goals"  # 72 млн — 7,2 месяца из 6
     assert state(found, "car001").this_month == 100
 
@@ -586,6 +599,7 @@ def test_a_goal_at_its_target_passes_its_part() -> None:
         piggy_row(**laptop),
         moves=(move_row(id="car001", day="01.09.2026", amount=1000, currency="USD"),),
         fact=spending_months(),
+        share=0.1,
         budget=frozen(2000),  # подушка 1000 $ = 12 млн — 1,2 месяца
     )
     assert state(found, "car001").status == "done"
@@ -632,8 +646,8 @@ def test_enough_compares_money_for_life_with_ordinary_spending() -> None:
             fact_row(date(2026, month, 4), "🎉 ПРАЗДНИК", "сезонный", 2_000_000),
         )
     )
-    found = screen(piggy_row(), fact=fact)
-    # отложить: 6 млн в «Новый год» и 10 % от 40 млн; обычные траты — без статьи копилки
+    found = screen(piggy_row(), fact=fact, share=0.25)
+    # отложить: 25 % от 40 млн (копилки — внутри них); обычные траты — без статьи копилки
     assert found.enough == Enough(
         income=40_000_000,
         save=10_000_000,
@@ -683,6 +697,7 @@ def test_a_goal_gets_no_more_than_it_lacks() -> None:
         piggy_row(**car),
         moves=(move_row(id="car001", day="01.09.2026", amount=980, currency="USD"),),
         fact=spending_months(),
+        share=0.1,
         budget=frozen(6000),  # подушка 5020 $ ≈ 6 месяцев — вся доля целям
     )
     # не хватает 20 $ = 240 000: больше цель не берёт, остальное — подушке
@@ -774,19 +789,20 @@ from app.services.piggy import goal_of  # noqa: E402
 OCTOBER, NOVEMBER, DECEMBER = date(2026, 10, 1), date(2026, 11, 1), date(2026, 12, 1)
 
 
-def test_the_month_goal_adds_the_share_and_takes_the_spending() -> None:
-    found = screen(piggy_row())
+def test_the_month_goal_takes_the_spending_from_the_capacity() -> None:
+    # 50 % от 12 млн — 6 млн в месяц: копилки и остаток вместе, минус траты из копилок
+    found = screen(piggy_row(), share=0.5)
     october = goal_of(found, OCTOBER)
     assert october is not None
     assert (october.piggies, october.share, october.spent, october.total) == (
         pytest.approx(6_000_000),
-        pytest.approx(1_200_000),
+        pytest.approx(0),
         0,
-        pytest.approx(7_200_000),
+        pytest.approx(6_000_000),
     )
-    assert goal_of(found, NOVEMBER).total == pytest.approx(7_200_000)
+    assert goal_of(found, NOVEMBER).total == pytest.approx(6_000_000)
     december = goal_of(found, DECEMBER)
-    assert december.total == pytest.approx(-9_800_000)
+    assert december.total == pytest.approx(6_000_000 - 12_000_000)
     assert [(item.name, item.uzs) for item in december.from_piggies] == [
         ("Новый год", pytest.approx(12_000_000))
     ]
@@ -798,13 +814,15 @@ def test_gifts_before_the_deadline_month_lower_the_goal() -> None:
         moves=(move_row(day="30.10.2026", amount=6_000_000),),
         fact=(spend(date(2026, 11, 10), 2_400_000),),
         today=date(2026, 11, 15),
+        share=0.5,
     )
     november = goal_of(found, NOVEMBER)
     assert (november.spent, november.total) == (
         pytest.approx(2_400_000),
-        pytest.approx(4_800_000),
+        pytest.approx(6_000_000 - 2_400_000),
     )
-    assert goal_of(found, DECEMBER).total == pytest.approx(-7_400_000)
+    # в декабре из копилки уйдёт остаток собранного: 12 − 2,4 млн
+    assert goal_of(found, DECEMBER).total == pytest.approx(6_000_000 - 9_600_000)
 
 
 def test_a_late_piggy_spends_only_what_it_collected() -> None:
@@ -832,3 +850,101 @@ def test_a_row_prefix_starts_its_key() -> None:
     key = fact_key(day, "🎉 ПРАЗДНИК", "сезонный", 2_400_000, "UZS", "VISA 1111 UZS",
                    "AI: подарки")  # fmt: skip
     assert key.startswith(prefix + "|")
+
+
+DAYS = {
+    "id": "bd0001",
+    "name": "Дни рождения",
+    "target": 10_000_000,
+    "deadline": "01.08.2027",
+    "sub": "день рождения",
+}
+
+
+def test_the_percent_caps_the_month() -> None:
+    found = screen(piggy_row(), piggy_row(**TRIP), share=0.1)
+    assert found.capacity == pytest.approx(1_200_000)
+    assert found.plan[0].total == pytest.approx(1_200_000)
+    new_year, trip = state(found, "p3k9za"), state(found, "tr0001")
+    assert (new_year.status, new_year.forecast, new_year.short) == (
+        "short",
+        pytest.approx(2_400_000),
+        9_600_000,
+    )
+    assert (trip.status, trip.forecast, trip.short) == (
+        "short",
+        pytest.approx(600),
+        1_900,
+    )
+    assert found.percent_needed == pytest.approx(0.5)
+
+
+def test_the_order_puts_the_trip_first() -> None:
+    found = screen(
+        piggy_row(), piggy_row(**TRIP), share=0.1, order=("tr0001", "p3k9za")
+    )
+    new_year, trip = state(found, "p3k9za"), state(found, "tr0001")
+    assert trip.forecast == pytest.approx(800)
+    assert (new_year.status, new_year.forecast, new_year.short) == (
+        "short",
+        pytest.approx(0),
+        12_000_000,
+    )
+    assert [(item.piggy.id, item.order) for item in found.piggies] == [
+        ("tr0001", 1),
+        ("p3k9za", 2),
+    ]
+
+
+def test_enough_percent_keeps_the_old_plan() -> None:
+    found = screen(piggy_row(), piggy_row(**TRIP), share=0.5)
+    totals = [round(month.total) for month in found.plan[:9]]
+    assert totals == [6_000_000] * 2 + [5_000_000] * 6 + [3_500_000]
+    assert all(item.status != "short" for item in found.piggies)
+    assert found.percent_needed == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("share", [0.03, 0.1, 0.3])
+def test_monthly_sums_never_exceed_the_capacity(share: float) -> None:
+    found = screen(piggy_row(), piggy_row(**TRIP), piggy_row(**DAYS), share=share)
+    assert all(month.total <= found.capacity + 1_000 * 3 for month in found.plan)
+
+
+def test_the_sheet_percent_wins_and_the_preview_wins_over_it() -> None:
+    head = [*LIST_HEADER, PERCENT_LABEL, 5]
+    found = screen(piggy_row(), head=head, share=0.1)
+    assert (found.percent, found.percent_source) == (pytest.approx(0.05), "sheet")
+    preview = screen(piggy_row(), head=head, share=0.1, percent=0.2)
+    assert (preview.percent, preview.percent_source) == (pytest.approx(0.2), "preview")
+    bad = screen(piggy_row(), head=[*LIST_HEADER, PERCENT_LABEL, "abc"], share=0.1)
+    assert (bad.percent, bad.percent_source) == (pytest.approx(0.1), "bad")
+    plain = screen(piggy_row(), share=0.1)
+    assert (plain.percent, plain.percent_source) == (pytest.approx(0.1), "default")
+
+
+def test_a_piggy_without_a_number_goes_after_the_numbered() -> None:
+    found = screen(piggy_row(order=""), piggy_row(**TRIP, order=1), share=0.1)
+    assert [(item.piggy.id, item.order) for item in found.piggies] == [
+        ("tr0001", 1),
+        ("p3k9za", 2),
+    ]
+
+
+def test_next_year_deadlines_come_after_all_nearest() -> None:
+    # «Новый год 2027» разбирается после июньского «Отпуска», а не сразу за 2026-м
+    found = screen(piggy_row(order=1), piggy_row(**TRIP, order=2), share=0.1)
+    assert state(found, "tr0001").forecast == pytest.approx(600)
+
+
+def test_no_income_in_the_list_uses_the_average_income() -> None:
+    incomes = tuple(
+        fact_row(date(2026, month, 5), "💰 ДОХОДЫ", "зарплата", 10_000_000)
+        for month in (7, 8, 9)
+    )
+    found = screen(
+        piggy_row(),
+        fact=incomes,
+        rows=tab(items=[("Квартплата", 18, -650, "USD")]),
+        share=0.1,
+    )
+    assert found.capacity == pytest.approx(1_000_000)

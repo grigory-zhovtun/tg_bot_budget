@@ -8,7 +8,11 @@ from typing import Any
 from gspread.exceptions import WorksheetNotFound
 
 from app import config
-from app.services.google_sheets import PIGGY_JOURNAL_HEADER, PIGGY_LIST_HEADER
+from app.services.google_sheets import (
+    PERCENT_LABEL,
+    PIGGY_JOURNAL_HEADER,
+    PIGGY_LIST_HEADER,
+)
 from app.services.piggy_sync import goal_cells, sync_piggy
 from tests.test_day_budget import FACT_HEADER, RATES, fact_row, tab
 
@@ -28,7 +32,11 @@ class SyncSheets:
     """Таблица в памяти с методами GoogleSheetsService, которые зовёт фон."""
 
     def __init__(self, rows: list[list[Any]], moves: list[list[Any]]) -> None:
-        self.rows = [list(PIGGY_LIST_HEADER), *(list(row) for row in rows)]
+        # 50 % от 12 млн — 6 млн в месяц: план без ограничения процентом
+        self.rows = [
+            [*PIGGY_LIST_HEADER, PERCENT_LABEL, 50],
+            *(list(row) for row in rows),
+        ]
         self.journal = [list(PIGGY_JOURNAL_HEADER), *(list(row) for row in moves)]
         self.fact = [FACT_HEADER, GIFTS]
         self.cells: list[dict[str, Any]] = []
@@ -144,11 +152,12 @@ def test_an_empty_window_is_written_as_a_plain_zero() -> None:
 
 
 def test_goal_cells_count_the_month_of_the_new_tab() -> None:
-    # 17.10: «Новый год» 12 млн к 20.12, ноябрь — 6 млн взноса + 10 % от 12 млн
+    # 17.10: «Новый год» 12 млн к 20.12; 50 % от 12 млн — 6 млн в месяц, весь
+    # ноябрьский — взнос «Нового года»
     sheets = SyncSheets([ROW], [])
     sheets.fact = [FACT_HEADER]
     cells = goal_cells(sheets, date(2026, 10, 17), *CATALOG)
-    assert cells(tab(goal=2_000_000), date(2026, 11, 1)) == (20, 7_200_000)
+    assert cells(tab(goal=2_000_000), date(2026, 11, 1)) == (20, 6_000_000)
 
 
 def test_goal_cells_without_open_piggies_leave_the_cell() -> None:

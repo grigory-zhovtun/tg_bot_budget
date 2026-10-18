@@ -645,7 +645,7 @@ class PiggyOut(ApiModel):
     this_month: float
     left_this_month: float
     status: Literal[
-        "on_track", "late", "no_target", "done", "leftover", "goal", "broken"
+        "on_track", "late", "short", "no_target", "done", "leftover", "goal", "broken"
     ]
     short: float
     leftover: float

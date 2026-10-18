@@ -15,7 +15,11 @@ from app import config
 from app.handlers.receipts import DIRTY
 from app.services.analytics_service import SavingsTab
 from app.services.day_budget import day_budget
-from app.services.google_sheets import PIGGY_JOURNAL_HEADER, PIGGY_LIST_HEADER
+from app.services.google_sheets import (
+    PERCENT_LABEL,
+    PIGGY_JOURNAL_HEADER,
+    PIGGY_LIST_HEADER,
+)
 from app.services.piggy import read_book, savings_screen
 from app.services.savings import month_savings
 from app.web.server import create_app
@@ -46,12 +50,13 @@ class PiggySheets:
         rows: list[list[Any]] | None = None,
         moves: list[list[Any]] | None = None,
         exists: bool = True,
+        percent: float = 100,
     ) -> None:
-        # копии строк: правка в одном тесте не должна менять ROW для следующих
+        # копии строк: правка в одном тесте не должна менять ROW для следующих;
+        # 100 % от поступлений списка — план без ограничения процентом
+        self.head = [*PIGGY_LIST_HEADER, PERCENT_LABEL, percent]
         self.list = (
-            [list(PIGGY_LIST_HEADER), *(list(row) for row in rows or [])]
-            if exists
-            else None
+            [list(self.head), *(list(row) for row in rows or [])] if exists else None
         )
         self.journal = (
             [list(PIGGY_JOURNAL_HEADER), *(list(row) for row in moves or [])]
@@ -69,9 +74,7 @@ class PiggySheets:
         if self.list is None:
             time.sleep(0.05)  # создание листа идёт по сети — второй запрос успеет
             self.created += 1
-            self.list, self.journal = [list(PIGGY_LIST_HEADER)], [
-                list(PIGGY_JOURNAL_HEADER)
-            ]
+            self.list, self.journal = [list(self.head)], [list(PIGGY_JOURNAL_HEADER)]
 
     def add_piggy(self, row: list[Any]) -> int:
         if self.fail:
@@ -477,7 +480,8 @@ def test_savings_answer_has_the_goal_and_the_plan_cell() -> None:
     assert goal["suggested"] == round(
         goal["piggies"] + goal["share"] - goal["spent"], -3
     )
-    assert goal["share"] == 1_200_000
+    # копилки и остаток вместе — 100 % от поступлений списка (12 млн)
+    assert goal["piggies"] + goal["share"] == 12_000_000
 
 
 def test_without_piggies_there_is_no_goal() -> None:
