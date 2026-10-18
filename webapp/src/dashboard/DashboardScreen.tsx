@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { Api, Dashboard } from "../api";
+import type { Api, Bootstrap, Dashboard } from "../api";
 import { longDay, money, short, withCurrency } from "../format";
 import { useResource, useStore } from "../store";
 import Ahead, { NoForecastNote } from "./Ahead";
@@ -136,13 +136,14 @@ function Sums({ data }: { data: Dashboard }) {
 
 interface SectionProps {
   api: Api;
+  boot: Bootstrap | null;
   data: Dashboard;
   section: Section;
   refresh: number;
 }
 
 /** Карточки выбранной вкладки: «Накопления» — свой ответ, остальные — «Сводки». */
-function SectionCards({ api, data, section, refresh }: SectionProps) {
+function SectionCards({ api, boot, data, section, refresh }: SectionProps) {
   switch (section) {
     case "today":
       return (
@@ -181,7 +182,7 @@ function SectionCards({ api, data, section, refresh }: SectionProps) {
         </>
       );
     case "savings":
-      return <SavingsTab api={api} refresh={refresh} />;
+      return <SavingsTab api={api} boot={boot} refresh={refresh} />;
     case "ahead":
       return <Ahead data={data} />;
   }
@@ -189,13 +190,21 @@ function SectionCards({ api, data, section, refresh }: SectionProps) {
 
 interface ContentProps {
   api: Api;
+  boot: Bootstrap | null;
   data: Dashboard;
   section: Section;
   refresh: number;
   onSection: (section: Section) => void;
 }
 
-function Content({ api, data, section, refresh, onSection }: ContentProps) {
+function Content({
+  api,
+  boot,
+  data,
+  section,
+  refresh,
+  onSection,
+}: ContentProps) {
   if (data.status === "no_month_tab") {
     // в таком ответе нет данных ни для одной вкладки
     return <p>Вкладки месяца нет — бот создаёт её 1-го числа.</p>;
@@ -203,12 +212,24 @@ function Content({ api, data, section, refresh, onSection }: ContentProps) {
   return (
     <>
       <SectionSwitch section={section} onSection={onSection} />
-      <SectionCards api={api} data={data} section={section} refresh={refresh} />
+      <SectionCards
+        api={api}
+        boot={boot}
+        data={data}
+        section={section}
+        refresh={refresh}
+      />
     </>
   );
 }
 
-export default function DashboardScreen({ api }: { api: Api }) {
+export default function DashboardScreen({
+  api,
+  boot = null,
+}: {
+  api: Api;
+  boot?: Bootstrap | null; // каталог — для окон копилок
+}) {
   const store = useStore();
   const load = useCallback((fresh: boolean) => api.dashboard(fresh), [api]);
   const { data, loading, error, reload } = useResource<Dashboard>(
@@ -257,6 +278,7 @@ export default function DashboardScreen({ api }: { api: Api }) {
       {data && (
         <Content
           api={api}
+          boot={boot}
           data={data}
           section={section}
           refresh={refreshed}

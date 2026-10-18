@@ -201,7 +201,7 @@ export default function App({ api }: { api: Api }) {
         {tab === "entry" && boot && (
           <EntryScreen api={api} boot={boot} onCatalogChanged={reload} />
         )}
-        {tab === "dashboard" && <DashboardScreen api={api} />}
+        {tab === "dashboard" && <DashboardScreen api={api} boot={boot} />}
         {tab === "dashboard" && boot && (
           <HomeScreenButton botUsername={boot.bot_username} />
         )}

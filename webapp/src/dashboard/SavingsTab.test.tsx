@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Api, SavingsScreen } from "../api";
-import { savingsFixture } from "../mocks/fixtures";
+import { bootstrapFixture, savingsFixture } from "../mocks/fixtures";
 import { fakeApi } from "../test/fakeApi";
 import SavingsTab from "./SavingsTab";
 
@@ -26,7 +26,7 @@ function withSavings(changes: Partial<SavingsScreen>): Api {
 
 describe("SavingsTab", () => {
   it("says how much to set aside this month", async () => {
-    render(<SavingsTab api={fakeApi()} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
     expect(await screen.findByText("В октябре отложить")).toBeTruthy();
     expect(
       screen.getByText("в копилки по плану 6,00 млн, осталось 6,00 млн"),
@@ -44,7 +44,7 @@ describe("SavingsTab", () => {
         goals: [{ id: "car001", amount: 2_000_000 }],
       },
     });
-    render(<SavingsTab api={api} refresh={0} />);
+    render(<SavingsTab api={api} boot={null} refresh={0} />);
     expect(
       await screen.findByText(
         "10 % от поступлений ≈ 4,00 млн — пополам: подушка и «Машина»",
@@ -53,7 +53,7 @@ describe("SavingsTab", () => {
   });
 
   it("tells whether the plan leaves enough for life", async () => {
-    render(<SavingsTab api={fakeApi()} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
     const line = await screen.findByText(
       "на жизнь остаётся 31,80 млн, обычные траты — 34,00 млн: не хватает 2,20 млн",
     );
@@ -62,7 +62,7 @@ describe("SavingsTab", () => {
   });
 
   it("shows the cushion without the money of the piggies", async () => {
-    render(<SavingsTab api={fakeApi()} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
     expect(
       await screen.findByText(
         "$1 100 = заморожено $1 500 − копилки $400 (на вечер вчера)",
@@ -74,7 +74,7 @@ describe("SavingsTab", () => {
     const api = withSavings({
       cushion: { ...cushion(), amount: 0, over: 300 },
     });
-    render(<SavingsTab api={api} refresh={0} />);
+    render(<SavingsTab api={api} boot={null} refresh={0} />);
     expect(
       await screen.findByText(
         "В копилках на $300 больше, чем на долларовой карте, — отложите разницу или поправьте копилки",
@@ -83,7 +83,7 @@ describe("SavingsTab", () => {
   });
 
   it("lists the piggies by deadline with their state", async () => {
-    render(<SavingsTab api={fakeApi()} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
     const list = await screen.findByRole("list", { name: "Копилки" });
     const cards = within(list).getAllByRole("listitem");
     expect(
@@ -108,7 +108,9 @@ describe("SavingsTab", () => {
   });
 
   it("invites to start the first piggy", async () => {
-    render(<SavingsTab api={withSavings({ piggies: [] })} refresh={0} />);
+    render(
+      <SavingsTab api={withSavings({ piggies: [] })} boot={null} refresh={0} />,
+    );
     expect(
       await screen.findByText(
         "Заведите копилку на Новый год, отпуск или другую большую трату — бот разложит взносы по месяцам",
@@ -118,7 +120,7 @@ describe("SavingsTab", () => {
 
   it("shows three months of the plan and the whole year on request", async () => {
     const user = userEvent.setup();
-    render(<SavingsTab api={fakeApi()} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
     const plan = await screen.findByRole("region", { name: "План на год" });
     expect(within(plan).getAllByRole("listitem")).toHaveLength(3);
     expect(
@@ -133,7 +135,7 @@ describe("SavingsTab", () => {
   });
 
   it("keeps the savings rate at the bottom", async () => {
-    render(<SavingsTab api={fakeApi()} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
     await screen.findByText("В октябре отложить");
     expect(
       screen
@@ -150,7 +152,7 @@ describe("SavingsTab", () => {
 
   it("explains a missing month tab", async () => {
     const api = withSavings({ status: "no_month_tab", month: null });
-    render(<SavingsTab api={api} refresh={0} />);
+    render(<SavingsTab api={api} boot={null} refresh={0} />);
     expect(
       await screen.findByText(
         "Вкладки месяца нет — бот создаёт её 1-го числа.",
@@ -160,9 +162,45 @@ describe("SavingsTab", () => {
 
   it("reads the table anew when the summary is refreshed", async () => {
     const api = fakeApi();
-    const { rerender } = render(<SavingsTab api={api} refresh={0} />);
+    const { rerender } = render(
+      <SavingsTab api={api} boot={null} refresh={0} />,
+    );
     await screen.findByText("В октябре отложить");
-    rerender(<SavingsTab api={api} refresh={1} />);
+    rerender(<SavingsTab api={api} boot={null} refresh={1} />);
     expect(api.savings).toHaveBeenLastCalledWith(true);
+  });
+
+  it("opens a piggy from its card and closes the window after a save", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(<SavingsTab api={api} boot={bootstrapFixture} refresh={0} />);
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Открыть копилку «Новый год»",
+      }),
+    );
+    expect(screen.getByRole("dialog", { name: "Новый год" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(api.updatePiggy).toHaveBeenCalled();
+    await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("starts a new piggy and sets a sum aside from the top", async () => {
+    const user = userEvent.setup();
+    render(<SavingsTab api={fakeApi()} boot={bootstrapFixture} refresh={0} />);
+    await user.click(await screen.findByRole("button", { name: "＋ Копилка" }));
+    expect(screen.getByRole("dialog", { name: "Новая копилка" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Закрыть" }));
+    await user.click(screen.getByRole("button", { name: "Отложил…" }));
+    expect(screen.getByRole("dialog", { name: "Отложил" })).toBeTruthy();
+  });
+
+  it("only shows the piggies until the catalog is loaded", async () => {
+    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
+    await screen.findByText("В октябре отложить");
+    expect(screen.queryByRole("button", { name: "＋ Копилка" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Открыть копилку «Новый год»" }),
+    ).toBeNull();
   });
 });
