@@ -27,6 +27,7 @@ AVERAGE_MONTHS = 3  # средние траты для подушки — за �
 RATE_MONTHS = 3  # норма сбережений крупно — за столько последних полных месяцев
 CHART_MONTHS = 6  # столбики нормы — по стольким полным месяцам
 FULL_FROM_DAY = 5  # траты ведут не с начала месяца (позже 5-го) — он не полный
+TINY_SHARE = 10_000.0  # сумов: доля поступления меньше — ни «🛟», ни «🐷»
 RATES_AGE = 300.0  # секунд: курс для эквивалента в подсказке — из копии не старше
 
 
@@ -227,12 +228,33 @@ class RatesSource(Protocol):
     def get_rates(self, max_age: float = 0.0) -> Rates: ...
 
 
+def _has_piggies(gs: RatesSource) -> bool:
+    """Есть лист «Копилки»: тогда про процент с поступления скажет «🐷»."""
+    reader = getattr(gs, "get_piggy", None)
+    if reader is None:
+        return False
+    try:
+        piggies, _ = reader(RATES_AGE)
+    except Exception:
+        return False
+    return bool(piggies)
+
+
 def save_hint(gs: RatesSource, rows: Sequence[SheetRow]) -> list[str]:
-    """Подсказка «Отложите» для записанных строк по настройкам бота.
+    """Подсказка «Отложите» для записанных строк по настройкам бота — только без
+    листа «Копилки» (с ним процент и раскладку называет сообщение «🐷»).
 
     Курс — из копии листа, и только если среди строк есть поступление.
     """
-    if config.SAVE_SHARE <= 0 or not incomes(rows):
+    came = incomes(rows)
+    if config.SAVE_SHARE <= 0 or not came or _has_piggies(gs):
         return []
     rates = gs.get_rates(RATES_AGE) if config.FROZEN_CURRENCY else None
+    if rates is not None:
+        share = sum(
+            (rates.convert(row.amount, row.currency, "UZS") or 0.0) * config.SAVE_SHARE
+            for row in came
+        )
+        if share < TINY_SHARE:
+            return []
     return save_lines(rows, config.SAVE_SHARE, config.FROZEN_CURRENCY, rates)

@@ -43,34 +43,67 @@ describe("SavingsTab", () => {
       spent: 2_800_000,
     };
     render(<SavingsTab api={withSavings({ goal })} boot={null} refresh={0} />);
-    await screen.findByText("В октябре отложить");
+    await screen.findByText("Откладываем 25 % с поступлений");
     expect(screen.queryByText(/В плане месяца/)).toBeNull();
   });
 
-  it("says how much to set aside this month", async () => {
+  it("says the percent and how much to set aside of what came in", async () => {
     render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
-    expect(await screen.findByText("В октябре отложить")).toBeTruthy();
     expect(
-      screen.getByText("в копилки по плану 6,00 млн, осталось 6,00 млн"),
+      await screen.findByText("Откладываем 25 % с поступлений"),
     ).toBeTruthy();
     expect(
-      screen.getByText("10 % от поступлений ≈ 4,00 млн — в подушку"),
+      screen.getByText("В октябре пришло 16,00 млн — отложить 4,00 млн"),
     ).toBeTruthy();
+    expect(screen.getByText("«Новый год» 4,00 млн")).toBeTruthy();
+    expect(
+      screen.getByText("Чтобы успеть всё к срокам, нужно 30 %").className,
+    ).toContain("text-warn");
   });
 
-  it("names the goals that share the 10 %", async () => {
+  it("names the cushion part and a percent that is enough", async () => {
     const api = withSavings({
-      month: {
-        ...month(),
-        share_to: "split",
-        goals: [{ id: "car001", amount: 2_000_000 }],
-      },
+      month: { ...month(), cushion: 1_000_000, percent_needed: 20 },
     });
     render(<SavingsTab api={api} boot={null} refresh={0} />);
     expect(
-      await screen.findByText(
-        "10 % от поступлений ≈ 4,00 млн — пополам: подушка и «Машина»",
-      ),
+      await screen.findByText("«Новый год» 4,00 млн · в подушку 1,00 млн"),
+    ).toBeTruthy();
+    expect(screen.getByText("Успеваем всё к срокам ✓")).toBeTruthy();
+  });
+
+  it("says when the percent cell cannot be read", async () => {
+    const api = withSavings({
+      month: { ...month(), percent: 10, percent_source: "bad" },
+    });
+    render(<SavingsTab api={api} boot={null} refresh={0} />);
+    expect(
+      await screen.findByText("Процент в таблице не читается — считаю по 10 %"),
+    ).toBeTruthy();
+  });
+
+  it("says nothing came in yet", async () => {
+    const api = withSavings({
+      month: { ...month(), received: 0, due: 0, left: 0 },
+    });
+    render(<SavingsTab api={api} boot={null} refresh={0} />);
+    expect(
+      await screen.findByText("В октябре поступлений ещё не было"),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Отложил…" })).toBeNull();
+  });
+
+  it("opens the percent and the order windows", async () => {
+    const user = userEvent.setup();
+    render(<SavingsTab api={fakeApi()} boot={bootstrapFixture} refresh={0} />);
+    await user.click(await screen.findByRole("button", { name: "Изменить" }));
+    expect(
+      screen.getByRole("dialog", { name: "Откладываем с поступлений" }),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Закрыть" }));
+    await user.click(screen.getByRole("button", { name: "Порядок" }));
+    expect(
+      screen.getByRole("dialog", { name: "Порядок важности" }),
     ).toBeTruthy();
   });
 
@@ -158,13 +191,13 @@ describe("SavingsTab", () => {
 
   it("keeps the savings rate at the bottom", async () => {
     render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
-    await screen.findByText("В октябре отложить");
+    await screen.findByText("Откладываем 25 % с поступлений");
     expect(
       screen
         .getAllByRole("heading", { level: 2 })
         .map((heading) => heading.textContent),
     ).toEqual([
-      "В октябре отложить",
+      "Откладываем 25 % с поступлений",
       "🛟 Подушка безопасности",
       "🐷 Копилки",
       "План на год",
@@ -187,7 +220,7 @@ describe("SavingsTab", () => {
     const { rerender } = render(
       <SavingsTab api={api} boot={null} refresh={0} />,
     );
-    await screen.findByText("В октябре отложить");
+    await screen.findByText("Откладываем 25 % с поступлений");
     rerender(<SavingsTab api={api} boot={null} refresh={1} />);
     expect(api.savings).toHaveBeenLastCalledWith(true);
   });
@@ -219,8 +252,10 @@ describe("SavingsTab", () => {
 
   it("only shows the piggies until the catalog is loaded", async () => {
     render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
-    await screen.findByText("В октябре отложить");
+    await screen.findByText("Откладываем 25 % с поступлений");
     expect(screen.queryByRole("button", { name: "＋ Копилка" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Порядок" })).toBeNull();
     expect(
       screen.queryByRole("button", { name: "Открыть копилку «Новый год»" }),
     ).toBeNull();

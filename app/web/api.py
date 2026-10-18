@@ -10,6 +10,7 @@ import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from gspread.exceptions import WorksheetNotFound
@@ -118,6 +119,8 @@ from app.web.schemas import (
     MonthPlanOut,
     MoveIn,
     MoveOut,
+    OrderIn,
+    PercentIn,
     PiggyIn,
     PiggyOut,
     PlanAddableOut,
@@ -205,7 +208,10 @@ PIGGY_FIELDS = {
     "amount": "Сумма — больше нуля",
     "kind": "Такого движения нет — обновите приложение",
     "key": "Трата не подходит — обновите «Накопления»",
+    "percent": "Процент — от 0 до 100, не больше одного знака после запятой",
+    "ids": "Копилки не те — обновите «Накопления»",
 }
+PIGGY_CHANGED = "Копилки поменялись — обновите «Накопления»"
 PIGGY_GONE = "Копилку уже закрыли — обновите «Накопления»"
 SPEND_GONE = "Трата изменилась — обновите «Накопления»"
 CURRENCY_LOCKED = (
@@ -355,6 +361,21 @@ def piggy_text(
     return f"{text}, каждый год" if yearly else text
 
 
+def percent_value(text: str) -> float | None:
+    """Процент предпросмотра: число от 0 до 100, не больше одного знака после
+    запятой; иначе None."""
+    try:
+        value = Decimal(text.strip().replace(",", "."))
+    except InvalidOperation:
+        return None
+    exponent = value.as_tuple().exponent
+    if not value.is_finite() or not isinstance(exponent, int):
+        return None
+    if not 0 <= value <= 100 or exponent < -1:
+        return None
+    return float(value)
+
+
 def piggy_error(fields: set[str] | dict[str, str]) -> JSONResponse:
     named = (
         fields
@@ -442,6 +463,9 @@ def piggy_out(state: PiggyState) -> PiggyOut:
         short=_rounded(state.short, code),
         leftover=_rounded(state.leftover, code),
         error=piggy.error,
+        order=state.order,
+        forecast=None if state.forecast is None else _rounded(state.forecast, code),
+        now=_rounded(state.now, code),
         history=[
             MoveOut(day=move.day, amount=move.amount, kind=move.kind, who=move.who)
             for move in state.history
@@ -468,20 +492,21 @@ def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOu
     month = None
     if first is not None:
         left = sum(
-            state.left_this_month * rates.to_uzs.get(state.piggy.currency, 0.0)
+            state.now * rates.to_uzs.get(state.piggy.currency, 0.0)
             for state in screen.piggies
-            if state.piggy.deadline is not None
+            if state.status != "broken"
         )
+        needed = screen.percent_needed
         month = SavingsMonthOut(
             month=f"{first.month:%Y-%m}",
-            piggy=float(round(first.total)),
-            piggy_left=float(round(left)),
-            share=float(round(first.cushion + sum(first.goals.values()))),
-            share_to=screen.share_to,  # type: ignore[arg-type]
-            goals=[
-                AmountOut(id=key, amount=float(round(value)))
-                for key, value in first.goals.items()
-            ],
+            percent=round(screen.percent * 100, 1),
+            percent_source=screen.percent_source,  # type: ignore[arg-type]
+            percent_needed=None if needed is None else round(needed * 100),
+            capacity=float(round(screen.capacity)),
+            received=float(round(screen.received)),
+            due=float(round(screen.due)),
+            left=float(round(left)),
+            cushion=float(round(screen.cushion_now)),
         )
     cushion = cushion_out(screen.cushion)
     if cushion is not None:
@@ -1082,6 +1107,7 @@ def plan_out(
                 piggies=float(round(piggy_goal.piggies)),
                 share=float(round(piggy_goal.share)),
                 spent=float(round(piggy_goal.spent)),
+                percent=round(piggy_goal.percent * 100, 1),
             )
         ),
         piggy_hints=(
@@ -1399,10 +1425,25 @@ def routes(application: Application) -> list[Route]:
     def catalog() -> tuple[set[str], list[str], dict[str, list[str]]]:
         return bot_catalog(application.bot_data)
 
-    async def read_savings(max_age: float) -> SavingsTab | None:
+    async def read_savings(
+        max_age: float,
+        percent: float | None = None,
+        order: Sequence[str] | None = None,
+    ) -> SavingsTab | None:
         today = local_today(config.ANALYTICS_TIMEZONE)
         analytics = application.bot_data["analytics_service"]
-        return await asyncio.to_thread(analytics.savings, today, *catalog(), max_age)
+        if percent is None and order is None:
+            return await asyncio.to_thread(
+                analytics.savings, today, *catalog(), max_age
+            )
+        return await asyncio.to_thread(
+            analytics.savings,
+            today,
+            *catalog(),
+            max_age,
+            percent=percent,
+            order=order,
+        )
 
     async def plan_goal(first: date, max_age: float) -> MonthGoal | None:
         """«Отложить за месяц» по копилкам для месяца «Плана»; сбой — без подсказок."""
@@ -1428,8 +1469,75 @@ def routes(application: Application) -> list[Route]:
         return JSONResponse(savings_screen_out(found, today).model_dump(mode="json"))
 
     async def savings(request: Request) -> JSONResponse:
+        """«Накопления»; ?percent=7&order=id1,id2 — предпросмотр окон «Процент» и
+        «Порядок»: экран считается так, будто настройка уже такая, без записи."""
         user = current_user(request)
-        return await fresh_savings(user.id, screen_age(request))
+        params = request.query_params
+        percent = None
+        if "percent" in params:
+            percent = percent_value(params["percent"])
+            if percent is None:
+                return piggy_error({"percent"})
+        order = [item for item in params.get("order", "").split(",") if item] or None
+        if percent is None and order is None:
+            return await fresh_savings(user.id, screen_age(request))
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        try:
+            found = await read_savings(
+                screen_age(request), None if percent is None else percent / 100, order
+            )
+        except Exception:
+            logger.exception("Savings preview failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        return JSONResponse(savings_screen_out(found, today).model_dump(mode="json"))
+
+    async def set_percent(request: Request) -> JSONResponse:
+        """«Откладываем N % с поступлений» — в Q1 «Копилок»."""
+        user = current_user(request)
+        body = await piggy_body(request, PercentIn)
+        if isinstance(body, JSONResponse):
+            return body
+        value = float(body.percent)
+        author = await author_name(application.bot, user) or ""
+        gs = application.bot_data["gs_service"]
+        try:
+            async with piggy_lock():
+                await asyncio.to_thread(gs.write_piggy_percent, value)
+        except Exception:
+            logger.exception("Piggy percent failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        text = f"{value:g} % с поступлений".replace(".", ",")
+        return await written(user.id, author, f"процент|{text}")
+
+    async def set_order(request: Request) -> JSONResponse:
+        """Порядок важности: номера в O «Копилок»; набор — ровно копилки порядка."""
+        user = current_user(request)
+        body = await piggy_body(request, OrderIn)
+        if isinstance(body, JSONResponse):
+            return body
+        ids = [str(item) for item in body.ids]
+        if len(set(ids)) != len(ids):
+            return piggy_error({"ids"})
+        author = await author_name(application.bot, user) or ""
+        gs = application.bot_data["gs_service"]
+        try:
+            async with piggy_lock():
+                found = await read_savings(SCREEN_COPY_AGE)
+                states = found.screen.piggies if found is not None else ()
+                names = {state.piggy.id: state.piggy.name for state in states}
+                if any(piggy_id not in names for piggy_id in ids):
+                    return piggy_error({"ids"})
+                ranked = {state.piggy.id for state in states if state.order is not None}
+                numbers = {piggy_id: n for n, piggy_id in enumerate(ids, start=1)}
+                if set(ids) != ranked or not await asyncio.to_thread(
+                    gs.write_piggy_order, numbers
+                ):
+                    return error_response(409, "piggies_changed", PIGGY_CHANGED)
+        except Exception:
+            logger.exception("Piggy order failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        text = " · ".join(f"{n}. {names[piggy_id]}" for piggy_id, n in numbers.items())
+        return await written(user.id, author, f"порядок копилок|{text}")
 
     async def piggy_body(request: Request, model: Any) -> Any:
         try:
@@ -1895,6 +2003,8 @@ def routes(application: Application) -> list[Route]:
         Route("/savings", savings),
         Route("/piggy", add_piggy, methods=["POST"]),
         Route("/piggy/save", save_piggies, methods=["POST"]),
+        Route("/piggy/percent", set_percent, methods=["PUT"]),
+        Route("/piggy/order", set_order, methods=["PUT"]),
         Route("/piggy/{piggy_id}", update_piggy, methods=["PUT"]),
         Route("/piggy/{piggy_id}/close", close_piggy, methods=["POST"]),
         Route("/piggy/{piggy_id}/moves", move_piggy, methods=["POST"]),

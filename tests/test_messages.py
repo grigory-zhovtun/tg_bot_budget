@@ -539,6 +539,28 @@ async def test_an_income_suggests_setting_a_share_aside(
     assert "🛟 Отложите 10 % в подушку: 3 000 000 UZS (≈ $250)" in result.lines
 
 
+@pytest.mark.parametrize("piggy_sheet", [True, False])
+async def test_with_the_piggy_sheet_the_share_is_told_by_the_piggy(
+    monkeypatch: pytest.MonkeyPatch, piggy_sheet: bool
+) -> None:
+    class PiggySheets(FakeSheets):
+        def get_piggy(self, max_age: float = 0.0) -> tuple[list[Any], list[Any]]:
+            return [["ID", "Копилка"]], [["Дата", "ID"]]
+
+    monkeypatch.setattr(config, "SAVE_SHARE", 0.1)
+    update, context, _ = make_chat("", {})
+    context.bot_data["gs_service"] = PiggySheets() if piggy_sheet else FakeSheets()
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    salary = entry_row(
+        30_000_000.0, True, "", "VISA 1111 UZS", "💰 ДОХОДЫ", "зарплата", today
+    )
+    result = await messages.save_rows(
+        context, update.effective_chat, [salary], [], "app:5"
+    )
+    # с листом «Копилки» про процент скажет «🐷»; без него — прежняя строка
+    assert any("🛟" in line for line in result.lines) is not piggy_sheet
+
+
 async def test_an_income_not_written_suggests_nothing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

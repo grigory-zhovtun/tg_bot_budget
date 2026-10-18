@@ -10,6 +10,7 @@ import pytest
 from app import config
 from app.domain import SheetRow
 from app.handlers import piggy
+from tests.test_day_budget import fact_row
 from tests.test_web_piggy import PiggyAnalytics, PiggySheets
 
 TODAY = date(2026, 10, 17)
@@ -30,11 +31,11 @@ def settings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(config, "WEBAPP_URL", "https://budget.example/app/")
 
 
-def context_with(sheets: PiggySheets) -> SimpleNamespace:
+def context_with(sheets: PiggySheets, *fact: list[Any]) -> SimpleNamespace:
     return SimpleNamespace(
         bot_data={
             "gs_service": sheets,
-            "analytics_service": PiggyAnalytics(sheets),
+            "analytics_service": PiggyAnalytics(sheets, *fact),
             **CATALOG,
         },
         bot=SimpleNamespace(send_message=AsyncMock()),
@@ -74,13 +75,25 @@ def told_wife(context: SimpleNamespace) -> list[str]:
     ]
 
 
-async def test_an_income_asks_to_set_the_piggies_part_aside() -> None:
-    context = context_with(PiggySheets([NEW_YEAR], []))
-    await piggy.income_prompt(context, OWNER, OWNER, [salary()])
+def came(day: int, amount: float) -> list[Any]:
+    """Поступление в fact этого месяца (листом — как его прочтёт расчёт)."""
+    return fact_row(date(2026, 10, day), "💰 ДОХОДЫ", "зарплата", amount)
+
+
+# 10 % от поступлений плана (12 млн) — 1,2 млн в месяц; 4 млн пришли 15-го
+ADVANCE = came(15, 4_000_000)
+
+
+async def test_one_piggy_message_after_an_income() -> None:
+    context = context_with(
+        PiggySheets([NEW_YEAR], [], percent=10), ADVANCE, came(17, 8_000_000)
+    )
+    await piggy.income_prompt(context, OWNER, OWNER, [salary(8_000_000)])
     call = context.bot.send_message.await_args
     assert call.kwargs["chat_id"] == OWNER
     assert call.kwargs["text"] == (
-        "🐷 В копилки по плану октября осталось: «Новый год» 6 000 000 UZS"
+        "🐷 С поступления 8 000 000 UZS — 10 %: 800 000 UZS. "
+        "За октябрь отложить: «Новый год» 1 200 000 UZS"
     )
     [[saved, part]] = call.kwargs["reply_markup"].inline_keyboard
     assert (saved.text, saved.callback_data) == ("Отложил всё", "piggy:all:2026-10")
@@ -89,16 +102,40 @@ async def test_an_income_asks_to_set_the_piggies_part_aside() -> None:
     assert part.web_app.url.endswith("&open=save")
 
 
-@pytest.mark.parametrize(
-    "moves",
-    [
-        # уже отложено за месяц — откладывать нечего
-        [["05.10.2026", "p3k9za", "Новый год", 6000000, "UZS", "отложил", "Иван", ""]],
-    ],
-)
-async def test_nothing_left_says_nothing(moves: list[list[Any]]) -> None:
-    context = context_with(PiggySheets([NEW_YEAR], moves))
-    await piggy.income_prompt(context, OWNER, OWNER, [salary()])
+async def test_the_cushion_part_names_only_this_income() -> None:
+    # 50 % — 6 млн в месяц, все — «Новому году»; с 16 млн пришедших это 8 млн:
+    # 6 млн копилке, 2 млн — подушке, и все 2 млн — от зарплаты 17-го
+    context = context_with(
+        PiggySheets([NEW_YEAR], [], percent=50), ADVANCE, came(17, 12_000_000)
+    )
+    await piggy.income_prompt(context, OWNER, OWNER, [salary(12_000_000)])
+    assert context.bot.send_message.await_args.kwargs["text"] == (
+        "🐷 С поступления 12 000 000 UZS — 50 %: 6 000 000 UZS. "
+        "За октябрь отложить: «Новый год» 6 000 000 UZS "
+        "· в подушку с этого поступления 2 000 000 UZS"
+    )
+
+
+async def test_nothing_for_the_piggies_says_all_to_the_cushion() -> None:
+    # копилка «один раз» уже собрана — дальше копить ей нечего (годовая копила бы
+    # на следующий год)
+    once = [*NEW_YEAR[:5], "один раз", *NEW_YEAR[6:]]
+    collected = ["30.09.2026", "p3k9za", "Новый год", 12000000, "UZS", "отложил",
+                 "Иван", ""]  # fmt: skip
+    context = context_with(
+        PiggySheets([once], [collected], percent=10), came(17, 12_000_000)
+    )
+    await piggy.income_prompt(context, OWNER, OWNER, [salary(12_000_000)])
+    call = context.bot.send_message.await_args
+    assert call.kwargs["text"] == (
+        "🐷 С поступления 12 000 000 UZS — 10 %: 1 200 000 UZS — всё в подушку"
+    )
+    assert call.kwargs.get("reply_markup") is None
+
+
+async def test_a_tiny_income_sends_nothing() -> None:
+    context = context_with(PiggySheets([NEW_YEAR], [], percent=10), came(17, 50_000))
+    await piggy.income_prompt(context, OWNER, OWNER, [salary(50_000)])
     context.bot.send_message.assert_not_awaited()
 
 
@@ -115,18 +152,19 @@ async def test_a_failed_count_says_nothing() -> None:
     context.bot.send_message.assert_not_awaited()
 
 
-async def test_set_all_aside_writes_the_month_part_once() -> None:
-    sheets = PiggySheets([NEW_YEAR], [])
-    context = context_with(sheets)
+async def test_set_all_aside_writes_now() -> None:
+    # пришёл только аванс: 10 % от 4 млн, а не весь взнос месяца 1,2 млн
+    sheets = PiggySheets([NEW_YEAR], [], percent=10)
+    context = context_with(sheets, ADVANCE)
     update, query = press("piggy:all:2026-10")
     await piggy.piggy_button(update, context)
     assert sheets.journal is not None
-    assert sheets.journal[-1] == ["17.10.2026", "p3k9za", "Новый год", 6_000_000,
+    assert sheets.journal[-1] == ["17.10.2026", "p3k9za", "Новый год", 400_000,
                                   "UZS", "отложил", "Иван", ""]  # fmt: skip
     query.edit_message_text.assert_awaited_with(
-        "🐷 Записал: «Новый год» 6 000 000 UZS", reply_markup=None
+        "🐷 Записал: «Новый год» 400 000 UZS", reply_markup=None
     )
-    assert told_wife(context) == ["🐷 Иван — отложил: Новый год 6 000 000 UZS"]
+    assert told_wife(context) == ["🐷 Иван — отложил: Новый год 400 000 UZS"]
     rows = len(sheets.journal)
     update, query = press("piggy:all:2026-10")
     await piggy.piggy_button(update, context)  # второй раз — ничего не задваивает
@@ -379,13 +417,14 @@ async def test_set_all_aside_after_a_part_writes_the_rest() -> None:
     # часть отложили в приложении — «Отложил всё» дописывает только остаток
     sheets = PiggySheets(
         [NEW_YEAR],
-        [["05.10.2026", "p3k9za", "Новый год", 2000000, "UZS", "отложил", "Иван", ""]],
+        [["16.10.2026", "p3k9za", "Новый год", 100000, "UZS", "отложил", "Иван", ""]],
+        percent=10,
     )
-    context = context_with(sheets)
+    context = context_with(sheets, ADVANCE)
     update, query = press("piggy:all:2026-10")
     await piggy.piggy_button(update, context)
     assert sheets.journal is not None
-    assert sheets.journal[-1][3] == 4_000_000
+    assert sheets.journal[-1][3] == 300_000  # 10 % от аванса минус отложенные 100 тыс.
     query.edit_message_text.assert_awaited_with(
-        "🐷 Записал: «Новый год» 4 000 000 UZS", reply_markup=None
+        "🐷 Записал: «Новый год» 300 000 UZS", reply_markup=None
     )

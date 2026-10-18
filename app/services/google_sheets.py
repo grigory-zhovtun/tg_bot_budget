@@ -74,7 +74,10 @@ CALENDAR_HEADER = [
 ]
 PIGGY_LIST_HEADER = ["ID", "Копилка", "Цель", "Валюта", "Срок", "Повтор", "Группа",
                      "Подкатегория", "Отложено", "Потрачено", "Осталось",
-                     "В этом месяце", "Кто", "Закрыта"]  # fmt: skip
+                     "В этом месяце", "Кто", "Закрыта", "Порядок"]  # fmt: skip
+# список — A:O, процент с поступлений — P1:Q1 (подпись и число)
+PIGGY_WIDTH = 17
+PERCENT_LABEL = "Откладываем с поступлений, %"
 PIGGY_JOURNAL_HEADER = ["Дата", "ID", "Копилка", "Сумма", "Валюта", "Что", "Кто",
                         "Ключ"]  # fmt: skip
 
@@ -681,18 +684,64 @@ class GoogleSheetsService:
 
     def ensure_piggy_sheets(self) -> None:
         """Листы копилок; каких нет — создать с шапкой (звать под замком записи)."""
-        for name, header in (
-            (config.PIGGY_SHEET_NAME, PIGGY_LIST_HEADER),
-            (config.PIGGY_JOURNAL_NAME, PIGGY_JOURNAL_HEADER),
+        for name, header, width in (
+            (config.PIGGY_SHEET_NAME, PIGGY_LIST_HEADER, PIGGY_WIDTH),
+            (
+                config.PIGGY_JOURNAL_NAME,
+                PIGGY_JOURNAL_HEADER,
+                len(PIGGY_JOURNAL_HEADER),
+            ),
         ):
             try:
                 self._worksheet(name)
             except gspread.WorksheetNotFound:
                 logger.info("No sheet %s, creating it", name)
-                worksheet = self.sheet.add_worksheet(name, rows=200, cols=len(header))
+                worksheet = self.sheet.add_worksheet(name, rows=200, cols=width)
                 worksheet.append_rows([header], value_input_option=ValueInputOption.raw)
                 self._worksheets[name] = worksheet
                 self._written()
+
+    def _wide_piggy_list(self) -> Any:
+        """Лист «Копилки» шириной не меньше PIGGY_WIDTH: листы до «Порядка» — в 14
+        колонок, запись в O или P1:Q1 за их край Google отклоняет. Без повтора:
+        повтор после потерянного ответа добавил бы колонки дважды."""
+        self.ensure_piggy_sheets()
+        worksheet = self._worksheet(config.PIGGY_SHEET_NAME)
+        if worksheet.col_count < PIGGY_WIDTH:
+            worksheet.add_cols(PIGGY_WIDTH - worksheet.col_count)
+        return worksheet
+
+    def write_piggy_percent(self, percent: float) -> None:
+        """P1:Q1 «Копилок»: подпись и процент с поступлений (RAW, в процентах)."""
+        self._wide_piggy_list()
+        name = config.PIGGY_SHEET_NAME
+        self.write_cells(
+            [{"range": f"'{name}'!P1:Q1", "values": [[PERCENT_LABEL, percent]]}]
+        )
+        self._written()
+
+    def write_piggy_order(self, numbers: Mapping[str, int]) -> bool:
+        """Номера важности в O строк копилок (строки ищутся по ID заново) и шапка O1
+        одним запросом; ID нет в листе — ничего не пишется, False."""
+        worksheet = self._wide_piggy_list()
+        ids = self._with_retry("Reading piggy ids", lambda: worksheet.col_values(1))
+        rows: dict[str, int] = {}
+        for index, value in enumerate(ids, start=1):
+            if index > 1:  # копию строки руками бот не видит — берём первую
+                rows.setdefault(str(value).strip(), index)
+        if any(piggy_id not in rows for piggy_id in numbers):
+            return False
+        name = config.PIGGY_SHEET_NAME
+        header = PIGGY_LIST_HEADER[14]
+        self.write_cells(
+            [{"range": f"'{name}'!O1", "values": [[header]]}]
+            + [
+                {"range": f"'{name}'!O{rows[piggy_id]}", "values": [[number]]}
+                for piggy_id, number in numbers.items()
+            ]
+        )
+        self._written()
+        return True
 
     def write_piggy_formulas(self, rows: Sequence[int]) -> None:
         """Формулы I и K в строках копилок (новая строка или стёртые руками)."""

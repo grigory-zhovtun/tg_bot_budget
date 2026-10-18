@@ -51,4 +51,18 @@ describe("PiggyCard", () => {
     const bar = screen.getByRole("progressbar", { name: "Новый год: собрано" });
     expect(bar.getAttribute("aria-valuenow")).toBe("100");
   });
+
+  it("shows the importance number", () => {
+    card({ order: 1 });
+    expect(screen.getByLabelText("Важность 1").textContent).toBe("1");
+  });
+
+  it("says what a short piggy will have by the deadline", () => {
+    card({ status: "short", forecast: 3_000_000, short: 9_000_000 });
+    expect(
+      screen.getByText(
+        "⚠ к 20.12 будет 3,00 млн из 12,00 млн — не хватит 9,00 млн",
+      ).className,
+    ).toContain("text-danger");
+  });
 });

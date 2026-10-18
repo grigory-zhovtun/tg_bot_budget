@@ -704,7 +704,8 @@ def test_the_plan_tells_the_piggy_goal_and_article_hints(
     from app.web import api as web_api
     from tests.test_web_piggy import PiggyAnalytics, PiggySheets
 
-    # 15.11: «Новый год» к 20.12 — в декабре из копилки уходит 12 млн
+    # 15.11: «Новый год» к 20.12, 6 млн отложено в октябре; 50 % от 12 млн — 6 млн
+    # в месяц, а в декабре из копилки уходит 12 млн
     monkeypatch.setattr(web_api, "local_today", lambda zone: date(2026, 11, 15))
     tabs = {title: [list(row) for row in TAB] for title in ("Nov 26", "Dec 26")}
     sheets = PlanSheets(tabs, [FACT_HEADER])
@@ -714,12 +715,15 @@ def test_the_plan_tells_the_piggy_goal_and_article_hints(
         **application.bot_data["subcategories"],
         "🎉 ПРАЗДНИК": ["сезонный"],
     }
+    october = ["30.10.2026", "p3k9za", "Новый год", 6_000_000, "UZS", "отложил",
+               "Иван", ""]  # fmt: skip
     application.bot_data["analytics_service"] = PiggyAnalytics(
-        PiggySheets([NEW_YEAR], [])
+        PiggySheets([NEW_YEAR], [october], percent=50)
     )
     body = client_for(application).get("/api/plan?month=2026-12", headers=auth())
     found = body.json()
-    assert found["goal_hint"]["suggested"] == -9_800_000
+    assert found["goal_hint"]["suggested"] == 6_000_000 - 12_000_000
+    assert found["goal_hint"]["percent"] == 50
     assert found["piggy_hints"] == [
         {
             "piggy": "Новый год",

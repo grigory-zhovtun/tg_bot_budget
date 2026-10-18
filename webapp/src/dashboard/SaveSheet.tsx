@@ -1,5 +1,11 @@
 import { useRef, useState } from "react";
-import { ApiError, type Api, type Bootstrap, type SavingsScreen } from "../api";
+import {
+  ApiError,
+  type Api,
+  type Bootstrap,
+  type Piggy,
+  type SavingsScreen,
+} from "../api";
 import { amountValue, apiAmount } from "../entry/amount";
 import { FieldError, cardCurrencies, segment } from "../fields";
 import { short } from "../format";
@@ -21,26 +27,36 @@ interface Part {
   text: string;
 }
 
-/** Как сервер разложит сумму: копилкам со сроком по порядку экрана их «осталось»,
- * потом долгим целям; остальное — подушке (в журнал не пишется). */
+/** Как сервер разложит сумму: копилкам порядка — их «осталось в этом месяце»,
+ * копилкам «не хватит» — до «не хватит», долгим целям — их «осталось»; остальное
+ * — подушке (в журнал не пишется). */
 function layout(
   data: SavingsScreen,
   uzs: number,
 ): { parts: Part[]; rest: number } {
-  const ordered = [
-    ...data.piggies.filter((piggy) => piggy.deadline !== null),
-    ...data.piggies.filter((piggy) => piggy.deadline === null),
-  ];
+  const ordered = data.piggies
+    .filter((piggy) => piggy.order !== null && piggy.status !== "broken")
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   let rest = uzs;
-  const parts: Part[] = [];
-  for (const piggy of ordered) {
+  const taken = new Map<Piggy, number>();
+  function give(piggy: Piggy, cap: number) {
     const rate = data.rates[piggy.currency];
-    if (piggy.status === "broken" || piggy.left_this_month <= 0 || !rate)
-      continue;
-    if (rest <= 0) break;
-    const take = Math.min(piggy.left_this_month * rate, rest);
+    if (!rate || cap <= 0 || rest <= 0) return;
+    const take = Math.min(cap * rate, rest);
+    taken.set(piggy, (taken.get(piggy) ?? 0) + take);
     rest -= take;
-    parts.push({
+  }
+  for (const piggy of ordered) give(piggy, piggy.left_this_month);
+  for (const piggy of ordered) {
+    if (piggy.status === "short") give(piggy, piggy.short);
+  }
+  for (const piggy of data.piggies) {
+    if (piggy.deadline === null && piggy.status !== "broken")
+      give(piggy, piggy.left_this_month);
+  }
+  const parts = [...taken].map(([piggy, take]) => {
+    const rate = data.rates[piggy.currency] ?? 1;
+    return {
       name: piggy.name,
       text: piggyMoney(
         piggy.currency === "UZS"
@@ -48,8 +64,8 @@ function layout(
           : Math.round((take / rate) * 100) / 100,
         piggy.currency,
       ),
-    });
-  }
+    };
+  });
   return { parts, rest };
 }
 
@@ -63,13 +79,7 @@ export default function SaveSheet({
 }: Props) {
   const currencies = boot ? cardCurrencies(boot, undefined) : ["UZS"];
   const [currency, setCurrency] = useState("UZS");
-  const left = data.piggies
-    .filter((piggy) => piggy.status !== "broken")
-    .reduce(
-      (sum, piggy) =>
-        sum + piggy.left_this_month * (data.rates[piggy.currency] ?? 0),
-      0,
-    );
+  const left = data.month?.left ?? 0; // «отложить сейчас», сумы
   const [text, setText] = useState(amountText(left, false));
   const [entryId] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);

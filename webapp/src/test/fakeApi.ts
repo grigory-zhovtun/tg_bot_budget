@@ -49,6 +49,8 @@ export function fakeApi(overrides: Partial<Api> = {}): Api {
     closePiggy: vi.fn<Api["closePiggy"]>().mockResolvedValue(savingsFixture),
     movePiggy: vi.fn<Api["movePiggy"]>().mockResolvedValue(savingsFixture),
     savePiggies: vi.fn<Api["savePiggies"]>().mockResolvedValue(savingsFixture),
+    setPercent: vi.fn<Api["setPercent"]>().mockResolvedValue(savingsFixture),
+    setOrder: vi.fn<Api["setOrder"]>().mockResolvedValue(savingsFixture),
     excludeSpend: vi
       .fn<Api["excludeSpend"]>()
       .mockResolvedValue(savingsFixture),

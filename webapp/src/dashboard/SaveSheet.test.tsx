@@ -17,9 +17,9 @@ describe("SaveSheet", () => {
       />,
     );
     expect(screen.getByLabelText("Сумма").textContent).toContain(
-      "6\u00a0000\u00a0000",
+      "4\u00a0000\u00a0000",
     );
-    expect(screen.getByText("«Новый год» — 6,00 млн")).toBeTruthy();
+    expect(screen.getByText("«Новый год» — 4,00 млн")).toBeTruthy();
     expect(screen.queryByText(/Подушке/)).toBeNull();
   });
 
@@ -35,9 +35,11 @@ describe("SaveSheet", () => {
       />,
     );
     await user.click(screen.getByRole("button", { name: "000" }));
+    // взнос «Нового года», потом «Отпуску» — его «не хватит» 500 $, потом подушка
     expect(screen.getByText("«Новый год» — 6,00 млн")).toBeTruthy();
+    expect(screen.getByText("«Отпуск» — 500 $")).toBeTruthy();
     expect(
-      screen.getByText("Подушке — 5994,00 млн, в журнал не пишется"),
+      screen.getByText("Подушке — 3988,00 млн, в журнал не пишется"),
     ).toBeTruthy();
   });
 
@@ -57,7 +59,7 @@ describe("SaveSheet", () => {
     await user.click(screen.getByRole("button", { name: "Записать" }));
     expect(api.savePiggies).toHaveBeenCalledWith({
       entry_id: expect.any(String),
-      amount: "6000000",
+      amount: "4000000",
       currency: "UZS",
     });
     await vi.waitFor(() =>

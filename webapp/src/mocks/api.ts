@@ -45,5 +45,7 @@ export const mockApi: Api = {
   closePiggy: () => later(savingsFixture),
   movePiggy: () => later(savingsFixture),
   savePiggies: () => later(savingsFixture),
+  setPercent: () => later(savingsFixture),
+  setOrder: () => later(savingsFixture),
   excludeSpend: () => later(savingsFixture),
 };

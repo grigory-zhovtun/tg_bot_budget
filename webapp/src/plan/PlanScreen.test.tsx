@@ -266,6 +266,7 @@ describe("PlanScreen", () => {
         piggies: 1_000_000,
         share: 1_200_000,
         spent: 12_000_000,
+        percent: 25,
       },
     });
     const user = userEvent.setup();
@@ -273,7 +274,7 @@ describe("PlanScreen", () => {
     const hint = await screen.findByRole("region", { name: "По копилкам" });
     expect(
       within(hint).getByText(
-        "По копилкам — −9,80 млн: копилки 1,00 млн + 10 % 1,20 млн − из копилок 12,00 млн",
+        "Откладываем 25 % — −9,80 млн: копилки 1,00 млн + подушка 1,20 млн − из копилок 12,00 млн",
       ),
     ).toBeTruthy();
     await user.click(within(hint).getByRole("button", { name: "Применить" }));
@@ -316,6 +317,7 @@ describe("PlanScreen", () => {
         piggies: 1_000_000,
         share: 1_200_000,
         spent: 12_000_000,
+        percent: 25,
       },
       piggy_hints: [
         {
