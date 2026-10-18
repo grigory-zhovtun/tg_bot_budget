@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -60,8 +60,37 @@ PROFILE_MARK = "О НАС"
 MAX_PROFILE = 2000
 CALENDAR_TTL = 60.0  # секунд: лист «Календарь» перечитываем не чаще раза в минуту
 MONTH_SHEETS = 4  # вкладка месяца, курсы, fact и «Календарь» читаются одновременно
-CALENDAR_HEADER = ["ID", "Дата", "Повтор", "Дни", "Группа", "Подкатегория",
-                   "Валюта", "Сумма", "Название", "Кто"]  # fmt: skip
+CALENDAR_HEADER = [
+    "ID",
+    "Дата",
+    "Повтор",
+    "Дни",
+    "Группа",
+    "Подкатегория",
+    "Валюта",
+    "Сумма",
+    "Название",
+    "Кто",
+]
+PIGGY_LIST_HEADER = ["ID", "Копилка", "Цель", "Валюта", "Срок", "Повтор", "Группа",
+                     "Подкатегория", "Отложено", "Потрачено", "Осталось",
+                     "В этом месяце", "Кто", "Закрыта"]  # fmt: skip
+PIGGY_JOURNAL_HEADER = ["Дата", "ID", "Копилка", "Сумма", "Валюта", "Что", "Кто",
+                        "Ключ"]  # fmt: skip
+
+
+def piggy_formulas() -> tuple[str, str]:
+    """Формулы «Отложено» (I) и «Осталось» (K) строки копилки; без номера строки,
+    как баланс в fact, разделитель «;» — локаль таблицы ru_RU."""
+    journal = config.PIGGY_JOURNAL_NAME
+    saved = (
+        f"=SUMIFS('{journal}'!$D:$D;'{journal}'!$B:$B;INDEX($A:$A;ROW());"
+        f"'{journal}'!$D:$D;\">0\")"
+    )
+    return saved, "=INDEX($I:$I;ROW())-INDEX($J:$J;ROW())"
+
+
+# fmt: skip
 # секунд: соединение и ответ Google; без таймаута зависший запрос ждёт бесконечно
 # и ничего не пишет в лог, а приложение через 25 с показывает «Сервер долго не отвечает»
 SHEETS_TIMEOUT = (10, 60)
@@ -631,6 +660,115 @@ class GoogleSheetsService:
         """Один batch_update без повтора: повтор вставки после потерянного ответа
         вставил бы строки дважды."""
         self.sheet.batch_update({"requests": requests})
+
+    def get_piggy(
+        self, max_age: float = 0.0
+    ) -> tuple[list[list[Any]], list[list[Any]]]:
+        """Значения листов «Копилки» и «Журнал копилок» (копии — как у get_values);
+        листа нет — пусто."""
+        found: list[list[list[Any]]] = []
+        for name in (config.PIGGY_SHEET_NAME, config.PIGGY_JOURNAL_NAME):
+            try:
+                found.append(self.get_values(name, max_age))
+            except gspread.WorksheetNotFound:
+                found.append([])
+        return found[0], found[1]
+
+    def ensure_piggy_sheets(self) -> None:
+        """Листы копилок; каких нет — создать с шапкой (звать под замком записи)."""
+        for name, header in (
+            (config.PIGGY_SHEET_NAME, PIGGY_LIST_HEADER),
+            (config.PIGGY_JOURNAL_NAME, PIGGY_JOURNAL_HEADER),
+        ):
+            try:
+                self._worksheet(name)
+            except gspread.WorksheetNotFound:
+                logger.info("No sheet %s, creating it", name)
+                worksheet = self.sheet.add_worksheet(name, rows=200, cols=len(header))
+                worksheet.append_rows([header], value_input_option=ValueInputOption.raw)
+                self._worksheets[name] = worksheet
+                self._written()
+
+    def write_piggy_formulas(self, rows: Sequence[int]) -> None:
+        """Формулы I и K в строках копилок (новая строка или стёртые руками)."""
+        if not rows:
+            return
+        name = config.PIGGY_SHEET_NAME
+        saved, left = piggy_formulas()
+        data = [
+            item
+            for number in rows
+            for item in (
+                {"range": f"'{name}'!I{number}", "values": [[saved]]},
+                {"range": f"'{name}'!K{number}", "values": [[left]]},
+            )
+        ]
+        self._with_retry(
+            "Writing piggy formulas",
+            lambda: self.sheet.values_batch_update(
+                {"valueInputOption": "USER_ENTERED", "data": data}
+            ),
+        )
+        self._written()
+
+    def add_piggy(self, row: Sequence[Any]) -> int:
+        """Новая копилка строкой в конец списка (значения как есть), потом формулы
+        I и K этой строки; первая копилка создаёт листы. Возвращает номер строки."""
+        self.ensure_piggy_sheets()
+        worksheet = self._worksheet(config.PIGGY_SHEET_NAME)
+        # без повтора: если ответ потерялся, повтор записал бы строку дважды
+        response = worksheet.append_rows(
+            [list(row)], value_input_option=ValueInputOption.raw, table_range="A:N"
+        )
+        self._written()
+        number, _ = appended_rows(response)
+        self.write_piggy_formulas([number])
+        return number
+
+    def update_piggy(self, piggy_id: str, cells: Mapping[str, Any]) -> bool:
+        """Ячейки строки копилки по колонкам ({"B": …, "M": …}); строка ищется по
+        ID заново, остальные колонки (формулы, колонки бота) не трогаются.
+        Копилки нет — False."""
+        try:
+            worksheet = self._worksheet(config.PIGGY_SHEET_NAME)
+        except gspread.WorksheetNotFound:
+            return False
+        ids = self._with_retry("Reading piggy ids", lambda: worksheet.col_values(1))
+        number = next(
+            (
+                index
+                for index, value in enumerate(ids, start=1)
+                if index > 1 and str(value).strip() == piggy_id
+            ),
+            None,
+        )
+        if number is None:
+            return False
+        name = config.PIGGY_SHEET_NAME
+        data = [
+            {"range": f"'{name}'!{column}{number}", "values": [[value]]}
+            for column, value in cells.items()
+        ]
+        self._with_retry(
+            "Writing piggy row",
+            lambda: self.sheet.values_batch_update(
+                {"valueInputOption": "RAW", "data": data}
+            ),
+        )
+        self._written()
+        return True
+
+    def add_piggy_moves(self, rows: Sequence[Sequence[Any]]) -> None:
+        """Строки журнала копилок в конец листа (значения как есть)."""
+        self.ensure_piggy_sheets()
+        worksheet = self._worksheet(config.PIGGY_JOURNAL_NAME)
+        # без повтора: если ответ потерялся, повтор записал бы строки дважды
+        worksheet.append_rows(
+            [list(row) for row in rows],
+            value_input_option=ValueInputOption.raw,
+            table_range="A:H",
+        )
+        self._written()
 
     def write_cells(self, data: list[dict[str, Any]]) -> None:
         """Значения как есть (RAW) одним запросом: применяются все или ни одно.

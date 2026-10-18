@@ -20,27 +20,12 @@ import pandas as pd
 from app.domain import INCOME_GROUP, Rates
 from app.services.analytics_service import TRANSFERS_GROUP, expenses, to_day
 from app.services.day_budget import DayBudget, read_forecast
+from app.services.google_sheets import PIGGY_JOURNAL_HEADER, PIGGY_LIST_HEADER
 from app.services.savings import Cushion, month_savings, monthly_spending
 
 logger = logging.getLogger(__name__)
 
-LIST_HEADER = [
-    "ID",
-    "Копилка",
-    "Цель",
-    "Валюта",
-    "Срок",
-    "Повтор",
-    "Группа",
-    "Подкатегория",
-    "Отложено",
-    "Потрачено",
-    "Осталось",
-    "В этом месяце",
-    "Кто",
-    "Закрыта",
-]
-JOURNAL_HEADER = ["Дата", "ID", "Копилка", "Сумма", "Валюта", "Что", "Кто", "Ключ"]
+LIST_HEADER, JOURNAL_HEADER = PIGGY_LIST_HEADER, PIGGY_JOURNAL_HEADER
 
 ONCE, YEARLY = "один раз", "каждый год"
 SAVED = "отложил"
