@@ -557,3 +557,42 @@ async def test_an_income_not_written_suggests_nothing(
         context, update.effective_chat, [salary], [], "app:4"
     )
     assert not any("🛟" in line for line in result.lines)
+
+
+async def test_an_income_asks_the_piggies_after_the_menu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    update, context, _ = make_chat("", {})
+    sent_before: list[int] = []
+
+    async def prompt(*args: Any) -> None:
+        sent_before.append(len(update.effective_chat.send_message.await_args_list))
+
+    asked = AsyncMock(side_effect=prompt)
+    monkeypatch.setattr(messages, "income_prompt", asked)
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    salary = entry_row(
+        20_000_000.0, True, "", "VISA 1111 UZS", "💰 ДОХОДЫ", "зарплата", today
+    )
+    await messages.save_rows(context, update.effective_chat, [salary], [], "app:9")
+    asked.assert_awaited_once()
+    chat_id, user_id, rows = asked.await_args.args[1:]
+    assert (chat_id, user_id) == (update.effective_chat.id, update.effective_chat.id)
+    assert [row.category for row in rows] == ["💰 ДОХОДЫ"]
+    assert sent_before and sent_before[0] >= 1  # сводка с меню уже ушла
+
+
+async def test_a_piggy_spending_reaches_the_app_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    line = "🐷 Из копилки «Новый год»: −300 000 UZS, осталось 5 700 000"
+    monkeypatch.setattr(messages, "spend_note", AsyncMock(return_value=[line]))
+    update, context, _ = make_chat("", {})
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    gifts = entry_row(300_000.0, False, "", "VISA 1111 UZS", "🍔 ЕДА", "кафе", today)
+    result = await messages.save_rows(
+        context, update.effective_chat, [gifts], [], "app:10"
+    )
+    assert result.lines[-1] == line
+    summary = update.effective_chat.send_message.await_args_list[0].args[0]
+    assert "🐷" not in summary  # в чате — своим сообщением, с кнопкой

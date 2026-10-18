@@ -43,10 +43,14 @@ class Tab:
             hidden,
         )
         self.dates: list[list[Any]] = []
+        self.rows: list[list[Any]] = [["Статья"]]  # значения вкладки для цели
 
     def get(self, range_name: str, **options: Any) -> list[list[Any]]:
         assert range_name == "M1:M2"
         return self.dates
+
+    def get_all_values(self, **options: Any) -> list[list[Any]]:
+        return self.rows
 
 
 class Book:
@@ -70,7 +74,7 @@ class Book:
             spec = request["duplicateSheet"]
             source = next(t for t in self.tabs if t.id == spec["sourceSheetId"])
             copy = Tab(spec["newSheetName"], 999, spec["insertSheetIndex"], False)
-            copy.dates = source.dates
+            copy.dates, copy.rows = source.dates, source.rows
             self.tabs.append(copy)
             return {"replies": [{"duplicateSheet": {"properties": {"sheetId": 999}}}]}
         return {}
@@ -137,7 +141,10 @@ def test_without_any_month_tab_nothing_is_created() -> None:
 
 
 def job_context(tab: MonthTab | Exception) -> SimpleNamespace:
-    def ensure(day: date) -> MonthTab:
+    goals: list[Any] = []
+
+    def ensure(day: date, goal: Any = None) -> MonthTab:
+        goals.append(goal)
         if isinstance(tab, Exception):
             raise tab
         return tab
@@ -145,6 +152,7 @@ def job_context(tab: MonthTab | Exception) -> SimpleNamespace:
     return SimpleNamespace(
         bot_data={"gs_service": SimpleNamespace(ensure_month_tab=ensure)},
         bot=SimpleNamespace(send_message=AsyncMock()),
+        goals=goals,
     )
 
 
@@ -424,3 +432,60 @@ async def test_the_list_is_reconciled_every_night(reconcile: AsyncMock) -> None:
 async def test_no_reconciliation_when_the_sheet_fails(reconcile: AsyncMock) -> None:
     await month.month_tab_job(job_context(ConnectionError("offline")))
     reconcile.assert_not_awaited()
+
+
+# --- «Отложить за месяц» новой вкладки (этап 3, спека 4.7) ---
+
+
+class Goal:
+    """Цель новой вкладки: что спросили и что ответить."""
+
+    def __init__(self, answer: tuple[int, float] | Exception | None) -> None:
+        self.answer = answer
+        self.calls: list[tuple[list[list[Any]], date]] = []
+
+    def __call__(self, rows: list[list[Any]], first: date) -> tuple[int, float] | None:
+        self.calls.append((rows, first))
+        if isinstance(self.answer, Exception):
+            raise self.answer
+        return self.answer
+
+
+def test_a_new_tab_gets_the_goal_with_its_dates() -> None:
+    book, goal = october_book(), Goal((20, 7_200_000.0))
+    service_for(book).ensure_month_tab(date(2026, 11, 1), goal)
+    [write] = book.values
+    assert write["data"] == [
+        {"range": "'Nov 26'!M1:M2", "values": [[46327], [46356]]},
+        {"range": "'Nov 26'!Q20:R20", "values": [[7_200_000.0, "UZS"]]},
+    ]
+    assert [first for _, first in goal.calls] == [date(2026, 11, 1)]
+
+
+def test_right_dates_keep_the_owners_goal() -> None:
+    book, goal = october_book(), Goal((20, 7_200_000.0))
+    service_for(book).ensure_month_tab(date(2026, 10, 6), goal)
+    assert book.values == [] and goal.calls == []
+
+
+def test_a_failed_goal_still_writes_the_dates() -> None:
+    book = october_book()
+    service_for(book).ensure_month_tab(date(2026, 11, 1), Goal(ConnectionError("x")))
+    [write] = book.values
+    assert write["data"] == [{"range": "'Nov 26'!M1:M2", "values": [[46327], [46356]]}]
+
+
+def test_the_next_month_tab_gets_the_goal() -> None:
+    book, goal = october_book(), Goal((20, -9_800_000.0))
+    service_for(book).ensure_next_month_tab(date(2026, 10, 20), goal)
+    assert book.values[-1]["data"][-1] == {
+        "range": "'Nov 26'!Q20:R20",
+        "values": [[-9_800_000.0, "UZS"]],
+    }
+
+
+@pytest.mark.usefixtures("owner")
+async def test_the_job_asks_the_piggies_for_the_goal() -> None:
+    context = job_context(MonthTab("Oct 26"))
+    await month.month_tab_job(context)
+    assert len(context.goals) == 1 and callable(context.goals[0])

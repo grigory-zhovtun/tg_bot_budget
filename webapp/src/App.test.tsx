@@ -32,6 +32,21 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Повторить" })).toBeTruthy();
   });
 
+  it("opens «Отложил» in «Накопления» from the bot's button", async () => {
+    window.history.replaceState(null, "", "/app/?launch=t&open=save");
+    try {
+      render(<App api={fakeApi()} />);
+      expect(
+        await screen.findByRole("dialog", { name: "Отложил" }),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("radio", { name: "Накопления", checked: true }),
+      ).toBeTruthy();
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
   it("switches to the dashboard", async () => {
     const user = userEvent.setup();
     render(<App api={fakeApi()} />);

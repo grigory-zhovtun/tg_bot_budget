@@ -79,6 +79,11 @@ PIGGY_JOURNAL_HEADER = ["Дата", "ID", "Копилка", "Сумма", "Ва�
                         "Ключ"]  # fmt: skip
 
 
+# Цель новой вкладки: по её значениям (UNFORMATTED) и первому дню — строка
+# «Отложить за месяц» и сумма в сумах; None — не писать
+GoalCells = Callable[[list[list[Any]], date], tuple[int, float] | None]
+
+
 def piggy_formulas() -> tuple[str, str]:
     """Формулы «Отложено» (I) и «Осталось» (K) строки копилки; без номера строки,
     как баланс в fact, разделитель «;» — локаль таблицы ru_RU."""
@@ -988,8 +993,15 @@ class GoogleSheetsService:
         }
         self._with_retry("Changing visibility", lambda: self.sheet.batch_update(body))
 
-    def _ensure_dates(self, title: str, first: date, last: date) -> bool:
-        """M1:M2 вкладки — первый и последний день месяца; True — пришлось поправить."""
+    def _ensure_dates(
+        self, title: str, first: date, last: date, goal: GoalCells | None = None
+    ) -> bool:
+        """M1:M2 вкладки — первый и последний день месяца; True — пришлось поправить.
+
+        Раз даты пришлось ставить, вкладка только что скопирована и её «Отложить за
+        месяц» — копия прошлого месяца: goal даёт новую сумму, она уходит тем же
+        запросом, что даты (сбой между копией и датами доделает следующий запуск).
+        """
         dates = [[_serial(first)], [_serial(last)]]
         current = self._with_retry(
             "Reading month dates",
@@ -999,18 +1011,33 @@ class GoogleSheetsService:
         )
         if current == dates:
             return False
+        data: list[dict[str, Any]] = [{"range": f"'{title}'!M1:M2", "values": dates}]
+        if goal is not None:
+            try:
+                rows = self._with_retry(
+                    "Reading the month tab",
+                    lambda: self._worksheet(title).get_all_values(
+                        value_render_option=ValueRenderOption.unformatted
+                    ),
+                )
+                found = goal(rows, first)
+            except Exception:
+                logger.exception("Month goal for %s failed", title)
+                found = None
+            if found is not None:
+                row, amount = found
+                data.append(
+                    {"range": f"'{title}'!Q{row}:R{row}", "values": [[amount, "UZS"]]}
+                )
         self._with_retry(
             "Writing month dates",
             lambda: self.sheet.values_batch_update(
-                {
-                    "valueInputOption": "RAW",
-                    "data": [{"range": f"'{title}'!M1:M2", "values": dates}],
-                }
+                {"valueInputOption": "RAW", "data": data}
             ),
         )
         return True
 
-    def ensure_month_tab(self, day: date) -> MonthTab:
+    def ensure_month_tab(self, day: date, goal: GoalCells | None = None) -> MonthTab:
         """Вкладка план-факта месяца day: создать копией прошлой, если её нет.
 
         Факт во вкладке считается формулами по датам M1 (первый день) и M2
@@ -1079,11 +1106,13 @@ class GoogleSheetsService:
                 # заранее созданный месяц показали руками до 1-го — прошлые прячем сейчас
                 self._set_hidden([(ws.id, True) for ws in past])
                 result.hidden = [ws.title for ws in past]
-        fixed = self._ensure_dates(result.title, first, last)
+        fixed = self._ensure_dates(result.title, first, last, goal)
         result.dates_fixed = fixed and not result.created
         return result
 
-    def ensure_next_month_tab(self, today: date) -> MonthTab:
+    def ensure_next_month_tab(
+        self, today: date, goal: GoalCells | None = None
+    ) -> MonthTab:
         """Вкладка следующего месяца копией текущей, скрытая до 1-го числа.
 
         Текущая вкладка остаётся видимой: бот и лимит живут по ней до конца
@@ -1127,7 +1156,7 @@ class GoogleSheetsService:
                 result.created, result.source = True, current.title
         if tab is not None and not tab.isSheetHidden:
             self._set_hidden([(tab.id, True)])
-        self._ensure_dates(result.title, first, last)
+        self._ensure_dates(result.title, first, last, goal)
         return result
 
     def recategorize_row(

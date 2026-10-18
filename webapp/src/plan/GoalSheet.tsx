@@ -21,6 +21,8 @@ export default function GoalSheet({
   const [text, setText] = useState(
     amountText(goal.amount, goal.currency !== "UZS"),
   );
+  // цель меньше нуля на клавиатуре не набрать: без ввода «Готово» её не трогает
+  const [touched, setTouched] = useState(false);
   return (
     <Sheet title="🎯 Отложить за месяц" onClose={onClose}>
       <label className="flex items-center justify-between gap-3 text-sm text-hint">
@@ -31,6 +33,7 @@ export default function GoalSheet({
           onChange={(change) => {
             setCurrency(change.target.value);
             setText("");
+            setTouched(true);
           }}
         >
           {currencies.map((code) => (
@@ -40,11 +43,20 @@ export default function GoalSheet({
           ))}
         </select>
       </label>
-      <AmountPad text={text} currency={currency} onChange={setText} />
+      <AmountPad
+        text={text}
+        currency={currency}
+        onChange={(next) => {
+          setText(next);
+          setTouched(true);
+        }}
+      />
       <button
         type="button"
         className="h-12 rounded-xl bg-button font-semibold text-button-text"
-        onClick={() => onDone(text, currency)}
+        onClick={() =>
+          !touched && goal.amount < 0 ? onClose() : onDone(text, currency)
+        }
       >
         Готово
       </button>

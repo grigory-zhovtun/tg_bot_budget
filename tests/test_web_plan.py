@@ -434,7 +434,8 @@ class NextSheets(PlanSheets):
     def ensure_month_tab(self, today: Any) -> MonthTab:
         return self.current
 
-    def ensure_next_month_tab(self, today: Any) -> MonthTab:
+    def ensure_next_month_tab(self, today: Any, goal: Any = None) -> MonthTab:
+        self.goal = goal
         title = month_title(NEXT)
         if title in self.tabs:
             return MonthTab(title)
@@ -670,3 +671,69 @@ def test_the_plan_screen_takes_copies_unless_asked_to_refresh() -> None:
     sheets.ages.clear()
     client.get(f"/api/plan?month={MONTH}&fresh=1", headers=auth())
     assert set(sheets.ages) == {0}
+
+
+def test_the_next_month_asks_the_piggies_for_the_goal() -> None:
+    sheets = NextSheets()
+    assert create_next(plan_app(sheets)).status_code == 200
+    assert callable(sheets.goal)
+
+
+# --- копилки в «Плане» (этап 3, спека 4.7) ---
+
+NEW_YEAR = ["p3k9za", "Новый год", 12000000, "UZS", "20.12.2026", "каждый год",
+            "🎉 ПРАЗДНИК", "сезонный", "", "", "", "", "Иван", ""]  # fmt: skip
+
+
+def test_a_goal_below_zero_is_saved() -> None:
+    body = change(
+        rows=[],
+        goal={
+            "base": {"amount": 1_000_000, "currency": "UZS"},
+            "value": {"amount": "-9800000", "currency": "UZS"},
+        },
+    )
+    response = post_plan(plan_app(sheets_with()), body)
+    assert response.status_code == 200
+    assert response.json()["goal"] == {"amount": -9_800_000, "currency": "UZS"}
+
+
+def test_the_plan_tells_the_piggy_goal_and_article_hints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.web import api as web_api
+    from tests.test_web_piggy import PiggyAnalytics, PiggySheets
+
+    # 15.11: «Новый год» к 20.12 — в декабре из копилки уходит 12 млн
+    monkeypatch.setattr(web_api, "local_today", lambda zone: date(2026, 11, 15))
+    tabs = {title: [list(row) for row in TAB] for title in ("Nov 26", "Dec 26")}
+    sheets = PlanSheets(tabs, [FACT_HEADER])
+    application = plan_app(sheets)
+    application.bot_data["categories"] = ["🍔 ЕДА", "🎉 ПРАЗДНИК"]
+    application.bot_data["subcategories"] = {
+        **application.bot_data["subcategories"],
+        "🎉 ПРАЗДНИК": ["сезонный"],
+    }
+    application.bot_data["analytics_service"] = PiggyAnalytics(
+        PiggySheets([NEW_YEAR], [])
+    )
+    body = client_for(application).get("/api/plan?month=2026-12", headers=auth())
+    found = body.json()
+    assert found["goal_hint"]["suggested"] == -9_800_000
+    assert found["piggy_hints"] == [
+        {
+            "piggy": "Новый год",
+            "month": "2026-12",
+            "group": "🎉 ПРАЗДНИК",
+            "subcategory": "сезонный",
+            "currency": "UZS",
+            "amount": 12_000_000,
+            "need": 12_000_000,
+            "key": None,
+        }
+    ]
+
+
+def test_without_piggies_the_plan_has_no_hints() -> None:
+    found = get_plan(sheets_with()).json()
+    assert (found["goal_hint"], found["piggy_hints"]) == (None, [])

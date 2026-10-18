@@ -153,6 +153,11 @@ export function editGoal(
   return { ...draft, goal: same ? null : { base, text, currency } };
 }
 
+/** Цель по копилкам: сумма со знаком (меньше нуля — «Из накоплений»), в сумах. */
+export function applyGoal(draft: Draft, goal: PlanGoal, amount: number): Draft {
+  return editGoal(draft, goal, String(Math.round(amount)), "UZS");
+}
+
 export function pairKey(subcategory: string, currency: string): string {
   return `${subcategory}|${currency}`;
 }

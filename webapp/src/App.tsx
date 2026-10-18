@@ -70,7 +70,11 @@ export default function App({ api }: { api: Api }) {
   const [boot, setBoot] = useState<Bootstrap | null>(initial.boot);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
-  const [tab, setTab] = useState<Tab>("entry");
+  // кнопка бота «Отложил часть…» открывает приложение с ?open=save
+  const [openSave] = useState(
+    () => new URLSearchParams(window.location.search).get("open") === "save",
+  );
+  const [tab, setTab] = useState<Tab>(openSave ? "dashboard" : "entry");
   const [drafts, setDrafts] = useState<Record<string, Draft> | null>(
     initial.drafts?.drafts ?? null,
   );
@@ -201,7 +205,9 @@ export default function App({ api }: { api: Api }) {
         {tab === "entry" && boot && (
           <EntryScreen api={api} boot={boot} onCatalogChanged={reload} />
         )}
-        {tab === "dashboard" && <DashboardScreen api={api} boot={boot} />}
+        {tab === "dashboard" && (
+          <DashboardScreen api={api} boot={boot} openSave={openSave} />
+        )}
         {tab === "dashboard" && boot && (
           <HomeScreenButton botUsername={boot.bot_username} />
         )}

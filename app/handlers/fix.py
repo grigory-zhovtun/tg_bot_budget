@@ -35,6 +35,7 @@ from app.domain import (
 )
 from app.errors import user_message
 from app.handlers.common import LAST_WRITE, premium_icons
+from app.handlers.piggy import income_prompt
 from app.handlers.receipts import mark_dirty
 from app.services.google_sheets import GoogleSheetsService
 from app.services.savings import save_hint
@@ -473,13 +474,17 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     mark_dirty(context.bot_data)  # доход стал тратой или наоборот — сверка списка
     logger.info("Row %s recategorized", number)
     verdict = f"✅ Исправил (строка {number}): {describe(fixed)}"
-    if row.category != INCOME_GROUP and category == INCOME_GROUP:
+    moved_in = row.category != INCOME_GROUP and category == INCOME_GROUP
+    if moved_in:
         # зарплата по SMS приходит переводом с ❓ — «отложите» звучит здесь
         hint = await asyncio.to_thread(save_hint, gs_service, [fixed])
         verdict = "\n".join([verdict, *hint])
     if "mode" in state:
         await _checked(query, context, state, last, verdict, True)
-        return
-    last.get("checks", {}).pop(state["row"], None)  # исправленная строка проверена
-    context.user_data.pop(STATE, None)
-    await _edit(query, verdict)
+    else:
+        last.get("checks", {}).pop(state["row"], None)  # исправленная строка проверена
+        context.user_data.pop(STATE, None)
+        await _edit(query, verdict)
+    chat = getattr(update, "effective_chat", None)
+    if moved_in and chat is not None:
+        await income_prompt(context, chat.id, chat.id, [fixed])  # «🐷» под ответом

@@ -23,8 +23,16 @@ from telegram.ext import Application, CallbackContext
 from app import config
 from app.custom_icons import leading_emoji
 from app.domain import INCOME_GROUP, currency_of, entry_row, local_today, month_title
+from app.handlers.common import notify_others
 from app.handlers.messages import save_rows, seen_input
 from app.handlers.month import describe, tell_owner
+from app.handlers.piggy import (
+    ARTICLES,
+    PIGGY_LOCK,
+    amount_text,
+    move_row,
+    piggy_note,
+)
 from app.handlers.receipts import mark_dirty
 from app.handlers.undo import undo_last
 from app.services.analytics_service import TRANSFERS_GROUP, SavingsTab, money
@@ -39,10 +47,14 @@ from app.services.piggy import (
     SPENT,
     WRITE_OFF,
     YEARLY,
+    MonthGoal,
     Piggy,
     PiggyState,
     distribute,
+    goal_of,
+    thousands,
 )
+from app.services.piggy_sync import bot_catalog, goal_cells
 from app.services.plan import (
     ArticleChange,
     Catalog,
@@ -55,6 +67,7 @@ from app.services.plan import (
     NewArticle,
     PlanChanges,
     addable,
+    article_key,
     change_note,
     kind_of,
     load_plan,
@@ -113,15 +126,18 @@ from app.web.schemas import (
     PlanArticleOut,
     PlanConflictOut,
     PlanEventOut,
+    PlanGoalHintOut,
     PlanGoalOut,
     PlanHistoryOut,
     PlanItemOut,
     PlanOut,
+    PlanPiggyHintOut,
     PlanSaveIn,
     RowsOut,
     RunwayOut,
     SaveIn,
     SavingMonthOut,
+    SavingsGoalOut,
     SavingsMonthOut,
     SavingsOut,
     SavingsScreenOut,
@@ -176,7 +192,6 @@ ADVICE_SECONDS = 60
 # вкладками не ждёт Google. Запись бота копии сбрасывает, а ?fresh=1 («Обновить»
 # и первое открытие приложения) читает таблицу заново
 SCREEN_COPY_AGE = 120.0
-PIGGY_LOCK = "piggy_lock"  # bot_data: в листы копилок пишет один запрос за раз
 PIGGY_ENTRIES = "piggy_entries"  # user_data: entry_id уже записанных правок копилок
 PIGGY_YEARS = 5  # срок копилки — не дальше чем через 5 лет
 PIGGY_FIELDS = {
@@ -325,11 +340,6 @@ def cushion_out(cushion: Cushion | None) -> CushionOut | None:
     )
 
 
-def amount_text(value: float) -> str:
-    """«12 000 000», «210», «210,50» — для заметок и ошибок."""
-    return money(value) if value == int(value) else f"{value:.2f}".replace(".", ",")
-
-
 def piggy_text(
     name: str,
     target: float | None,
@@ -343,12 +353,6 @@ def piggy_text(
         return f"{text}, без срока"
     text += f" к {deadline:%d.%m}"
     return f"{text}, каждый год" if yearly else text
-
-
-def piggy_note(action: str, author: str, text: str) -> str:
-    """«🐷 Иван — новая копилка: …»; без имени — «🐷 Новая копилка: …»."""
-    head = f"{author} — {action}" if author else action[:1].upper() + action[1:]
-    return f"🐷 {head}: {text}"
 
 
 def piggy_error(fields: set[str] | dict[str, str]) -> JSONResponse:
@@ -413,16 +417,6 @@ def piggy_cells(body: PiggyIn, author: str) -> dict[str, Any]:
 def piggy_row(piggy_id: str, body: PiggyIn, author: str) -> list[Any]:
     cells = piggy_cells(body, author)
     return [piggy_id, *(cells[c] for c in "BCDEFGH"), "", "", "", "", author, ""]
-
-
-def move_row(
-    day: date, piggy: Piggy, amount: float, kind: str, author: str, key: str = ""
-) -> list[Any]:
-    """Строка журнала копилок: сумма в валюте копилки со знаком, округлённая, как
-    сумма валюты (без хвостов вида 66.77000000000001 и без «-0»)."""
-    rounded = _rounded(amount, piggy.currency) or 0.0
-    return [f"{day:%d.%m.%Y}", piggy.id, piggy.name, rounded, piggy.currency, kind,
-            author, key]  # fmt: skip
 
 
 def piggy_out(state: PiggyState) -> PiggyOut:
@@ -502,10 +496,23 @@ def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOu
                 "over": _rounded(screen.over, cushion.currency),
             }
         )
+    found_goal = goal_of(screen, first.month) if first is not None else None
+    goal = None
+    if found_goal is not None and any(
+        state.status != "broken" for state in screen.piggies
+    ):
+        goal = SavingsGoalOut(
+            suggested=thousands(found_goal.total),
+            in_plan=None if screen.in_plan is None else float(round(screen.in_plan)),
+            piggies=float(round(found_goal.piggies)),
+            share=float(round(found_goal.share)),
+            spent=float(round(found_goal.spent)),
+        )
     return SavingsScreenOut(
         status="ok",
         today=today,
         month=month,
+        goal=goal,
         cushion=cushion,
         piggies=[piggy_out(state) for state in screen.piggies],
         plan=[
@@ -969,12 +976,43 @@ def event_out(
     )
 
 
+def piggy_hints(
+    goal: MonthGoal, plan: MonthPlan, first: date
+) -> list[PlanPiggyHintOut]:
+    """Траты из копилок со статьёй, которых план статьи ещё не покрывает (4.7)."""
+    articles = {article.key: article for article in plan.articles}
+    found: list[PlanPiggyHintOut] = []
+    for item in goal.from_piggies:
+        if not item.group or not item.subcategory:
+            continue
+        article = articles.get(article_key(item.subcategory, item.currency))
+        if article is not None and not article.editable:
+            continue  # статья во вкладке дважды — её «План» не правит
+        need = item.amount - (article.plan if article is not None else 0.0)
+        if _rounded(need, item.currency) <= 0:
+            continue
+        found.append(
+            PlanPiggyHintOut(
+                piggy=item.name,
+                month=f"{first:%Y-%m}",
+                group=item.group,
+                subcategory=item.subcategory,
+                currency=item.currency,
+                amount=_rounded(item.amount, item.currency),
+                need=_rounded(need, item.currency),
+                key=article.key if article is not None else None,
+            )
+        )
+    return found
+
+
 def plan_out(
     first: date,
     today: date,
     loaded: LoadedPlan | None,
     icons: dict[str, str],
     catalog: Catalog,
+    piggy_goal: MonthGoal | None = None,
 ) -> PlanOut:
     """План месяца для экрана; без вкладки — только статус."""
     month, title = f"{first:%Y-%m}", month_title(first)
@@ -1036,6 +1074,19 @@ def plan_out(
             )
             for item in addable(plan, catalog, loaded.rates.to_uzs.keys(), history)
         ],
+        goal_hint=(
+            None
+            if piggy_goal is None
+            else PlanGoalHintOut(
+                suggested=thousands(piggy_goal.total),
+                piggies=float(round(piggy_goal.piggies)),
+                share=float(round(piggy_goal.share)),
+                spent=float(round(piggy_goal.spent)),
+            )
+        ),
+        piggy_hints=(
+            [] if piggy_goal is None else piggy_hints(piggy_goal, plan, first)
+        ),
     )
 
 
@@ -1122,15 +1173,6 @@ async def author_name(bot: Bot, user: WebUser) -> str | None:
         logger.warning("No name for user_id=%s", user.id)
         return None
     return chat.first_name or None
-
-
-async def notify_others(bot: Bot, author_id: int, text: str) -> None:
-    """Сообщение всем пользователям, кроме автора; сбой отправки — только в лог."""
-    for user_id in sorted(config.ALLOWED_USER_IDS - {author_id}):
-        try:
-            await bot.send_message(chat_id=user_id, text=text)
-        except Exception:
-            logger.warning("Could not tell user_id=%s about the plan", user_id)
 
 
 def routes(application: Application) -> list[Route]:
@@ -1355,18 +1397,25 @@ def routes(application: Application) -> list[Route]:
         return application.bot_data.setdefault(PIGGY_LOCK, asyncio.Lock())
 
     def catalog() -> tuple[set[str], list[str], dict[str, list[str]]]:
-        bot_data = application.bot_data
-        cards = {currency_of(source) for source in bot_data.get("sources", [])}
-        return (
-            cards or {"UZS"},
-            bot_data.get("categories", []),
-            bot_data.get("subcategories", {}),
-        )
+        return bot_catalog(application.bot_data)
 
     async def read_savings(max_age: float) -> SavingsTab | None:
         today = local_today(config.ANALYTICS_TIMEZONE)
         analytics = application.bot_data["analytics_service"]
         return await asyncio.to_thread(analytics.savings, today, *catalog(), max_age)
+
+    async def plan_goal(first: date, max_age: float) -> MonthGoal | None:
+        """«Отложить за месяц» по копилкам для месяца «Плана»; сбой — без подсказок."""
+        try:
+            found = await read_savings(max_age)
+        except Exception:
+            logger.exception("Piggy hints for the plan failed")
+            return None
+        if found is None or not any(
+            state.status != "broken" for state in found.screen.piggies
+        ):
+            return None
+        return goal_of(found.screen, first)
 
     async def fresh_savings(user_id: int, max_age: float = 0.0) -> JSONResponse:
         """«Накопления» ответом: после записи — по таблице заново, экрану — из копии."""
@@ -1413,6 +1462,8 @@ def routes(application: Application) -> list[Route]:
     async def written(user_id: int, author: str, note: str) -> JSONResponse:
         """После записи: фоновая запись «Потрачено» и взноса, заметка второму."""
         mark_dirty(application.bot_data)
+        # статью новой или поправленной копилки бот узнаёт сразу, не через 10 минут
+        application.bot_data.pop(ARTICLES, None)
         await notify_others(application.bot, user_id, piggy_note_text(author, note))
         return await fresh_savings(user_id)
 
@@ -1683,7 +1734,8 @@ def routes(application: Application) -> list[Route]:
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
         icons: dict[str, str] = application.bot_data.get("icons", {})
         catalog: Catalog = application.bot_data.get("subcategories", {})
-        body = plan_out(first, today, loaded, icons, catalog)
+        goal = await plan_goal(first, SCREEN_COPY_AGE)
+        body = plan_out(first, today, loaded, icons, catalog, goal)
         return JSONResponse(body.model_dump(mode="json"))
 
     async def save_month_plan(request: Request) -> JSONResponse:
@@ -1725,7 +1777,8 @@ def routes(application: Application) -> list[Route]:
                 )
             return validation_error(set(outcome.invalid))
         icons: dict[str, str] = application.bot_data.get("icons", {})
-        fresh = plan_out(first, today, loaded, icons, catalog)
+        goal = await plan_goal(first, SCREEN_COPY_AGE)
+        fresh = plan_out(first, today, loaded, icons, catalog, goal)
         if outcome.conflicts:
             conflict = PlanConflictOut(
                 error=ErrorOut(code="plan_changed", message=CONFLICT),
@@ -1752,7 +1805,8 @@ def routes(application: Application) -> list[Route]:
         try:
             async with lock:
                 current = await asyncio.to_thread(gs.ensure_month_tab, today)
-                tab = await asyncio.to_thread(gs.ensure_next_month_tab, today)
+                goal = goal_cells(gs, today, *bot_catalog(application.bot_data))
+                tab = await asyncio.to_thread(gs.ensure_next_month_tab, today, goal)
                 loaded = await asyncio.to_thread(
                     load_plan, gs, month_title(first), today
                 )
@@ -1766,7 +1820,8 @@ def routes(application: Application) -> list[Route]:
             logger.info("Plan tab %s created by user_id=%s", tab.title, user.id)
         icons: dict[str, str] = application.bot_data.get("icons", {})
         catalog: Catalog = application.bot_data.get("subcategories", {})
-        body = plan_out(first, today, loaded, icons, catalog)
+        goal = await plan_goal(first, SCREEN_COPY_AGE)
+        body = plan_out(first, today, loaded, icons, catalog, goal)
         return JSONResponse(body.model_dump(mode="json"))
 
     async def plan_advice(request: Request) -> JSONResponse:

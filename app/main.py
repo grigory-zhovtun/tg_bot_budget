@@ -33,6 +33,7 @@ from app.handlers import (
     last_write,
     messages,
     month,
+    piggy,
     receipts,
     statement_import,
     transactions,
@@ -260,6 +261,7 @@ def build_application(
     app.add_handler(CallbackQueryHandler(fix.fix_button, pattern=r"^fix:"))
     app.add_handler(CallbackQueryHandler(last_write.button, pattern=r"^last:"))
     app.add_handler(CallbackQueryHandler(statement_import.button, pattern=r"^import:"))
+    app.add_handler(CallbackQueryHandler(piggy.piggy_button, pattern=r"^piggy:"))
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, messages.text_handler)
