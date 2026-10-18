@@ -1,5 +1,5 @@
 import type { Piggy } from "../api";
-import { piggyMoney, whenText } from "./piggyText";
+import { dayMonth, piggyMoney, whenText } from "./piggyText";
 
 interface Props {
   piggy: Piggy;
@@ -15,6 +15,12 @@ function Status({ piggy }: { piggy: Piggy }) {
       return (
         <p className="text-sm font-semibold text-danger">
           {`к сроку не успеть — не хватает ${money(piggy.short)}`}
+        </p>
+      );
+    case "short":
+      return (
+        <p className="text-sm font-semibold text-danger">
+          {`⚠ к ${dayMonth(piggy.deadline ?? "")} будет ${money(piggy.forecast ?? 0)} из ${money(piggy.target ?? 0)} — не хватит ${money(piggy.short)}`}
         </p>
       );
     case "no_target":
@@ -48,7 +54,17 @@ export default function PiggyCard({ piggy, onOpen }: Props) {
       : null;
   return (
     <li className="relative flex flex-col gap-1 rounded-2xl bg-section p-4">
-      <h3 className="font-semibold">{piggy.name}</h3>
+      <div className="flex items-center gap-2">
+        {piggy.order !== null && (
+          <span
+            aria-label={`Важность ${piggy.order}`}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-text text-sm font-bold text-bg"
+          >
+            {piggy.order}
+          </span>
+        )}
+        <h3 className="font-semibold">{piggy.name}</h3>
+      </div>
       {piggy.status !== "broken" && (
         <>
           <p className="text-sm">

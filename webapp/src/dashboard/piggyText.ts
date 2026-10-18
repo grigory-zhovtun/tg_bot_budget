@@ -1,5 +1,5 @@
-/** Тексты «Накоплений»: суммы копилок, сроки, доля 10 %, «хватает ли». */
-import type { Enough, Piggy, SavingsMonth } from "../api";
+/** Тексты «Накоплений»: суммы копилок, сроки, процент, «хватает ли». */
+import type { Enough, Piggy } from "../api";
 import { money, short } from "../format";
 
 /** «В октябре отложить». */
@@ -41,18 +41,22 @@ export function whenText(piggy: Piggy): string {
     : `до ${day}.${month}.${year}`;
 }
 
-/** Куда идёт доля 10 %: «в подушку», «пополам: подушка и «Машина»». */
-export function shareText(
-  month: SavingsMonth,
-  names: Record<string, string>,
-): string {
-  const goals = month.goals
-    .map((goal) => `«${names[goal.id] ?? goal.id}»`)
-    .join(", ");
-  if (!goals) return "в подушку";
-  return month.share_to === "goals"
-    ? `на ${goals}`
-    : `пополам: подушка и ${goals}`;
+/** «25», «2,5» — процент с поступлений. */
+export function percentText(value: number): string {
+  return String(value).replace(".", ",");
+}
+
+/** «2026-12-20» → «20.12». */
+export function dayMonth(deadline: string): string {
+  const [, month = "", day = ""] = deadline.split("-");
+  return `${day}.${month}`;
+}
+
+/** «12,00 млн из 12,00 млн ✓», «2 000 $ из 2 500 $» — что копилка успеет к сроку. */
+export function forecastText(piggy: Piggy): string {
+  const money = (value: number) => piggyMoney(value, piggy.currency);
+  const head = `${money(piggy.forecast ?? 0)} из ${money(piggy.target ?? 0)}`;
+  return piggy.status === "short" ? head : `${head} ✓`;
 }
 
 /** «на жизнь остаётся …, обычные траты — …: не хватает …» или «…: хватает, запас …». */

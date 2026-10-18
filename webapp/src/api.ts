@@ -181,7 +181,14 @@ export interface Dashboard {
 
 /** Копилка «Накоплений»; суммы — в её валюте. */
 export type PiggyStatus =
-  "on_track" | "late" | "no_target" | "done" | "leftover" | "goal" | "broken";
+  | "on_track"
+  | "late"
+  | "short"
+  | "no_target"
+  | "done"
+  | "leftover"
+  | "goal"
+  | "broken";
 
 export interface AmountItem {
   id: string; // копилка
@@ -224,6 +231,9 @@ export interface Piggy {
   short: number;
   leftover: number;
   error: string | null;
+  order: number | null; // номер важности; null — не в порядке
+  forecast: number | null; // будет к ближайшему сроку по плану
+  now: number; // отложить сейчас
   history: PiggyMove[];
   spends: PiggySpend[];
 }
@@ -238,13 +248,23 @@ export interface PiggyPlanMonth {
   ready: string[]; // копилки, собранные к сроку в этом месяце
 }
 
+/** Текущий месяц: процент с поступлений и сколько отложить, сумы. */
 export interface SavingsMonth {
   month: string;
-  piggy: number;
-  piggy_left: number;
-  share: number;
-  share_to: "cushion" | "split" | "goals";
-  goals: AmountItem[];
+  percent: number; // проценты: 5
+  percent_source: "sheet" | "default" | "bad" | "preview";
+  percent_needed: number | null; // целые проценты «успеть всё»
+  capacity: number; // процент от поступлений плана месяца
+  received: number; // пришло с 1-го по сегодня
+  due: number; // процент от пришедшего
+  left: number; // отложить сейчас — копилкам и долгим целям
+  cushion: number; // часть подушке
+}
+
+/** Предпросмотр окон «Процент» и «Порядок»: ничего не пишется. */
+export interface SavingsPreview {
+  percent?: number;
+  order?: string[];
 }
 
 export interface Enough {
@@ -498,6 +518,7 @@ export interface PlanGoalHint {
   piggies: number;
   share: number;
   spent: number; // траты из копилок в месяце
+  percent: number; // процент с поступлений
 }
 
 /** Трата из копилки в месяце «Плана»: заложить её в план статьи. */
@@ -738,7 +759,25 @@ export const api = {
       body: JSON.stringify(input),
     }),
   createNextPlan: () => request<MonthPlan>("/plan/next", { method: "POST" }),
-  savings: (read = false) => request<SavingsScreen>(`/savings${fresh(read)}`),
+  savings: (read = false, preview?: SavingsPreview) => {
+    const params = new URLSearchParams();
+    if (read) params.set("fresh", "1");
+    if (preview?.percent !== undefined)
+      params.set("percent", String(preview.percent));
+    if (preview?.order) params.set("order", preview.order.join(","));
+    const query = params.toString();
+    return request<SavingsScreen>(`/savings${query ? `?${query}` : ""}`);
+  },
+  setPercent: (percent: number) =>
+    request<SavingsScreen>("/piggy/percent", {
+      method: "PUT",
+      body: JSON.stringify({ percent }),
+    }),
+  setOrder: (ids: string[]) =>
+    request<SavingsScreen>("/piggy/order", {
+      method: "PUT",
+      body: JSON.stringify({ ids }),
+    }),
   addPiggy: (input: PiggyInput) =>
     request<SavingsScreen>("/piggy", {
       method: "POST",

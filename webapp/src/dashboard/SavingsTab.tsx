@@ -11,12 +11,20 @@ import type {
 import { short } from "../format";
 import { useResource, useStore } from "../store";
 import CushionCard from "./CushionCard";
+import OrderSheet from "./OrderSheet";
+import PercentSheet from "./PercentSheet";
 import PiggyCard from "./PiggyCard";
 import PiggySheet from "./PiggySheet";
 import SaveSheet from "./SaveSheet";
 import SavingsCard from "./SavingsCard";
 import YearPlan from "./YearPlan";
-import { enoughText, MONTHS_IN, monthIndex, shareText } from "./piggyText";
+import {
+  enoughText,
+  MONTHS_IN,
+  monthIndex,
+  percentText,
+  piggyMoney,
+} from "./piggyText";
 
 interface Props {
   api: Api;
@@ -27,10 +35,11 @@ interface Props {
 
 interface SetAsideProps {
   month: SavingsMonth;
+  piggies: Piggy[];
   enough: Enough | null;
-  names: Record<string, string>;
   goal: SavingsGoal | null;
   onSave: (() => void) | null; // null — откладывать нечего
+  onPercent: (() => void) | null; // null — каталога ещё нет
 }
 
 const GOAL_STEP = 1000; // в таблицу цель пишется до тысячи
@@ -45,23 +54,66 @@ function goalText(goal: SavingsGoal | null): string | null {
   return `В плане месяца «Отложить» — ${short(inPlan)}, по копилкам нужно ${short(goal.suggested)}: поправьте в «Плане»`;
 }
 
-/** «В октябре отложить»: взносы копилок, доля 10 % и хватает ли на жизнь. */
-function SetAside({ month, enough, names, goal, onSave }: SetAsideProps) {
+/** «Откладываем N % с поступлений»: сколько пришло, сколько отложить и кому,
+ * успеваем ли к срокам и хватает ли на жизнь. */
+function SetAside({
+  month,
+  piggies,
+  enough,
+  goal,
+  onSave,
+  onPercent,
+}: SetAsideProps) {
   const differs = goalText(goal);
-  const title = `В ${MONTHS_IN[monthIndex(month.month)] ?? month.month} отложить`;
+  const named = MONTHS_IN[monthIndex(month.month)] ?? month.month;
+  const parts = piggies
+    .filter((piggy) => piggy.status !== "broken" && piggy.now > 0)
+    .map((piggy) => `«${piggy.name}» ${piggyMoney(piggy.now, piggy.currency)}`)
+    .join(", ");
+  const line = [
+    parts,
+    month.cushion > 0 ? `в подушку ${short(month.cushion)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const needed = month.percent_needed;
   return (
     <section
-      aria-label={title}
+      aria-label="Откладываем с поступлений"
       className="flex flex-col gap-1 rounded-2xl bg-section p-4"
     >
-      <h2 className="font-semibold">{title}</h2>
+      <div className="flex items-start justify-between gap-3">
+        <h2 className="font-semibold">
+          {`Откладываем ${percentText(month.percent)} % с поступлений`}
+        </h2>
+        {onPercent && (
+          <button
+            type="button"
+            className="shrink-0 font-semibold text-link"
+            onClick={onPercent}
+          >
+            Изменить
+          </button>
+        )}
+      </div>
+      {month.percent_source === "bad" && (
+        <p className="text-sm font-semibold text-warn">
+          {`Процент в таблице не читается — считаю по ${percentText(month.percent)} %`}
+        </p>
+      )}
       <p>
-        {month.piggy > 0
-          ? `в копилки по плану ${short(month.piggy)}, осталось ${short(month.piggy_left)}`
-          : "в копилки в этом месяце — ничего"}
+        {month.received > 0
+          ? `В ${named} пришло ${short(month.received)} — отложить ${short(month.due)}`
+          : `В ${named} поступлений ещё не было`}
       </p>
-      {month.share > 0 && (
-        <p>{`10 % от поступлений ≈ ${short(month.share)} — ${shareText(month, names)}`}</p>
+      {line && <p>{line}</p>}
+      {needed !== null && month.percent < needed && (
+        <p className="text-sm font-semibold text-warn">
+          {`Чтобы успеть всё к срокам, нужно ${needed} %`}
+        </p>
+      )}
+      {needed !== null && month.percent >= needed && (
+        <p className="text-sm font-semibold text-ok">Успеваем всё к срокам ✓</p>
       )}
       {enough && (
         <p
@@ -95,11 +147,9 @@ function Skeleton() {
 }
 
 /** Вкладка «Накопления»: что отложить, подушка, копилки, план на год и норма. */
-/** «Отложил…» раскладывает сумму по взносам месяца — без них класть некуда. */
+/** «Отложил…» — пока с пришедшего есть что отложить копилкам. */
 function canSetAside(data: SavingsScreen): boolean {
-  return data.piggies.some(
-    (piggy) => piggy.status !== "broken" && piggy.left_this_month > 0,
-  );
+  return (data.month?.left ?? 0) > 0;
 }
 
 export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
@@ -113,11 +163,13 @@ export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
   );
   const [opened, setOpened] = useState<Piggy | "new" | null>(null);
   const [saving, setSaving] = useState(false);
+  const [setting, setSetting] = useState<"percent" | "order" | null>(null);
   const saved = useCallback(
     (fresh: SavingsScreen) => {
       store.put("savings", fresh);
       setOpened(null);
       setSaving(false);
+      setSetting(null);
     },
     [store],
   );
@@ -157,15 +209,19 @@ export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
     data.piggies.map((piggy) => [piggy.id, piggy.name]),
   );
   const canSave = canSetAside(data);
+  const ordered = data.piggies.filter(
+    (piggy) => piggy.order !== null && piggy.status !== "broken",
+  );
   return (
     <>
       {data.month && (
         <SetAside
           month={data.month}
+          piggies={data.piggies}
           enough={data.enough}
-          names={names}
           goal={data.goal ?? null}
           onSave={canSave ? () => setSaving(true) : null}
+          onPercent={boot ? () => setSetting("percent") : null}
         />
       )}
       {data.cushion && <CushionCard cushion={data.cushion} />}
@@ -173,13 +229,24 @@ export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
         <div className="flex items-center justify-between gap-2">
           <h2 className="font-semibold">🐷 Копилки</h2>
           {boot && (
-            <button
-              type="button"
-              className="font-semibold text-link"
-              onClick={() => setOpened("new")}
-            >
-              ＋ Копилка
-            </button>
+            <div className="flex gap-4">
+              {ordered.length > 1 && (
+                <button
+                  type="button"
+                  className="font-semibold text-link"
+                  onClick={() => setSetting("order")}
+                >
+                  Порядок
+                </button>
+              )}
+              <button
+                type="button"
+                className="font-semibold text-link"
+                onClick={() => setOpened("new")}
+              >
+                ＋ Копилка
+              </button>
+            </div>
           )}
         </div>
         {data.piggies.length > 0 ? (
@@ -210,6 +277,22 @@ export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
           piggy={opened === "new" ? null : opened}
           onSaved={saved}
           onClose={() => setOpened(null)}
+        />
+      )}
+      {setting === "percent" && (
+        <PercentSheet
+          api={api}
+          data={data}
+          onSaved={saved}
+          onClose={() => setSetting(null)}
+        />
+      )}
+      {setting === "order" && (
+        <OrderSheet
+          api={api}
+          data={data}
+          onSaved={saved}
+          onClose={() => setSetting(null)}
         />
       )}
       {saving && (

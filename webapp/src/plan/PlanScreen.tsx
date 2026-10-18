@@ -14,6 +14,7 @@ import { itemAmount, money, short, withCurrency } from "../format";
 import { useResource, useStore } from "../store";
 import { haptic, telegram } from "../telegram";
 import { amountValue } from "../entry/amount";
+import { percentText } from "../dashboard/piggyText";
 import AddArticleSheet from "./AddArticleSheet";
 import AdvicePanel, { type AdviceState } from "./AdvicePanel";
 import ArticleSheet from "./ArticleSheet";
@@ -71,8 +72,8 @@ function goalInSums(goal: PlanGoal, rates: Record<string, number>): number {
     : goal.amount * (rates[goal.currency] ?? 0);
 }
 
-/** «По копилкам — W: копилки X + 10 % Y − из копилок Z» и «Применить», пока цель
- * черновика с этим расходится (спека 4.7). */
+/** «Откладываем N % — W: копилки X + подушка Y − из копилок Z» и «Применить», пока
+ * цель черновика с этим расходится (спека 4.7, процент — спека процента 4.6). */
 function GoalHint({
   hint,
   shown,
@@ -89,7 +90,7 @@ function GoalHint({
       className="flex flex-col gap-2 rounded-2xl bg-section p-3"
     >
       <p className="text-sm">
-        {`По копилкам — ${short(hint.suggested)}: копилки ${short(hint.piggies)} + 10 % ${short(hint.share)} − из копилок ${short(hint.spent)}`}
+        {`Откладываем ${percentText(hint.percent)} % — ${short(hint.suggested)}: копилки ${short(hint.piggies)} + подушка ${short(hint.share)} − из копилок ${short(hint.spent)}`}
       </p>
       <button
         type="button"
