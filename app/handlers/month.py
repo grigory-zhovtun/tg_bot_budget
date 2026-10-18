@@ -11,6 +11,7 @@ from app import config
 from app.domain import local_today
 from app.handlers.receipts import sync_now
 from app.services.google_sheets import GoogleSheetsService, MonthTab
+from app.services.piggy_sync import bot_catalog, goal_cells
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +75,9 @@ async def month_tab_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
     today = local_today(config.ANALYTICS_TIMEZONE)
     try:
-        tab = await asyncio.to_thread(gs_service.ensure_month_tab, today)
+        # новая вкладка получает «Отложить за месяц» по копилкам вместе с датами
+        goal = goal_cells(gs_service, today, *bot_catalog(context.bot_data))
+        tab = await asyncio.to_thread(gs_service.ensure_month_tab, today, goal)
     except Exception:
         logger.exception("Month tab check failed")
         return

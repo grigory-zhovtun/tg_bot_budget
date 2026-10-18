@@ -43,7 +43,9 @@ from app.services.piggy import (
     PiggyState,
     distribute,
     goal_of,
+    thousands,
 )
+from app.services.piggy_sync import bot_catalog, goal_cells
 from app.services.plan import (
     ArticleChange,
     Catalog,
@@ -465,11 +467,6 @@ def piggy_out(state: PiggyState) -> PiggyOut:
             for item in balance.spends
         ],
     )
-
-
-def thousands(value: float) -> float:
-    """Сумы до тысячи — как пишем «Отложить за месяц» в таблицу."""
-    return float(round(value / 1000) * 1000)
 
 
 def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOut:
@@ -1375,13 +1372,7 @@ def routes(application: Application) -> list[Route]:
         return application.bot_data.setdefault(PIGGY_LOCK, asyncio.Lock())
 
     def catalog() -> tuple[set[str], list[str], dict[str, list[str]]]:
-        bot_data = application.bot_data
-        cards = {currency_of(source) for source in bot_data.get("sources", [])}
-        return (
-            cards or {"UZS"},
-            bot_data.get("categories", []),
-            bot_data.get("subcategories", {}),
-        )
+        return bot_catalog(application.bot_data)
 
     async def read_savings(max_age: float) -> SavingsTab | None:
         today = local_today(config.ANALYTICS_TIMEZONE)
@@ -1772,7 +1763,8 @@ def routes(application: Application) -> list[Route]:
         try:
             async with lock:
                 current = await asyncio.to_thread(gs.ensure_month_tab, today)
-                tab = await asyncio.to_thread(gs.ensure_next_month_tab, today)
+                goal = goal_cells(gs, today, *bot_catalog(application.bot_data))
+                tab = await asyncio.to_thread(gs.ensure_next_month_tab, today, goal)
                 loaded = await asyncio.to_thread(
                     load_plan, gs, month_title(first), today
                 )

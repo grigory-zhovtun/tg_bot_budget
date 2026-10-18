@@ -12,21 +12,28 @@ from datetime import date, timedelta
 from typing import Any
 
 from app import config
-from app.domain import Rates, month_title
+from app.domain import Rates, currency_of, month_title
 from app.services.analytics_service import transactions_frame
 from app.services.day_budget import day_budget
-from app.services.google_sheets import GoogleSheetsService, read_month_sheets
+from app.services.google_sheets import (
+    GoalCells,
+    GoogleSheetsService,
+    read_month_sheets,
+)
 from app.services.piggy import (
     AFTER_DAYS,
     WINDOW,
     Book,
     Screen,
     balances,
+    goal_of,
     next_year,
     read_book,
     savings_screen,
+    thousands,
     window_key,
 )
+from app.services.plan import read_plan
 
 logger = logging.getLogger(__name__)
 
@@ -169,3 +176,58 @@ def sync_piggy(
     if written:
         logger.info("Piggy banks: %d row(s) and cell(s) written", written)
     return written
+
+
+def bot_catalog(
+    bot_data: Mapping[str, Any],
+) -> tuple[set[str], list[str], dict[str, list[str]]]:
+    """Валюты карт и справочник статей бота — по ним проверяются строки копилок."""
+    cards = {currency_of(source) for source in bot_data.get("sources", [])}
+    return (
+        cards or {"UZS"},
+        list(bot_data.get("categories", [])),
+        dict(bot_data.get("subcategories", {})),
+    )
+
+
+def goal_cells(
+    gs: GoogleSheetsService,
+    today: date,
+    currencies: Collection[str],
+    groups: Collection[str],
+    subcategories: Mapping[str, Sequence[str]],
+) -> GoalCells:
+    """«Отложить за месяц» новой вкладки по копилкам (спека 4.7): строка цели по
+    подписи и сумма до тысячи; без открытых копилок ячейку владельца не трогаем."""
+
+    def cells(rows: list[list[Any]], first: date) -> tuple[int, float] | None:
+        goal = read_plan(rows).goal
+        if goal is None:
+            return None
+        piggies, journal = gs.get_piggy(0.0)
+        book = read_book(
+            piggies, journal, set(currencies), list(groups), dict(subcategories)
+        )
+        if not any(
+            piggy.id and not piggy.error and piggy.closed is None
+            for piggy in book.piggies
+        ):
+            return None
+        rates = gs.get_rates(SHEET_AGE)
+        frame = transactions_frame(
+            gs.get_values(config.FACT_SHEET_NAME, SHEET_AGE), rates
+        )
+        screen = savings_screen(
+            book,
+            frame,
+            rows,
+            today,
+            rates,
+            None,
+            config.SAVE_SHARE,
+            config.CUSHION_MONTHS,
+        )
+        found = goal_of(screen, first)
+        return None if found is None else (goal.row, thousands(found.total))
+
+    return cells

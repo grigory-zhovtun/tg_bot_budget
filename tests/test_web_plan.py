@@ -434,7 +434,8 @@ class NextSheets(PlanSheets):
     def ensure_month_tab(self, today: Any) -> MonthTab:
         return self.current
 
-    def ensure_next_month_tab(self, today: Any) -> MonthTab:
+    def ensure_next_month_tab(self, today: Any, goal: Any = None) -> MonthTab:
+        self.goal = goal
         title = month_title(NEXT)
         if title in self.tabs:
             return MonthTab(title)
@@ -670,3 +671,9 @@ def test_the_plan_screen_takes_copies_unless_asked_to_refresh() -> None:
     sheets.ages.clear()
     client.get(f"/api/plan?month={MONTH}&fresh=1", headers=auth())
     assert set(sheets.ages) == {0}
+
+
+def test_the_next_month_asks_the_piggies_for_the_goal() -> None:
+    sheets = NextSheets()
+    assert create_next(plan_app(sheets)).status_code == 200
+    assert callable(sheets.goal)

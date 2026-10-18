@@ -13,8 +13,8 @@ from typing import Any
 from telegram.ext import ContextTypes
 
 from app import config
-from app.domain import currency_of, local_today
-from app.services.piggy_sync import sync_piggy
+from app.domain import local_today
+from app.services.piggy_sync import bot_catalog, sync_piggy
 from app.services.receipts_sync import sync_receipts
 
 logger = logging.getLogger(__name__)
@@ -45,14 +45,8 @@ async def sync_now(bot_data: dict[str, Any], today: date) -> int:
             if written:
                 logger.info("Receipts: %d cell(s) of the list updated", written)
         try:
-            cards = {currency_of(s) for s in bot_data.get("sources", [])} or {"UZS"}
             await asyncio.to_thread(
-                sync_piggy,
-                bot_data["gs_service"],
-                today,
-                cards,
-                bot_data.get("categories", []),
-                bot_data.get("subcategories", {}),
+                sync_piggy, bot_data["gs_service"], today, *bot_catalog(bot_data)
             )
         except Exception:
             logger.exception("Piggy sync failed")

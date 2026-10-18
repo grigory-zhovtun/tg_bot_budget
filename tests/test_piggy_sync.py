@@ -9,7 +9,7 @@ from gspread.exceptions import WorksheetNotFound
 
 from app import config
 from app.services.google_sheets import PIGGY_JOURNAL_HEADER, PIGGY_LIST_HEADER
-from app.services.piggy_sync import sync_piggy
+from app.services.piggy_sync import goal_cells, sync_piggy
 from tests.test_day_budget import FACT_HEADER, RATES, fact_row, tab
 
 TODAY = date(2027, 1, 25)  # окно «Нового года» к 20.12 закрылось 19.01
@@ -141,3 +141,22 @@ def test_an_empty_window_is_written_as_a_plain_zero() -> None:
     sync_piggy(sheets, TODAY, *CATALOG)
     amount = sheets.journal[-1][3]
     assert amount == 0 and math.copysign(1.0, amount) == 1.0
+
+
+def test_goal_cells_count_the_month_of_the_new_tab() -> None:
+    # 17.10: «Новый год» 12 млн к 20.12, ноябрь — 6 млн взноса + 10 % от 12 млн
+    sheets = SyncSheets([ROW], [])
+    sheets.fact = [FACT_HEADER]
+    cells = goal_cells(sheets, date(2026, 10, 17), *CATALOG)
+    assert cells(tab(goal=2_000_000), date(2026, 11, 1)) == (20, 7_200_000)
+
+
+def test_goal_cells_without_open_piggies_leave_the_cell() -> None:
+    sheets = SyncSheets([], [])
+    cells = goal_cells(sheets, date(2026, 10, 17), *CATALOG)
+    assert cells(tab(goal=2_000_000), date(2026, 11, 1)) is None
+
+
+def test_goal_cells_need_the_goal_row() -> None:
+    cells = goal_cells(SyncSheets([ROW], []), date(2026, 10, 17), *CATALOG)
+    assert cells(tab(), date(2026, 11, 1)) is None

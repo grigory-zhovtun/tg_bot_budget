@@ -586,6 +586,11 @@ class _Need:
     first: bool  # ближайший срок копилки
 
 
+def thousands(value: float) -> float:
+    """Сумы до тысячи — так «Отложить за месяц» пишется в таблицу и в «Применить»."""
+    return float(round(value / 1000) * 1000)
+
+
 def goal_of(screen: Screen, month: date) -> MonthGoal | None:
     """«Отложить за месяц» месяца плана; месяца нет в плане — None."""
     first = month.replace(day=1)
