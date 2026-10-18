@@ -6,8 +6,10 @@
 Без сети: на входе значения листов.
 """
 
+import calendar
 import hashlib
 import logging
+import math
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -17,6 +19,8 @@ import pandas as pd
 
 from app.domain import INCOME_GROUP, Rates
 from app.services.analytics_service import TRANSFERS_GROUP, expenses, to_day
+from app.services.day_budget import DayBudget, read_forecast
+from app.services.savings import Cushion, month_savings, monthly_spending
 
 logger = logging.getLogger(__name__)
 
@@ -445,3 +449,442 @@ def balances(
             saved, taken + window_spent, left, left + window_spent + early, spends
         )
     return found
+
+
+# --- план взносов, 10 %, подушка, «хватает ли» (спека 4.3–4.5, 4.8) ---
+
+PLAN_MONTHS = 12  # на экране — год с текущего месяца
+HORIZON_MONTHS = 24  # сроки «каждый год» — на два года вперёд
+STARTER_MONTHS = 1.0  # пока подушки меньше чем на месяц трат — вся доля 10 % в неё
+STATUSES = ("on_track", "late", "no_target", "done", "leftover", "goal", "broken")
+
+
+@dataclass(frozen=True)
+class MonthPlan:
+    """Месяц плана, в сумах: взносы копилок со сроком, доля 10 % подушке и целям."""
+
+    month: date  # первое число
+    total: float  # сумма взносов копилок со сроком
+    items: dict[str, float]  # ID копилки → взнос
+    cushion: float
+    goals: dict[str, float]  # ID долгой цели → доля
+    ready: tuple[str, ...]  # копилки, собранные к сроку в этом месяце
+
+
+@dataclass(frozen=True)
+class PiggyState:
+    """Копилка на экране; суммы — в её валюте."""
+
+    piggy: Piggy
+    balance: Balance
+    status: str  # STATUSES
+    this_month: float  # взнос текущего месяца по плану
+    left_this_month: float  # сколько из него ещё не отложено
+    short: float  # «к сроку не успеть»: сколько не хватает
+    leftover: float  # остаток прошлого окна
+    history: tuple[Move, ...]  # последние строки журнала, новые первыми
+
+
+@dataclass(frozen=True)
+class Enough:
+    """Хватает ли: средние за полные месяцы, в сумах."""
+
+    income: float
+    save: float  # взносы копилок месяца и доля 10 % от дохода
+    life: float  # income − save
+    ordinary: float  # траты без статей копилок «каждый год»
+    gap: float  # life − ordinary: меньше нуля — не хватает
+
+
+@dataclass(frozen=True)
+class Screen:
+    today: date
+    piggies: tuple[PiggyState, ...]  # по сроку, долгие цели, потом строки с ошибкой
+    plan: tuple[MonthPlan, ...]
+    cushion: Cushion | None  # «Заморожено» за вычетом копилок
+    frozen: float | None  # «Заморожено» на вечер вчера
+    envelopes: float  # остатки копилок на вечер вчера, в валюте заморозки
+    over: float  # на сколько копилки больше «Заморожено»
+    share_to: str  # куда идёт доля 10 % в этом месяце: cushion | split | goals
+    enough: Enough | None
+
+
+@dataclass(frozen=True)
+class _Need:
+    piggy_id: str
+    deadline: date
+    need: float  # в сумах
+    first: bool  # ближайший срок копилки
+
+
+def money_day(rows: list[list[Any]] | None) -> int | None:
+    """День последнего поступления (+) жёлтого списка вкладки; None — их нет."""
+    found = read_forecast(rows) if rows else None
+    days = [item.day for item in found.items if item.amount > 0] if found else []
+    return max(days, default=None)
+
+
+def _income(rows: list[list[Any]] | None) -> float:
+    """Поступления (+) списка вкладки в сумах."""
+    found = read_forecast(rows) if rows else None
+    return sum(item.uzs for item in found.items if item.amount > 0) if found else 0.0
+
+
+def _add_months(month: date, count: int) -> date:
+    index = month.year * 12 + month.month - 1 + count
+    return date(index // 12, index % 12 + 1, 1)
+
+
+def _next_year(day: date) -> date:
+    try:
+        return day.replace(year=day.year + 1)
+    except ValueError:  # 29 февраля
+        return day.replace(year=day.year + 1, day=28)
+
+
+def _money_date(month: date, day: int | None) -> date:
+    last = calendar.monthrange(month.year, month.month)[1]
+    return month.replace(day=min(day or last, last))
+
+
+def _up(value: float, currency: str) -> float:
+    """Вверх: сумы — до тысячи, остальные валюты — до целых."""
+    step = 1000 if currency == "UZS" else 1
+    return float(math.ceil(value / step - 1e-6) * step) if value > 0 else 0.0
+
+
+def _schedule(
+    money: Sequence[date], needs: Sequence[_Need]
+) -> tuple[list[dict[int, float]], list[list[int]]]:
+    """Взносы по месяцам ступеньками: наименьшая ровная сумма, которой хватает на
+    все сроки, держится до самого тесного срока, потом — то же для остальных;
+    внутри месяца — ближайший срок первым. Возвращает взносы и собранные сроки
+    (индексы needs) по месяцам."""
+    order = sorted(range(len(needs)), key=lambda k: (needs[k].deadline, k))
+    left = {k: needs[k].need for k in order}
+    alloc: list[dict[int, float]] = [{} for _ in money]
+    ready: list[list[int]] = [[] for _ in money]
+    first = done = 0
+    while done < len(order) and first < len(money):
+        best: tuple[float, int, int] | None = None
+        total = 0.0
+        for position in range(done, len(order)):
+            k = order[position]
+            total += left[k]
+            count = sum(
+                1 for i in range(first, len(money)) if money[i] <= needs[k].deadline
+            )
+            if count and (best is None or total / count >= best[0] - 1e-9):
+                best = (total / count, position, count)
+        if best is None:
+            break
+        rate, last, count = best
+        for i in range(first, first + count):
+            budget = rate
+            for position in range(done, last + 1):
+                k = order[position]
+                take = min(budget, left[k])
+                if take > 1e-9:
+                    alloc[i][k] = alloc[i].get(k, 0.0) + take
+                    left[k] -= take
+                    budget -= take
+                    if left[k] <= 1e-6:
+                        ready[i].append(k)
+                if budget <= 1e-9:
+                    break
+        first, done = first + count, last + 1
+    return alloc, ready
+
+
+def _saved_in(moves: Sequence[Move], month: date) -> float:
+    return sum(
+        move.amount
+        for move in moves
+        if move.amount > 0
+        and (move.day.year, move.day.month) == (month.year, month.month)
+    )
+
+
+def _leftover(moves: Sequence[Move], left: float) -> float:
+    """Остаток после последнего итога окна, пока после него ничего не отложили."""
+    last = max(
+        (index for index, move in enumerate(moves) if move.kind == WINDOW), default=None
+    )
+    if last is None or any(move.kind == SAVED for move in moves[last + 1 :]):
+        return 0.0
+    return max(left, 0.0)
+
+
+def _enough(
+    frame: pd.DataFrame,
+    today: date,
+    yearly: set[tuple[str, str]],
+    piggies_now: float,
+    share: float,
+) -> Enough | None:
+    months = [
+        item for item in month_savings(frame, today).months if item.spent or item.income
+    ]
+    if not months:
+        return None
+    count = len(months)
+    income = sum(item.income for item in months) / count
+    spent = expenses(frame)
+    firsts = spent["day"].map(lambda day: day.replace(day=1))
+    pairs = pd.MultiIndex.from_frame(spent[["group", "subcategory"]])
+    chosen = {item.month for item in months}
+    article = spent[pairs.isin(list(yearly)) & firsts.isin(list(chosen)).to_numpy()]
+    ordinary = (
+        sum(item.spent for item in months) - float(article["amount_uzs"].sum())
+    ) / count
+    save = piggies_now + share * income
+    life = income - save
+    return Enough(income, save, life, ordinary, life - ordinary)
+
+
+def savings_screen(
+    book: Book,
+    frame: pd.DataFrame,
+    rows: list[list[Any]] | None,
+    today: date,
+    rates: Rates,
+    budget: DayBudget | None,
+    share: float,
+    cushion_months: int,
+) -> Screen:
+    """Вкладка «Накопления»: копилки, план взносов на год, подушка и «хватает ли»."""
+    month = today.replace(day=1)
+    before = month - timedelta(days=1)
+    start = balances(book, frame, rates, before)  # план месяца — от остатков на 1-е
+    now = balances(book, frame, rates, today)
+    night = balances(book, frame, rates, today - timedelta(days=1))
+    open_piggies = [piggy for piggy in book.piggies if piggy.closed is None]
+    valid = [piggy for piggy in open_piggies if piggy.id and not piggy.error]
+    scheduled = [
+        piggy
+        for piggy in valid
+        if piggy.deadline is not None and piggy.target is not None
+    ]
+    goals = [piggy for piggy in valid if piggy.deadline is None]
+
+    # сроки и их нужда в сумах
+    horizon = _add_months(month, HORIZON_MONTHS)
+    pay_day = money_day(rows)
+    needs: list[_Need] = []
+    late: dict[str, float] = {}
+    for piggy in scheduled:
+        rate = rates.to_uzs.get(piggy.currency)
+        if not rate or piggy.deadline is None or piggy.target is None:
+            continue
+        deadline = piggy.deadline
+        passed = today > deadline + timedelta(days=AFTER_DAYS)
+        if passed and not piggy.yearly:
+            continue  # окно «один раз» прошло: копилка ждёт решения об остатке
+        if passed:  # срок ещё не перенесли — считаем со следующего года
+            deadline = _next_year(deadline)
+        collected = start[piggy.id].left if passed else start[piggy.id].collected
+        needs.append(
+            _Need(piggy.id, deadline, max(piggy.target - collected, 0.0) * rate, True)
+        )
+        if piggy.yearly:
+            following = _next_year(deadline)
+            while following < horizon:
+                needs.append(_Need(piggy.id, following, piggy.target * rate, False))
+                following = _next_year(following)
+    last = max((need.deadline for need in needs), default=month)
+    span = max(
+        PLAN_MONTHS, (last.year - month.year) * 12 + last.month - month.month + 1
+    )
+    months = [_add_months(month, index) for index in range(span)]
+    money = [_money_date(item, pay_day) for item in months]
+    for need in needs:
+        if (
+            need.first
+            and need.need > 0
+            and not any(day <= need.deadline for day in money)
+        ):
+            late[need.piggy_id] = need.need
+    planned = [
+        need
+        for need in needs
+        if need.need > 1e-6 and not (need.first and need.piggy_id in late)
+    ]
+    alloc, ready = _schedule(money, planned)
+
+    # доля 10 %: по подушке на 1-е число, дальше подушка растёт на свою часть
+    monthly = monthly_spending(frame, today)
+    currency = budget.frozen_currency if budget is not None else None
+    frozen_rate = rates.to_uzs.get(currency or "", 0.0)
+    cushion_uzs: float | None = None
+    if budget is not None and budget.frozen is not None and currency and frozen_rate:
+        envelopes_start = sum(
+            rates.convert(start[piggy.id].left, piggy.currency, currency) or 0.0
+            for piggy in open_piggies
+            if piggy.id in start
+        )
+        cushion_uzs = (
+            budget.frozen - budget.frozen_change - envelopes_start
+        ) * frozen_rate
+    share_month = share * _income(rows)
+    collected_goals = {
+        piggy.id: start[piggy.id].collected * rates.to_uzs.get(piggy.currency, 0.0)
+        for piggy in goals
+    }
+    plan: list[MonthPlan] = []
+    share_to = "cushion"
+    for index, first_day in enumerate(months[:PLAN_MONTHS]):
+        cover = (
+            cushion_uzs / monthly if cushion_uzs is not None and monthly > 0 else None
+        )
+        active = [
+            piggy
+            for piggy in goals
+            if piggy.target is None
+            or collected_goals[piggy.id]
+            < piggy.target * rates.to_uzs.get(piggy.currency, 0.0)
+        ]
+        if cover is None or cover < STARTER_MONTHS or not active:
+            to_goals = 0.0
+        elif cover < cushion_months:
+            to_goals = share_month / 2
+        else:
+            to_goals = share_month
+        if index == 0:
+            share_to = (
+                "cushion"
+                if to_goals == 0
+                else "goals" if to_goals >= share_month else "split"
+            )
+        each = to_goals / len(active) if active else 0.0
+        parts: dict[str, float] = {}
+        for piggy in active:  # цели не дают больше, чем ей не хватает
+            rate = rates.to_uzs.get(piggy.currency, 0.0)
+            wanted = (
+                piggy.target * rate - collected_goals[piggy.id]
+                if piggy.target is not None
+                else each
+            )
+            parts[piggy.id] = min(each, max(wanted, 0.0))
+            collected_goals[piggy.id] += parts[piggy.id]
+        to_goals = sum(parts.values())
+        if cushion_uzs is not None:
+            cushion_uzs += share_month - to_goals
+        items: dict[str, float] = {}
+        for k, amount in alloc[index].items():
+            items[planned[k].piggy_id] = items.get(planned[k].piggy_id, 0.0) + amount
+        plan.append(
+            MonthPlan(
+                first_day,
+                sum(items.values()),
+                items,
+                share_month - to_goals,
+                parts,
+                tuple(dict.fromkeys(planned[k].piggy_id for k in ready[index])),
+            )
+        )
+
+    # копилки на экране
+    states: list[PiggyState] = []
+    for piggy in open_piggies:
+        moves = book.moves_of(piggy.id) if piggy.id else ()
+        balance = now.get(piggy.id, Balance(0.0, 0.0, 0.0, 0.0, ()))
+        rate = rates.to_uzs.get(piggy.currency, 0.0)
+        planned_now = plan[0].items.get(piggy.id, 0.0) + plan[0].goals.get(
+            piggy.id, 0.0
+        )
+        this_month = _up(planned_now / rate, piggy.currency) if rate else 0.0
+        left_month = max(this_month - _saved_in(moves, month), 0.0)
+        status, short, leftover = "on_track", 0.0, _leftover(moves, balance.left)
+        if piggy.error or not piggy.id:
+            status = "broken"
+        elif piggy.deadline is None:
+            reached = piggy.target is not None and balance.collected >= piggy.target
+            status = "done" if reached else "goal"
+        elif piggy.target is None:
+            status = "no_target"
+        elif (
+            not piggy.yearly
+            and today > piggy.deadline + timedelta(days=AFTER_DAYS)
+            and balance.left > 0
+        ):
+            status, leftover = "leftover", balance.left
+        elif balance.collected >= piggy.target:
+            status = "done"
+        elif piggy.id in late:
+            status, short = "late", (late[piggy.id] / rate if rate else 0.0)
+        states.append(
+            PiggyState(
+                piggy,
+                balance,
+                status,
+                this_month,
+                left_month,
+                short,
+                leftover,
+                tuple(reversed(moves[-5:])),
+            )
+        )
+    states.sort(
+        key=lambda item: (
+            2 if item.status == "broken" else 1 if item.piggy.deadline is None else 0,
+            item.piggy.deadline or date.max,
+            item.piggy.row,
+        )
+    )
+
+    # подушка — на вечер вчера, как «Заморожено»
+    cushion, envelopes, over = None, 0.0, 0.0
+    frozen = budget.frozen if budget is not None else None
+    if frozen is not None and currency and frozen_rate:
+        envelopes = sum(
+            rates.convert(night[piggy.id].left, piggy.currency, currency) or 0.0
+            for piggy in open_piggies
+            if piggy.id in night
+        )
+        amount = frozen - envelopes
+        over = max(-amount, 0.0)
+        kept = max(amount, 0.0)
+        cushion = Cushion(
+            kept, currency, kept * frozen_rate, frozen_rate, monthly, cushion_months
+        )
+    yearly = {
+        (piggy.group or "", piggy.subcategory or "")
+        for piggy in scheduled
+        if piggy.yearly and piggy.subcategory
+    }
+    return Screen(
+        today,
+        tuple(states),
+        tuple(plan),
+        cushion,
+        frozen,
+        envelopes,
+        over,
+        share_to,
+        _enough(frame, today, yearly, plan[0].total if plan else 0.0, share),
+    )
+
+
+def distribute(
+    screen: Screen, amount: float, currency: str, rates: Rates
+) -> list[tuple[str, float]]:
+    """«Отложил…» одной суммой: копилкам со сроком по порядку экрана их «осталось
+    в этом месяце», потом долгим целям; остальное — подушке, его не пишут."""
+    rest = rates.convert(amount, currency, "UZS")
+    if rest is None or rest <= 0:
+        return []
+    chosen: list[tuple[str, float]] = []
+    ordered = [item for item in screen.piggies if item.piggy.deadline is not None] + [
+        item for item in screen.piggies if item.piggy.deadline is None
+    ]
+    for item in ordered:
+        if item.status == "broken" or item.left_this_month <= 0 or rest <= 0:
+            continue
+        rate = rates.to_uzs.get(item.piggy.currency)
+        if not rate:
+            continue
+        take = min(item.left_this_month * rate, rest)
+        rest -= take
+        digits = 0 if item.piggy.currency == "UZS" else 2
+        chosen.append((item.piggy.id, round(take / rate, digits)))
+    return chosen

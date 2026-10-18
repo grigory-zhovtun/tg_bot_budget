@@ -392,3 +392,263 @@ def test_fact_keys_number_repeats_and_ignore_ai() -> None:
     assert fact_key(day, "🍔 ЕДА", "кафе", 50_000, "UZS", "VISA", "AI: кафе") == (
         fact_key(day, "🍔 ЕДА", "кафе", 50_000, "UZS", "VISA", "кафе")
     )
+
+
+# --- план взносов, 10 %, подушка, «хватает ли» (спека 4.3–4.5, 4.8) ---
+
+from types import SimpleNamespace  # noqa: E402
+
+from app.services.piggy import (  # noqa: E402
+    Balance,
+    Enough,
+    PiggyState,
+    Screen,
+    distribute,
+    money_day,
+    savings_screen,
+)
+from tests.test_day_budget import tab  # noqa: E402
+
+TODAY = date(2026, 10, 17)
+TRIP = {
+    "id": "tr0001",
+    "name": "Отпуск",
+    "target": 2500,
+    "currency": "USD",
+    "deadline": "01.06.2027",
+    "group": "✈️ ПОЕЗДКИ",
+    "sub": "путешествие",
+}
+GOAL = {
+    "id": "car001",
+    "name": "Машина",
+    "target": "",
+    "currency": "USD",
+    "deadline": "",
+    "repeat": "",
+    "group": "",
+    "sub": "",
+}
+
+
+def frozen(amount: float, change: float = 0.0) -> Any:
+    """Дневной бюджет — только то, что берут копилки: «Заморожено» в долларах."""
+    return SimpleNamespace(
+        frozen=amount,
+        frozen_change=change,
+        frozen_currency="USD",
+        frozen_uzs=amount * 12_000,
+    )
+
+
+def screen(
+    *piggies: list[Any],
+    moves: tuple[list[Any], ...] = (),
+    fact: tuple[list[Any], ...] = (),
+    today: date = TODAY,
+    budget: Any = None,
+) -> Screen:
+    # список вкладки: аванс 15-го и ЗП 30-го — день денег 30-е, поступлений 12 млн
+    return savings_screen(
+        book(*piggies, moves=moves), frame(*fact), tab(), today, RATES, budget, 0.1, 6
+    )
+
+
+def state(found: Screen, piggy_id: str) -> PiggyState:
+    return next(item for item in found.piggies if item.piggy.id == piggy_id)
+
+
+def spending_months(amount: float = 10_000_000) -> tuple[list[Any], ...]:
+    """Траты июля–сентября по 10 млн: средние траты в месяц — 10 млн."""
+    return tuple(
+        fact_row(date(2026, month, 3), "🍔 ЕДА", "кафе", amount) for month in (7, 8, 9)
+    )
+
+
+def test_money_day_is_the_last_income_of_the_list() -> None:
+    assert money_day(tab()) == 30
+    assert money_day(None) is None
+
+
+def test_the_spec_example_steps_down() -> None:
+    found = screen(piggy_row(), piggy_row(**TRIP))
+    totals = [round(month.total) for month in found.plan[:9]]
+    assert totals == [6_000_000] * 2 + [5_000_000] * 6 + [3_500_000]
+    assert len(found.plan) == 12
+    assert found.plan[0].items == {"p3k9za": 6_000_000}
+    assert found.plan[2].items == {"tr0001": 5_000_000}
+    assert found.plan[1].ready == ("p3k9za",)
+    assert found.plan[7].ready == ("tr0001",)
+    assert (state(found, "p3k9za").this_month, state(found, "tr0001").this_month) == (
+        6_000_000,
+        0,
+    )
+    assert state(found, "p3k9za").status == "on_track"
+
+
+def test_a_deadline_before_any_money_day_is_late() -> None:
+    found = screen(
+        piggy_row(target=1_000_000, deadline="25.10.2026", repeat="один раз")
+    )
+    late = state(found, "p3k9za")
+    assert (late.status, late.short) == ("late", 1_000_000)
+
+
+def test_a_contribution_after_the_money_day_counts_for_its_month() -> None:
+    found = screen(
+        piggy_row(),
+        moves=(move_row(day="31.10.2026", amount=6_000_000),),
+        today=date(2026, 10, 31),
+    )
+    piggy = state(found, "p3k9za")
+    assert (piggy.this_month, piggy.left_this_month) == (6_000_000, 0)
+
+
+def test_rounds_up_to_thousands_and_whole_dollars() -> None:
+    sums = screen(piggy_row(target=11_998_002))
+    assert state(sums, "p3k9za").this_month == 6_000_000
+    dollars = screen(piggy_row(**(TRIP | {"target": 420.4, "deadline": "20.12.2026"})))
+    assert state(dollars, "tr0001").this_month == 211
+
+
+def test_no_target_asks_for_a_sum() -> None:
+    assert state(screen(piggy_row(target="")), "p3k9za").status == "no_target"
+
+
+def test_done_when_collected_reaches_the_target() -> None:
+    found = screen(piggy_row(), moves=(move_row(day="10.10.2026", amount=12_000_000),))
+    assert state(found, "p3k9za").status == "done"
+
+
+def test_the_share_goes_to_the_cushion_under_a_month() -> None:
+    found = screen(piggy_row(**GOAL), fact=spending_months(), budget=frozen(500))
+    assert found.share_to == "cushion"  # 6 млн при тратах 10 млн — 0,6 месяца
+    assert state(found, "car001").this_month == 0
+
+
+def test_the_share_splits_between_a_month_and_the_target() -> None:
+    found = screen(piggy_row(**GOAL), fact=spending_months(), budget=frozen(2000))
+    assert found.share_to == "split"  # 24 млн — 2,4 месяца
+    # 10 % от поступлений 12 млн — 1,2 млн, половина цели: 600 000 = $50
+    assert state(found, "car001").this_month == 50
+    assert found.plan[0].goals == {"car001": 600_000}
+    assert found.plan[0].cushion == 600_000
+
+
+def test_the_share_goes_to_goals_from_the_target() -> None:
+    found = screen(piggy_row(**GOAL), fact=spending_months(), budget=frozen(6000))
+    assert found.share_to == "goals"  # 72 млн — 7,2 месяца из 6
+    assert state(found, "car001").this_month == 100
+
+
+def test_a_goal_at_its_target_passes_its_part() -> None:
+    laptop = GOAL | {"id": "lap001", "name": "Ноутбук"}
+    car = GOAL | {"target": 1000}
+    found = screen(
+        piggy_row(**car),
+        piggy_row(**laptop),
+        moves=(move_row(id="car001", day="01.09.2026", amount=1000, currency="USD"),),
+        fact=spending_months(),
+        budget=frozen(2000),  # подушка 1000 $ = 12 млн — 1,2 месяца
+    )
+    assert state(found, "car001").status == "done"
+    assert (state(found, "car001").this_month, state(found, "lap001").this_month) == (
+        0,
+        50,
+    )
+
+
+def test_the_cushion_is_frozen_minus_piggies_as_of_last_night() -> None:
+    found = screen(
+        piggy_row(**TRIP),
+        moves=(
+            move_row(id="tr0001", day="16.10.2026", amount=400, currency="USD"),
+            move_row(id="tr0001", day="17.10.2026", amount=100, currency="USD"),
+        ),
+        fact=spending_months(),
+        budget=frozen(1500),
+    )
+    # сегодняшние доллары «Заморожено» увидит только завтра — и копилка тоже
+    assert (found.envelopes, found.over) == (400, 0)
+    assert found.cushion is not None
+    assert found.cushion.amount == 1100
+
+
+def test_piggies_over_the_frozen_money_warn() -> None:
+    found = screen(
+        piggy_row(**TRIP),
+        moves=(move_row(id="tr0001", day="16.10.2026", amount=400, currency="USD"),),
+        fact=spending_months(),
+        budget=frozen(300),
+    )
+    assert found.cushion is not None
+    assert (found.cushion.amount, found.over) == (0, 100)
+
+
+def test_enough_compares_money_for_life_with_ordinary_spending() -> None:
+    fact = tuple(
+        row
+        for month in range(4, 10)
+        for row in (
+            fact_row(date(2026, month, 2), "💰 ДОХОДЫ", "зарплата", 40_000_000),
+            fact_row(date(2026, month, 3), "🍔 ЕДА", "кафе", 32_000_000),
+            fact_row(date(2026, month, 4), "🎉 ПРАЗДНИК", "сезонный", 2_000_000),
+        )
+    )
+    found = screen(piggy_row(), fact=fact)
+    # отложить: 6 млн в «Новый год» и 10 % от 40 млн; обычные траты — без статьи копилки
+    assert found.enough == Enough(
+        income=40_000_000,
+        save=10_000_000,
+        life=30_000_000,
+        ordinary=32_000_000,
+        gap=-2_000_000,
+    )
+
+
+def _state(piggy_id: str, currency: str, left: float, deadline: date | None) -> Any:
+    piggy = Piggy(piggy_id, 2, piggy_id, None, currency, deadline, True, None, None,
+                  "", None)  # fmt: skip
+    status = "goal" if deadline is None else "on_track"
+    return PiggyState(piggy, Balance(0, 0, 0, 0, ()), status, left, left, 0, 0, ())
+
+
+def test_distribute_by_deadlines_then_goals() -> None:
+    found = Screen(
+        TODAY,
+        (
+            _state("ny", "UZS", 6_000_000, date(2026, 12, 20)),
+            _state("trip", "USD", 210, date(2027, 6, 1)),
+            _state("goal", "UZS", 1_500_000, None),
+        ),
+        (),
+        None,
+        None,
+        0,
+        0,
+        "split",
+        None,
+    )
+    assert distribute(found, 12_000_000, "UZS", RATES) == [
+        ("ny", 6_000_000),
+        ("trip", 210),
+        ("goal", 1_500_000),
+    ]  # остальные 1 980 000 — подушке, их не пишем
+    assert distribute(found, 7_000_000, "UZS", RATES) == [
+        ("ny", 6_000_000),
+        ("trip", 83.33),
+    ]
+
+
+def test_a_goal_gets_no_more_than_it_lacks() -> None:
+    car = GOAL | {"target": 1000}
+    found = screen(
+        piggy_row(**car),
+        moves=(move_row(id="car001", day="01.09.2026", amount=980, currency="USD"),),
+        fact=spending_months(),
+        budget=frozen(6000),  # подушка 5020 $ ≈ 6 месяцев — вся доля целям
+    )
+    # не хватает 20 $ = 240 000: больше цель не берёт, остальное — подушке
+    assert found.plan[0].goals == {"car001": 240_000}
+    assert found.plan[0].cushion == 960_000
+    assert state(found, "car001").this_month == 20
