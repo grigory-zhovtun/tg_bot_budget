@@ -211,6 +211,9 @@ class CushionOut(ApiModel):
     target_months: int
     short_uzs: float  # сколько не хватает до цели, сумы; 0 — цель достигнута
     short: float  # то же в валюте подушки
+    frozen: float | None = None  # «Заморожено» на вечер вчера
+    piggies: float = 0.0  # остатки копилок на вечер вчера, в валюте подушки
+    over: float = 0.0  # на сколько копилки больше «Заморожено»
 
 
 class SavingMonthOut(ApiModel):
@@ -260,8 +263,6 @@ class DashboardOut(ApiModel):
     untracked: list[UntrackedOut] = []
     cards: list[CardOut] = []
     categories: list[CategoryOut] = []  # план-факт по категориям, от больших трат
-    cushion: CushionOut | None = None
-    savings: SavingsOut | None = None
 
 
 class ForecastEventOut(ApiModel):
@@ -577,3 +578,129 @@ class AdvicePointOut(ApiModel):
 
 class PlanAdviceOut(ApiModel):
     points: list[AdvicePointOut]
+
+
+class AmountOut(ApiModel):
+    id: str  # копилка
+    amount: float  # сумы
+
+
+class MoveOut(ApiModel):
+    day: date
+    amount: float  # в валюте копилки: плюс — отложили, минус — забрали
+    kind: str
+    who: str
+
+
+class SpendOut(ApiModel):
+    key: str  # ключ строки fact — для «Не из копилки»
+    day: date
+    group: str
+    subcategory: str
+    amount: float  # в валюте копилки
+
+
+class PiggyOut(ApiModel):
+    """Копилка «Накоплений»; суммы — в её валюте."""
+
+    id: str
+    row: int  # строка листа «Копилки»
+    name: str
+    target: float | None
+    currency: str
+    deadline: date | None
+    repeat: Literal["once", "yearly"]
+    group: str | None
+    subcategory: str | None
+    author: str
+    saved: float
+    spent: float
+    balance: float
+    collected: float  # к ближайшему сроку: остаток и то, что из него уже потратили
+    this_month: float
+    left_this_month: float
+    status: Literal[
+        "on_track", "late", "no_target", "done", "leftover", "goal", "broken"
+    ]
+    short: float
+    leftover: float
+    error: str | None
+    history: list[MoveOut]
+    spends: list[SpendOut]
+
+
+class MonthPlanOut(ApiModel):
+    month: str  # «2026-10»
+    total: float  # взносы копилок со сроком, сумы
+    items: list[AmountOut]
+    cushion: float  # доля 10 % подушке
+    goals: list[AmountOut]  # доля 10 % долгим целям
+    ready: list[str]  # копилки, собранные к сроку в этом месяце
+
+
+class SavingsMonthOut(ApiModel):
+    """Первый месяц плана: сколько отложить, сумы."""
+
+    month: str
+    piggy: float  # взносы копилок со сроком
+    piggy_left: float  # сколько из них ещё не отложено
+    share: float  # доля 10 % от поступлений списка
+    share_to: Literal["cushion", "split", "goals"]
+    goals: list[AmountOut]
+
+
+class EnoughOut(ApiModel):
+    income: float
+    save: float
+    life: float
+    ordinary: float
+    gap: float  # меньше нуля — не хватает
+
+
+class SavingsScreenOut(ApiModel):
+    """«Накопления»: копилки, план на год, подушка за вычетом копилок и норма."""
+
+    status: Literal["ok", "no_month_tab"]
+    today: date
+    month: SavingsMonthOut | None = None
+    cushion: CushionOut | None = None
+    piggies: list[PiggyOut] = []
+    plan: list[MonthPlanOut] = []
+    enough: EnoughOut | None = None
+    savings: SavingsOut | None = None
+    rates: dict[str, float] = {}
+
+
+class PiggyIn(ApiModel):
+    """Копилка из окна: цель строкой, как сумма траты."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    entry_id: UUID | None = None  # у новой: повтор с тем же — без второй строки
+    name: str = Field(min_length=1, max_length=40)
+    target: Decimal | None = Field(
+        default=None, gt=0, le=Decimal(10) ** 12, decimal_places=2
+    )
+    currency: str = Field(min_length=3, max_length=3)
+    deadline: date | None = None
+    repeat: Literal["once", "yearly"] = "once"
+    group: str | None = Field(default=None, max_length=100)
+    subcategory: str | None = Field(default=None, max_length=100)
+
+
+class MoveIn(ApiModel):
+    entry_id: UUID | None = None
+    kind: Literal["saved", "spent", "write_off"]
+    amount: Decimal = Field(gt=0, le=Decimal(10) ** 12, decimal_places=2)
+
+
+class SaveIn(ApiModel):
+    """«Отложил…» одной суммой на все копилки."""
+
+    entry_id: UUID | None = None
+    amount: Decimal = Field(gt=0, le=Decimal(10) ** 12, decimal_places=2)
+    currency: str = Field(min_length=3, max_length=3)
+
+
+class ExcludeIn(ApiModel):
+    key: str = Field(min_length=1, max_length=500)

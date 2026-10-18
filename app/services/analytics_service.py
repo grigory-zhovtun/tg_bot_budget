@@ -11,7 +11,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 import pandas as pd
 from gspread.exceptions import WorksheetNotFound
@@ -25,8 +25,19 @@ if TYPE_CHECKING:
     from app.services.calendar import CalendarRecord
     from app.services.dashboard import Dashboard
     from app.services.forecast import MonthForecast
+    from app.services.piggy import Screen
+    from app.services.savings import Savings
 
 logger = logging.getLogger(__name__)
+
+
+class SavingsTab(NamedTuple):
+    """«Накопления»: копилки, план и подушка, норма сбережений, курсы таблицы."""
+
+    screen: "Screen"
+    savings: "Savings"
+    rates: Rates
+
 
 TRANSFERS_GROUP = "💳 СЧЕТА"
 OPENING_BALANCE = "нач остаток"
@@ -582,6 +593,45 @@ class AnalyticsService:
             read_calendar(sheets.calendar),
             cards,
         )
+
+    def savings(
+        self,
+        today: date,
+        currencies: Iterable[str],
+        groups: Iterable[str],
+        subcategories: dict[str, list[str]],
+        max_age: float = 0.0,
+    ) -> "SavingsTab | None":
+        """Вкладка «Накопления»; None — вкладки месяца нет.
+
+        currencies, groups, subcategories — валюты карт и справочник статей бота:
+        по ним проверяются строки листа «Копилки».
+        """
+        from app.services.day_budget import day_budget
+        from app.services.piggy import read_book, savings_screen
+        from app.services.savings import month_savings
+
+        sheet = month_title(today)
+        sheets = read_month_sheets(self.gs_service, sheet, max_age, calendar=False)
+        if sheets.month is None:
+            logger.info("No plan sheet %s", sheet)
+            return None
+        piggies, journal = self.gs_service.get_piggy(max_age)
+        rates = sheets.rates
+        frame = transactions_frame(sheets.fact, rates)
+        book = read_book(piggies, journal, set(currencies), list(groups), subcategories)
+        budget = day_budget(frame, sheets.month, today, rates, config.FROZEN_CURRENCY)
+        screen = savings_screen(
+            book,
+            frame,
+            sheets.month,
+            today,
+            rates,
+            budget,
+            config.SAVE_SHARE,
+            config.CUSHION_MONTHS,
+        )
+        return SavingsTab(screen, month_savings(frame, today), rates)
 
     def forecast(
         self, today: date, currencies: Iterable[str], max_age: float = 0.0
