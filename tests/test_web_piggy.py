@@ -66,6 +66,8 @@ class PiggySheets:
         self.fail = False
         self.created = 0
         self.updates: list[tuple[str, dict[str, Any]]] = []
+        self.percents: list[float] = []
+        self.orders: list[dict[str, int]] = []
 
     def get_piggy(self, max_age: float = 0.0) -> tuple[list[Any], list[Any]]:
         return [list(r) for r in self.list or []], [list(r) for r in self.journal or []]
@@ -101,6 +103,30 @@ class PiggySheets:
         assert self.journal is not None
         self.journal.extend(list(row) for row in rows)
 
+    def write_piggy_percent(self, percent: float) -> None:
+        if self.fail:
+            raise ConnectionError("Google is down")
+        self.ensure_piggy_sheets()
+        assert self.list is not None
+        head = self.list[0] + [""] * (17 - len(self.list[0]))
+        head[15:17] = [PERCENT_LABEL, percent]
+        self.list[0] = head
+        self.percents.append(percent)
+
+    def write_piggy_order(self, numbers: dict[str, int]) -> bool:
+        if self.fail:
+            raise ConnectionError("Google is down")
+        assert self.list is not None
+        rows = {row[0]: row for row in self.list[1:]}
+        if any(piggy_id not in rows for piggy_id in numbers):
+            return False
+        for piggy_id, number in numbers.items():
+            row = rows[piggy_id]
+            row.extend([""] * (15 - len(row)))
+            row[14] = number
+        self.orders.append(dict(numbers))
+        return True
+
 
 class PiggyAnalytics:
     """«Накопления» по листам в памяти: что записали — то и в ответе."""
@@ -118,6 +144,9 @@ class PiggyAnalytics:
         groups: Any,
         subcategories: Any,
         max_age: float = 0.0,
+        *,
+        percent: float | None = None,
+        order: Any = None,
     ) -> SavingsTab:
         self.ages.append(max_age)
         piggies, journal = self.sheets.get_piggy(max_age)
@@ -125,7 +154,18 @@ class PiggyAnalytics:
         found = frame(*self.fact)
         rows = self.rows
         budget = day_budget(found, rows, today, RATES, "USD")
-        screen = savings_screen(book, found, rows, today, RATES, budget, 0.1, 6)
+        screen = savings_screen(
+            book,
+            found,
+            rows,
+            today,
+            RATES,
+            budget,
+            0.1,
+            6,
+            percent=percent,
+            order=order,
+        )
         return SavingsTab(screen, month_savings(found, today), RATES)
 
 
@@ -186,7 +226,8 @@ def test_savings_screen_shape() -> None:
     assert found["cushion"]["piggies"] == 500  # 6 млн по курсу 12 000
     assert len(found["savings"]["months"]) == 6
     assert set(found["month"]) == {
-        "month", "piggy", "piggy_left", "share", "share_to", "goals",
+        "month", "percent", "percent_source", "percent_needed", "capacity",
+        "received", "due", "left", "cushion",
     }  # fmt: skip
 
 
@@ -497,3 +538,96 @@ def test_a_new_piggy_drops_the_bots_memory_of_articles() -> None:
     response = client_for(application).post("/api/piggy", json=body(), headers=auth())
     assert response.status_code == 200
     assert "piggy_articles" not in application.bot_data
+
+
+TRIP_ROW = ["tr0001", "Отпуск", 2500, "USD", f"{TODAY + timedelta(days=200):%d.%m.%Y}",
+            "каждый год", "", "", "", "", "", "", "Иван", ""]  # fmt: skip
+
+
+def test_savings_answer_has_the_percent_and_the_month() -> None:
+    came = fact_row(TODAY, "💰 ДОХОДЫ", "зарплата", 4_000_000)
+    application, _ = setup(PiggySheets([ROW], [], percent=10), came)
+    found = client_for(application).get("/api/savings", headers=auth()).json()
+    month = found["month"]
+    assert (month["percent"], month["percent_source"]) == (10, "sheet")
+    assert (month["capacity"], month["received"], month["due"]) == (
+        1_200_000,
+        4_000_000,
+        400_000,
+    )
+    assert (month["left"], month["cushion"]) == (400_000, 0)
+    piggy = found["piggies"][0]
+    assert (piggy["order"], piggy["status"], piggy["now"]) == (1, "short", 400_000)
+    assert piggy["forecast"] < 12_000_000
+
+
+def test_preview_writes_nothing() -> None:
+    application, sheets = setup(PiggySheets([ROW, TRIP_ROW], [], percent=10))
+    client = client_for(application)
+    found = client.get("/api/savings?percent=50", headers=auth()).json()
+    assert (found["month"]["percent"], found["month"]["percent_source"]) == (
+        50,
+        "preview",
+    )
+    first = client.get("/api/savings?order=tr0001,p3k9za", headers=auth()).json()
+    assert [(item["id"], item["order"]) for item in first["piggies"][:2]] == [
+        ("tr0001", 1),
+        ("p3k9za", 2),
+    ]
+    bad = client.get("/api/savings?percent=abc", headers=auth())
+    assert (bad.status_code, list(bad.json()["error"]["fields"])) == (422, ["percent"])
+    assert (sheets.percents, sheets.orders) == ([], [])
+
+
+def test_put_percent_writes_q1_and_notes_the_other() -> None:
+    application, sheets = setup(PiggySheets([ROW], []))
+    response = client_for(application).put(
+        "/api/piggy/percent", json={"percent": 5}, headers=auth()
+    )
+    assert response.status_code == 200
+    assert sheets.percents == [5]
+    assert response.json()["month"]["percent"] == 5
+    assert told(application) == ["🐷 Иван — процент: 5 % с поступлений"]
+
+
+@pytest.mark.parametrize("value", [-1, 101, 2.55, "abc"])
+def test_bad_percents_are_rejected(value: Any) -> None:
+    application, sheets = setup(PiggySheets([ROW], []))
+    response = client_for(application).put(
+        "/api/piggy/percent", json={"percent": value}, headers=auth()
+    )
+    assert response.status_code == 422
+    assert list(response.json()["error"]["fields"]) == ["percent"]
+    assert sheets.percents == []
+
+
+def test_put_order_writes_o_and_notes_the_other() -> None:
+    application, sheets = setup(PiggySheets([ROW, TRIP_ROW], [], percent=10))
+    response = client_for(application).put(
+        "/api/piggy/order", json={"ids": ["tr0001", "p3k9za"]}, headers=auth()
+    )
+    assert response.status_code == 200
+    assert sheets.orders == [{"tr0001": 1, "p3k9za": 2}]
+    assert response.json()["piggies"][0]["id"] == "tr0001"
+    assert told(application) == [
+        "🐷 Иван — порядок копилок: 1. Отпуск · 2. Кафе с друзьями"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("ids", "status", "code"),
+    [
+        (["p3k9za"], 409, "piggies_changed"),
+        (["p3k9za", "tr0001", "zzz999"], 422, "validation"),
+        (["p3k9za", "p3k9za", "tr0001"], 422, "validation"),
+    ],
+)
+def test_a_stale_or_bad_order_is_rejected(
+    ids: list[str], status: int, code: str
+) -> None:
+    application, sheets = setup(PiggySheets([ROW, TRIP_ROW], []))
+    response = client_for(application).put(
+        "/api/piggy/order", json={"ids": ids}, headers=auth()
+    )
+    assert (response.status_code, response.json()["error"]["code"]) == (status, code)
+    assert sheets.orders == []

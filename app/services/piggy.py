@@ -598,6 +598,7 @@ class MonthGoal:
     spent: float
     total: float
     from_piggies: tuple[FromPiggy, ...]
+    percent: float = 0.0  # процент с поступлений, доля
 
 
 @dataclass(frozen=True)
@@ -1178,7 +1179,7 @@ def savings_screen(
         over,
         share_to,
         _enough(frame, today, yearly, portion),
-        _month_goals(plan, states, book, today, rates, late, expected),
+        _month_goals(plan, states, book, today, rates, late, expected, portion),
         goal_in_plan(rows, rates),
         portion,
         source,
@@ -1234,6 +1235,7 @@ def _month_goals(
     rates: Rates,
     late: Mapping[str, float],
     expected: Mapping[tuple[str, date], float] | None = None,
+    percent: float = 0.0,
 ) -> tuple[MonthGoal, ...]:
     """«Отложить за месяц» для каждого месяца плана (спека 4.7).
 
@@ -1296,6 +1298,7 @@ def _month_goals(
                 spent_uzs,
                 month_plan.total + share - spent_uzs,
                 tuple(found),
+                percent,
             )
         )
     return tuple(goals)

@@ -440,6 +440,7 @@ class PlanGoalHintOut(ApiModel):
     piggies: float
     share: float
     spent: float  # траты из копилок в месяце
+    percent: float = 0.0  # процент с поступлений, проценты
 
 
 class PlanPiggyHintOut(ApiModel):
@@ -650,6 +651,9 @@ class PiggyOut(ApiModel):
     short: float
     leftover: float
     error: str | None
+    order: int | None = None  # номер важности; null — не в порядке
+    forecast: float | None = None  # будет к ближайшему сроку по плану
+    now: float = 0.0  # отложить сейчас
     history: list[MoveOut]
     spends: list[SpendOut]
 
@@ -674,14 +678,17 @@ class SavingsGoalOut(ApiModel):
 
 
 class SavingsMonthOut(ApiModel):
-    """Первый месяц плана: сколько отложить, сумы."""
+    """Текущий месяц: процент с поступлений и сколько отложить, сумы."""
 
     month: str
-    piggy: float  # взносы копилок со сроком
-    piggy_left: float  # сколько из них ещё не отложено
-    share: float  # доля 10 % от поступлений списка
-    share_to: Literal["cushion", "split", "goals"]
-    goals: list[AmountOut]
+    percent: float  # проценты: 5.0
+    percent_source: Literal["sheet", "default", "bad", "preview"]
+    percent_needed: int | None  # целые проценты «успеть всё»; null — копить нечего
+    capacity: float  # процент от поступлений плана месяца
+    received: float  # пришло с 1-го по сегодня
+    due: float  # процент от пришедшего
+    left: float  # отложить сейчас — копилкам и долгим целям
+    cushion: float  # часть подушке
 
 
 class EnoughOut(ApiModel):
@@ -728,6 +735,18 @@ class MoveIn(ApiModel):
     entry_id: UUID | None = None
     kind: Literal["saved", "spent", "write_off"]
     amount: Decimal = Field(gt=0, le=Decimal(10) ** 12, decimal_places=2)
+
+
+class PercentIn(ApiModel):
+    """«Откладываем N % с поступлений»."""
+
+    percent: Decimal = Field(ge=0, le=100, decimal_places=1)
+
+
+class OrderIn(ApiModel):
+    """Порядок важности: ID копилок со сроком, самая важная — первой."""
+
+    ids: list[str] = Field(min_length=1, max_length=50)
 
 
 class SaveIn(ApiModel):

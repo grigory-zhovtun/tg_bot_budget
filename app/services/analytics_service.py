@@ -8,7 +8,7 @@ import calendar
 import io
 import logging
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -601,8 +601,12 @@ class AnalyticsService:
         groups: Iterable[str],
         subcategories: dict[str, list[str]],
         max_age: float = 0.0,
+        *,
+        percent: float | None = None,
+        order: Sequence[str] | None = None,
     ) -> "SavingsTab | None":
-        """Вкладка «Накопления»; None — вкладки месяца нет.
+        """Вкладка «Накопления»; None — вкладки месяца нет. percent и order —
+        предпросмотр окон «Процент» и «Порядок».
 
         currencies, groups, subcategories — валюты карт и справочник статей бота:
         по ним проверяются строки листа «Копилки».
@@ -630,6 +634,8 @@ class AnalyticsService:
             budget,
             config.SAVE_SHARE,
             config.CUSHION_MONTHS,
+            percent=percent,
+            order=order,
         )
         return SavingsTab(screen, month_savings(frame, today), rates)
 

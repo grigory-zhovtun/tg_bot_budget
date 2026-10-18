@@ -723,6 +723,7 @@ def test_the_plan_tells_the_piggy_goal_and_article_hints(
     body = client_for(application).get("/api/plan?month=2026-12", headers=auth())
     found = body.json()
     assert found["goal_hint"]["suggested"] == 6_000_000 - 12_000_000
+    assert found["goal_hint"]["percent"] == 50
     assert found["piggy_hints"] == [
         {
             "piggy": "Новый год",
