@@ -10,6 +10,8 @@ import type {
   ForecastPast,
   ForecastRecord,
   MonthPlan,
+  Piggy,
+  SavingsScreen,
 } from "../api";
 
 export const bootstrapFixture: Bootstrap = {
@@ -61,27 +63,6 @@ export const dashboardFixture: Dashboard = {
   balance: 39_000_000,
   planned_balance: 41_500_000,
   frozen: { amount: 1000, currency: "USD", uzs: 12_000_000, change: -50 },
-  cushion: {
-    amount: 1000,
-    currency: "USD",
-    uzs: 12_000_000,
-    monthly: 40_000_000,
-    months: 0.3,
-    target_months: 6,
-    short_uzs: 228_000_000,
-    short: 19_000,
-  },
-  savings: {
-    rate: -0.1,
-    months: [
-      { month: "2026-04", income: 40_000_000, spent: 30_000_000, rate: 0.25 },
-      { month: "2026-05", income: 0, spent: 35_000_000, rate: null },
-      { month: "2026-06", income: 50_000_000, spent: 48_000_000, rate: 0.04 },
-      { month: "2026-07", income: 30_000_000, spent: 60_000_000, rate: -1 },
-      { month: "2026-08", income: 45_000_000, spent: 36_000_000, rate: 0.2 },
-      { month: "2026-09", income: 45_000_000, spent: 36_000_000, rate: 0.2 },
-    ],
-  },
   groups: [
     {
       name: "🍔 ЕДА",
@@ -708,4 +689,153 @@ export const forecastFixture: Forecast = {
     "кафе|UZS": { typical: 160_000, last: 145_000, per_day: 21_000 },
     "продукты|UZS": { typical: 380_000, last: 420_000, per_day: 95_000 },
   },
+};
+
+const PLAN_MONTHS = [
+  "2026-10", "2026-11", "2026-12", "2027-01", "2027-02", "2027-03",
+  "2027-04", "2027-05", "2027-06", "2027-07", "2027-08", "2027-09",
+]; // prettier-ignore
+
+function piggy(changes: Partial<Piggy>): Piggy {
+  return {
+    id: "p3k9za",
+    row: 2,
+    name: "Новый год",
+    target: 12_000_000,
+    currency: "UZS",
+    deadline: "2026-12-20",
+    repeat: "yearly",
+    group: "🎉 ПРАЗДНИК",
+    subcategory: "сезонный",
+    author: "Иван",
+    saved: 0,
+    spent: 0,
+    balance: 0,
+    collected: 0,
+    this_month: 6_000_000,
+    left_this_month: 6_000_000,
+    status: "on_track",
+    short: 0,
+    leftover: 0,
+    error: null,
+    history: [],
+    spends: [],
+    ...changes,
+  };
+}
+
+export const savingsFixture: SavingsScreen = {
+  status: "ok",
+  today: "2026-10-10",
+  month: {
+    month: "2026-10",
+    piggy: 6_000_000,
+    piggy_left: 6_000_000,
+    share: 4_000_000,
+    share_to: "cushion",
+    goals: [],
+  },
+  cushion: {
+    amount: 1100,
+    currency: "USD",
+    uzs: 13_200_000,
+    monthly: 40_000_000,
+    months: 0.33,
+    target_months: 6,
+    short_uzs: 226_800_000,
+    short: 18_900,
+    frozen: 1500,
+    piggies: 400,
+    over: 0,
+  },
+  piggies: [
+    piggy({}),
+    piggy({
+      id: "tr0001",
+      row: 3,
+      name: "Отпуск",
+      target: 2500,
+      currency: "USD",
+      deadline: "2027-06-01",
+      group: "✈️ ПОЕЗДКИ",
+      subcategory: "путешествие",
+      saved: 400,
+      balance: 400,
+      collected: 400,
+      this_month: 0,
+      left_this_month: 0,
+      history: [
+        { day: "2026-10-05", amount: 400, kind: "отложил", who: "Иван" },
+      ],
+    }),
+    piggy({
+      id: "rm0001",
+      row: 4,
+      name: "Ремонт",
+      target: null,
+      deadline: "2027-08-01",
+      repeat: "once",
+      group: null,
+      subcategory: null,
+      this_month: 0,
+      left_this_month: 0,
+      status: "no_target",
+    }),
+    piggy({
+      id: "car001",
+      row: 5,
+      name: "Машина",
+      target: null,
+      currency: "USD",
+      deadline: null,
+      repeat: "once",
+      group: null,
+      subcategory: null,
+      this_month: 0,
+      left_this_month: 0,
+      status: "goal",
+    }),
+    piggy({
+      id: "",
+      row: 6,
+      name: "Без валюты",
+      currency: "EUR",
+      deadline: null,
+      this_month: 0,
+      left_this_month: 0,
+      status: "broken",
+      error: "валюты «EUR» нет у карт",
+    }),
+  ],
+  plan: PLAN_MONTHS.map((month, index) => {
+    const total = index < 2 ? 6_000_000 : index < 8 ? 5_000_000 : 3_500_000;
+    const id = index < 2 || index >= 8 ? "p3k9za" : "tr0001";
+    return {
+      month,
+      total,
+      items: [{ id, amount: total }],
+      cushion: 4_000_000,
+      goals: [],
+      ready: index === 1 ? ["p3k9za"] : index === 7 ? ["tr0001"] : [],
+    };
+  }),
+  enough: {
+    income: 42_000_000,
+    save: 10_200_000,
+    life: 31_800_000,
+    ordinary: 34_000_000,
+    gap: -2_200_000,
+  },
+  savings: {
+    rate: -0.1,
+    months: [
+      { month: "2026-04", income: 40_000_000, spent: 30_000_000, rate: 0.25 },
+      { month: "2026-05", income: 0, spent: 35_000_000, rate: null },
+      { month: "2026-06", income: 50_000_000, spent: 48_000_000, rate: 0.04 },
+      { month: "2026-07", income: 30_000_000, spent: 60_000_000, rate: -1 },
+      { month: "2026-08", income: 45_000_000, spent: 36_000_000, rate: 0.2 },
+      { month: "2026-09", income: 45_000_000, spent: 36_000_000, rate: 0.2 },
+    ],
+  },
+  rates: { UZS: 1, USD: 12_000, RUB: 150 },
 };

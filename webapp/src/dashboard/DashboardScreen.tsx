@@ -5,8 +5,7 @@ import { useResource, useStore } from "../store";
 import Ahead, { NoForecastNote } from "./Ahead";
 import CardBalances from "./CardBalances";
 import CategoryChart from "./CategoryChart";
-import CushionCard from "./CushionCard";
-import SavingsCard from "./SavingsCard";
+import SavingsTab from "./SavingsTab";
 import SectionSwitch from "./SectionSwitch";
 import SpendingChart from "./SpendingChart";
 import { storeSection, storedSection, type Section } from "./section";
@@ -135,14 +134,15 @@ function Sums({ data }: { data: Dashboard }) {
   );
 }
 
-/** Карточки выбранной вкладки — из одного ответа «Сводки». */
-function SectionCards({
-  data,
-  section,
-}: {
+interface SectionProps {
+  api: Api;
   data: Dashboard;
   section: Section;
-}) {
+  refresh: number;
+}
+
+/** Карточки выбранной вкладки: «Накопления» — свой ответ, остальные — «Сводки». */
+function SectionCards({ api, data, section, refresh }: SectionProps) {
   switch (section) {
     case "today":
       return (
@@ -181,24 +181,21 @@ function SectionCards({
         </>
       );
     case "savings":
-      return (
-        <>
-          {data.cushion && <CushionCard cushion={data.cushion} />}
-          {data.savings && <SavingsCard savings={data.savings} />}
-        </>
-      );
+      return <SavingsTab api={api} refresh={refresh} />;
     case "ahead":
       return <Ahead data={data} />;
   }
 }
 
 interface ContentProps {
+  api: Api;
   data: Dashboard;
   section: Section;
+  refresh: number;
   onSection: (section: Section) => void;
 }
 
-function Content({ data, section, onSection }: ContentProps) {
+function Content({ api, data, section, refresh, onSection }: ContentProps) {
   if (data.status === "no_month_tab") {
     // в таком ответе нет данных ни для одной вкладки
     return <p>Вкладки месяца нет — бот создаёт её 1-го числа.</p>;
@@ -206,7 +203,7 @@ function Content({ data, section, onSection }: ContentProps) {
   return (
     <>
       <SectionSwitch section={section} onSection={onSection} />
-      <SectionCards data={data} section={section} />
+      <SectionCards api={api} data={data} section={section} refresh={refresh} />
     </>
   );
 }
@@ -220,9 +217,12 @@ export default function DashboardScreen({ api }: { api: Api }) {
     load,
     { failure: "Не получилось загрузить сводку" },
   );
-  // «Обновить» читает таблицу заново, а не копию листов на сервере
+  // «Обновить» читает таблицу заново, а не копию листов на сервере — и «Сводку»,
+  // и «Накопления»: у них свой ответ, его вкладка ловит счётчик
+  const [refreshed, setRefreshed] = useState(0);
   const refresh = useCallback(() => {
     reload(true);
+    setRefreshed((count) => count + 1);
   }, [reload]);
   const [section, setSection] = useState<Section>(storedSection);
   const choose = useCallback((next: Section) => {
@@ -254,7 +254,15 @@ export default function DashboardScreen({ api }: { api: Api }) {
           </button>
         </div>
       )}
-      {data && <Content data={data} section={section} onSection={choose} />}
+      {data && (
+        <Content
+          api={api}
+          data={data}
+          section={section}
+          refresh={refreshed}
+          onSection={choose}
+        />
+      )}
     </div>
   );
 }

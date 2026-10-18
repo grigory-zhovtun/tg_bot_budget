@@ -7,6 +7,7 @@ import {
   nextPlanFixture,
   notCreatedFixture,
   planFixture,
+  savingsFixture,
   writtenFixture,
 } from "./fixtures";
 
@@ -37,4 +38,12 @@ export const mockApi: Api = {
   },
   savePlan: () => later({ ...planFixture, saved: 1 }),
   planAdvice: () => later(adviceFixture),
+  // мок-режим: правки копилок не сохраняются, приходит тот же экран
+  savings: () => later(savingsFixture),
+  addPiggy: () => later(savingsFixture),
+  updatePiggy: () => later(savingsFixture),
+  closePiggy: () => later(savingsFixture),
+  movePiggy: () => later(savingsFixture),
+  savePiggies: () => later(savingsFixture),
+  excludeSpend: () => later(savingsFixture),
 };

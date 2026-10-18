@@ -17,8 +17,10 @@ import {
 import {
   bootstrapFixture,
   dashboardFixture,
+  savingsFixture,
   writtenFixture,
 } from "../mocks/fixtures";
+import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
 import EntryScreen from "./EntryScreen";
 
@@ -247,6 +249,27 @@ describe("EntryScreen", () => {
     await user.click(screen.getByRole("button", { name: /Записать/ }));
     await screen.findByText(/✅ 48 000 UZS/);
     expect(api.dashboard).toHaveBeenCalledTimes(2);
+  });
+
+  it("makes «Накопления» ask the table again after a write", async () => {
+    const store = new Store();
+    store.put("savings", savingsFixture);
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(
+      <StoreProvider value={store}>
+        <EntryScreen
+          api={api}
+          boot={bootstrapFixture}
+          onCatalogChanged={vi.fn()}
+        />
+      </StoreProvider>,
+    );
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await screen.findByText(/✅ 48 000 UZS/);
+    // трата по статье копилки меняет её остаток — вкладка спросит сервер заново
+    expect(store.get("savings").at).toBe(0);
   });
 
   it("keeps the fresh plan when an older answer comes late", async () => {

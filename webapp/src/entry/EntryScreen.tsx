@@ -26,8 +26,8 @@ import { GroupTiles, SubTiles } from "./Tiles";
 
 const MAX_DAYS_BACK = 31;
 const CATALOG_FIELDS = ["source", "category", "subcategory"];
-// трата и её отмена меняют сводку, прогноз и факт плана
-const CHANGED_BY_WRITES = ["dashboard", "forecast", "plan:"];
+// трата и её отмена меняют сводку, прогноз, факт плана и траты из копилок
+const CHANGED_BY_WRITES = ["dashboard", "forecast", "plan:", "savings"];
 
 type Step = "group" | "sub" | "amount";
 

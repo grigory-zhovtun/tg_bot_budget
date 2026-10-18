@@ -98,6 +98,9 @@ export interface Cushion {
   target_months: number;
   short_uzs: number; // сколько не хватает до цели; 0 — цель достигнута
   short: number; // то же в валюте подушки
+  frozen?: number | null; // «Заморожено» на вечер вчера
+  piggies?: number; // остатки копилок на вечер вчера, в валюте подушки
+  over?: number; // на сколько копилки больше «Заморожено»
 }
 
 /** Полный месяц: доход без «нач остаток» и траты без переводов, в сумах. */
@@ -174,8 +177,117 @@ export interface Dashboard {
   untracked: Untracked[];
   cards: CardBalance[];
   categories: Category[]; // план-факт по категориям, от больших трат
-  cushion?: Cushion | null; // нет — заморозку не считаем
-  savings?: Savings | null;
+}
+
+/** Копилка «Накоплений»; суммы — в её валюте. */
+export type PiggyStatus =
+  "on_track" | "late" | "no_target" | "done" | "leftover" | "goal" | "broken";
+
+export interface AmountItem {
+  id: string; // копилка
+  amount: number; // сумы
+}
+
+export interface PiggyMove {
+  day: string;
+  amount: number; // плюс — отложили, минус — забрали
+  kind: string;
+  who: string;
+}
+
+export interface PiggySpend {
+  key: string; // строка fact — для «Не из копилки»
+  day: string;
+  group: string;
+  subcategory: string;
+  amount: number;
+}
+
+export interface Piggy {
+  id: string;
+  row: number; // строка листа «Копилки»
+  name: string;
+  target: number | null;
+  currency: string;
+  deadline: string | null;
+  repeat: "once" | "yearly";
+  group: string | null;
+  subcategory: string | null;
+  author: string;
+  saved: number;
+  spent: number;
+  balance: number;
+  collected: number; // к ближайшему сроку: остаток и уже потраченное из него
+  this_month: number;
+  left_this_month: number;
+  status: PiggyStatus;
+  short: number;
+  leftover: number;
+  error: string | null;
+  history: PiggyMove[];
+  spends: PiggySpend[];
+}
+
+/** Месяц плана взносов, сумы. */
+export interface PiggyPlanMonth {
+  month: string; // «2026-10»
+  total: number; // копилки со сроком
+  items: AmountItem[];
+  cushion: number; // доля 10 % подушке
+  goals: AmountItem[]; // доля 10 % долгим целям
+  ready: string[]; // копилки, собранные к сроку в этом месяце
+}
+
+export interface SavingsMonth {
+  month: string;
+  piggy: number;
+  piggy_left: number;
+  share: number;
+  share_to: "cushion" | "split" | "goals";
+  goals: AmountItem[];
+}
+
+export interface Enough {
+  income: number;
+  save: number;
+  life: number;
+  ordinary: number;
+  gap: number; // меньше нуля — не хватает
+}
+
+export interface SavingsScreen {
+  status: "ok" | "no_month_tab";
+  today: string;
+  month: SavingsMonth | null;
+  cushion: Cushion | null;
+  piggies: Piggy[];
+  plan: PiggyPlanMonth[];
+  enough: Enough | null;
+  savings: Savings | null;
+  rates: Record<string, number>;
+}
+
+export interface PiggyInput {
+  entry_id?: string;
+  name: string;
+  target: string | null; // строкой, как сумма траты
+  currency: string;
+  deadline: string | null;
+  repeat: "once" | "yearly";
+  group: string | null;
+  subcategory: string | null;
+}
+
+export interface MoveInput {
+  entry_id: string;
+  kind: "saved" | "spent" | "write_off";
+  amount: string;
+}
+
+export interface SaveInput {
+  entry_id: string;
+  amount: string;
+  currency: string;
 }
 
 /** Строка списка, которая ещё впереди: сумма — остаток, в валюте строки. */
@@ -594,6 +706,36 @@ export const api = {
       body: JSON.stringify(input),
     }),
   createNextPlan: () => request<MonthPlan>("/plan/next", { method: "POST" }),
+  savings: (read = false) => request<SavingsScreen>(`/savings${fresh(read)}`),
+  addPiggy: (input: PiggyInput) =>
+    request<SavingsScreen>("/piggy", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  updatePiggy: (id: string, input: PiggyInput) =>
+    request<SavingsScreen>(`/piggy/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    }),
+  closePiggy: (id: string) =>
+    request<SavingsScreen>(`/piggy/${encodeURIComponent(id)}/close`, {
+      method: "POST",
+    }),
+  movePiggy: (id: string, input: MoveInput) =>
+    request<SavingsScreen>(`/piggy/${encodeURIComponent(id)}/moves`, {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  savePiggies: (input: SaveInput) =>
+    request<SavingsScreen>("/piggy/save", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+  excludeSpend: (id: string, key: string) =>
+    request<SavingsScreen>(`/piggy/${encodeURIComponent(id)}/exclude`, {
+      method: "POST",
+      body: JSON.stringify({ key }),
+    }),
   planAdvice: (input: PlanAdviceRequest) =>
     request<{ points: AdvicePoint[] }>(
       "/plan/advice",

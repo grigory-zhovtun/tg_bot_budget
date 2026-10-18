@@ -245,8 +245,9 @@ export default function PlanScreen({
         (fresh) => {
           haptic("success");
           setPlan(fresh);
-          // план меняет сводку и прогноз — их вкладки спросят сервер заново
-          store.expire(["dashboard", "forecast"]);
+          // план меняет сводку, прогноз и взносы копилок (день денег, 10 %) —
+          // их вкладки спросят сервер заново
+          store.expire(["dashboard", "forecast", "savings"]);
           setConflicts([]);
           // правки, сделанные пока шло сохранение, остаются; записанные совпали
           // со свежим планом и уходят сами
