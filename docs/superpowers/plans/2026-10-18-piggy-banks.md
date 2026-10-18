@@ -507,3 +507,133 @@ git commit -m "feat(webapp): «Сводка» in four sections"
 - [ ] **Step 3:** реализовать; README — абзац о копилках (листы, план, 10 %, подушка, окна), CLAUDE.md — `piggy.py`, `piggy_sync.py`, листы.
 - [ ] **Step 4:** `npx prettier --write src && npm run lint && npm test && npm run build` и `black . && ruff check . && pytest -q` — всё зелёное; превью 360 px.
 - [ ] **Step 5:** commit `feat(webapp): the piggy bank and «Отложил…» windows`.
+
+---
+
+## Этап 3 — бот и «Отложить за месяц»
+
+**Goal:** Бот говорит о копилках в чате — после поступления «🐷 В копилки по плану ноября осталось: …» с «Отложил всё» и «Отложил часть…», после траты из копилки «🐷 Из копилки …» с «Не из копилки»; «🎯 Отложить за месяц» получает сумму копилок — в новой вкладке сам, в «Плане» подсказкой с «Применить»; цель может быть меньше нуля.
+
+**Architecture:** `piggy.py` считает «Отложить за месяц» (4.7) для каждого месяца плана — `Screen.goals`. `GET /api/savings` отдаёт цель текущего месяца, «Накопления» показывают расхождение с Q20. `GoogleSheetsService._ensure_dates` пишет Q:R строки цели тем же запросом, что даты, — сумму даёт `piggy_sync.goal_cells`. «План» получает подсказку цели и статей месяца трат, сервер принимает цель меньше нуля. Новый `app/handlers/piggy.py` — сообщения «🐷», кнопки `piggy:` и хелперы журнала и заметок, вынесенные из `app/web/api.py` (иначе круговой импорт: `api.py` сам импортирует обработчики). Приложение по `?open=save` открывает «Накопления» и «Отложил…».
+
+**Spec:** разделы 4.7, 6.2 п. 1, 6.4 (`?open=save`), 7, 8 и 9 п. 3.
+
+### Global Constraints этапа 3
+
+- Всё из «Global Constraints этапа 2» (Python, листы, тексты API, коммиты и PR).
+- **«Отложить за месяц» месяца M** (4.7), в сумах: взносы копилок со сроком в M (`MonthPlan.total`) + доля 10 % (`cushion` + Σ `goals`) − траты из копилок в M. Траты из копилок: в текущем месяце — уже потраченное из копилок в M по сегодня (траты окна из fact и строки журнала «потратил» и «списал остаток» с днём в M); у копилок со сроком в M — плюс ещё не потраченная часть «собрано к сроку» (цель, у «к сроку не успеть» — собранное, минус уже потраченное к этому сроку); в будущих месяцах — только второе. Может быть меньше нуля. В таблицу и в «Применить» — сумы, округлённые до тысячи.
+- **Q20** пишется только во вкладку, которой бот в этот же раз ставит даты M1:M2, тем же `values_batch_update` (RAW: Q — число, R — `UZS`), и только когда есть открытая копилка; строка — по подписи «Отложить за месяц» (`plan.read_plan(rows).goal.row`); сбой расчёта — даты пишутся без Q:R, сбой в лог. Q20 вкладки, где даты уже верны, бот не трогает: это ячейка владельца.
+- Тексты бота — дословно (спека 7.1–7.3): «🐷 В копилки по плану ноября осталось: «Новый год» 6 000 000 UZS, «Отпуск» 210 USD»; кнопки «Отложил всё» и «Отложил часть…»; «🐷 Записал: «Новый год» 6 000 000 UZS, «Отпуск» 210 USD»; «Уже записано»; «Подсказка за октябрь устарела: в ноябре свой план»; «🐷 Из копилки «Новый год»: −2 400 000 UZS, осталось 3 600 000»; трата больше остатка — «🐷 Из копилки «Новый год»: 600 000 UZS — всё, что было, остальное — обычные траты»; «Не из копилки»; «🐷 Не из копилки — учтено»; «Уже учтено»; «Запись изменилась — отметьте в «Накоплениях»». Суммы — как `amount_text` этапа 2.
+- `callback_data` не длиннее 64 байт: `piggy:all:<ГГГГ-ММ>` и `piggy:no:<ID>:<отпечаток из 10 знаков>`; `CallbackQueryHandler(..., pattern=r"^piggy:")` — до общего обработчика кнопок в `main.py`. Обработчик не опирается на `user_data` (после перезапуска её нет): всё пересчитывает по таблице заново под `PIGGY_LOCK` — тем же замком, что API.
+- Сообщения «🐷» — отдельные `send_message` в чат записавшего, после меню под сводкой, без `track_message` (следующая запись их не удаляет); их сбой — только в лог, сводка и ответ записи не меняются.
+- Обычная трата без статьи копилки не добавляет чтений таблицы: статьи открытых копилок — в `bot_data["piggy_articles"]` (время чтения и множество пар), обновляются любым чтением листов копилок, сами — не чаще раза в 10 минут.
+- «Отложил часть…» — `InlineKeyboardButton(web_app=WebAppInfo(app_url(user_id) + "&open=save"))`; без `WEBAPP_URL` этой кнопки нет.
+- «План»: цель меньше нуля — строка «💰 Из накоплений» с суммой без минуса; ручной ввод — от нуля; «Применить» ставит любое число до ±10¹²; окно цели без ввода отрицательную цель не трогает.
+
+### Review Focus этапа 3
+
+1. **«Отложил всё» после перезапуска, дважды, после «Отложил часть…», в следующем месяце** — журнал не задваивается, старая подсказка говорит, что устарела (тесты в Task 14).
+2. **Сбой между копией вкладки и датами** — следующий запуск ставит даты и Q20 одним запросом; вкладку с верными датами (Q20 владельца) бот не трогает (тесты в Task 12).
+3. **Отрицательная цель проходит «План» насквозь** — видна как «Из накоплений», «Готово» без ввода её не затирает, сохранение уходит со знаком, сервер принимает (тесты в Task 13).
+4. **«Не из копилки» после /undo или правки строки** — «Запись изменилась…», журнал не меняется; две копилки одной статьи — одно нажатие снимает трату с обеих (тесты в Task 15).
+5. **Обычная запись не медленнее и не ломается** — трата без статьи копилки не читает листы копилок; сбой расчёта «🐷» оставляет сводку прежней (тесты в Task 14 и 15).
+
+### Task 11: «Отложить за месяц» в модели и «Накоплениях»
+
+**Files:**
+- Modify: `app/services/piggy.py`, `app/web/schemas.py`, `app/web/api.py` (`savings_screen_out`), `webapp/src/api.ts`, `webapp/src/mocks/fixtures.ts`, `webapp/src/dashboard/SavingsTab.tsx`
+- Test: `tests/test_piggy.py`, `tests/test_web_piggy.py`, `webapp/src/dashboard/SavingsTab.test.tsx`
+
+**Interfaces:**
+- Produces (`piggy.py`): `FromPiggy(piggy_id, name, group, subcategory, currency, amount, uzs)` — траты из копилки в месяце (`amount` — в валюте копилки, `uzs` — в сумах); `MonthGoal(month, piggies, share, spent, total, from_piggies: tuple[FromPiggy, ...])` — сумы, `total = piggies + share − spent`; `Screen.goals: tuple[MonthGoal, ...] = ()` — по месяцу плана, в том же порядке; `goal_of(screen, month: date) -> MonthGoal | None`.
+- Produces (API): `SavingsGoalOut {suggested, in_plan, piggies, share, spent}` — сумы, `suggested` — до тысячи, `in_plan` — Q20 текущей вкладки в сумах по курсу таблицы (`null` — строки цели нет); `SavingsScreenOut.goal: SavingsGoalOut | None` — `null`, когда открытых копилок нет.
+- Produces (TS): `SavingsGoal`, `SavingsScreen.goal: SavingsGoal | null`.
+
+- [ ] **Step 1: Write the failing tests**
+  - `test_the_month_goal_adds_the_share_and_takes_the_spending` — «Новый год» 12 млн к 20.12, сегодня 17.10, поступлений в списке 12 млн: октябрь — `(6_000_000, 1_200_000, 0, 7_200_000)` (`piggies, share, spent, total`), ноябрь — `7_200_000`, декабрь — `1_000_000 + 1_200_000 − 12_000_000 = −9_800_000`, в `from_piggies` декабря — «Новый год» `12_000_000`.
+  - `test_gifts_before_the_deadline_month_lower_the_goal` — сегодня 15.11, отложено 6 млн 30.10, подарки 2,4 млн 10.11: ноябрь — `6_000_000 + 1_200_000 − 2_400_000 = 4_800_000`, декабрь — `1_000_000 + 1_200_000 − 9_600_000 = −7_400_000`.
+  - `test_a_late_piggy_spends_only_what_it_collected` — у «к сроку не успеть» в месяц срока из копилки уходит собранное, а не цель.
+  - `test_savings_answer_has_the_goal_and_the_plan_cell` (API) — `goal["suggested"] == 7_200_000`, `goal["in_plan"]` — Q20 вкладки в сумах; без копилок — `goal is None`.
+  - vitest: «В плане месяца «Отложить» — 2,00 млн, по копилкам нужно 7,20 млн: поправьте в «Плане»» при расхождении от 1 000 сумов; совпадает или `goal: null` — строки нет.
+- [ ] **Step 2:** `../venv_dev/bin/pytest tests/test_piggy.py tests/test_web_piggy.py -q` и `cd webapp && rtk proxy npx vitest run src/dashboard` — FAIL.
+- [ ] **Step 3:** реализовать: `goals` считает `savings_screen` по уже готовым `plan`, `now`, `late` и журналу.
+- [ ] **Step 4:** те же запуски — PASS; `black . && ruff check . && pytest -q`, `npx prettier --write src && npm run lint && npm test && npm run build`.
+- [ ] **Step 5:** commit `feat(piggy): «Отложить за месяц» from the piggy banks`.
+
+### Task 12: Q20 новой вкладки
+
+**Files:**
+- Modify: `app/services/google_sheets.py` (`_ensure_dates`, `ensure_month_tab`, `ensure_next_month_tab`), `app/services/piggy_sync.py` (`goal_cells`), `app/handlers/month.py` (`month_tab_job`), `app/web/api.py` (`create_next_plan`)
+- Test: `tests/test_month.py`, `tests/test_piggy_sync.py`, `tests/test_web_plan.py`
+
+**Interfaces:**
+- Consumes: Task 11 — `Screen.goals`, `goal_of`.
+- Produces: `GoalCells = Callable[[list[list[Any]], date], tuple[int, float] | None]` (`google_sheets.py`) — по значениям вкладки (UNFORMATTED) и её первому дню: строка цели и сумма в сумах или `None`; `_ensure_dates(title, first, last, goal: GoalCells | None = None) -> bool`; `ensure_month_tab(day, goal: GoalCells | None = None)`; `ensure_next_month_tab(today, goal: GoalCells | None = None)` — `goal` только для следующей вкладки; `piggy_sync.goal_cells(gs, today, currencies, groups, subcategories) -> GoalCells`.
+
+- [ ] **Step 1: Write the failing tests**
+  - `test_month.py`: даты неверны и есть `goal` → один `values_batch_update` с `'<вкладка>'!M1:M2` и `'<вкладка>'!Q20:R20` = `[[7_200_000, "UZS"]]`; даты верны → `goal` не вызывается, записи нет; `goal` упал → даты записаны без Q:R; `goal=None` — как сейчас (прежние `assert data == [...]` не меняются).
+  - `test_piggy_sync.py`: `goal_cells` на копии вкладки со строкой цели 20 и «Новым годом» → `(20, 7_200_000)`; без открытых копилок → `None`; вкладка без подписи «Отложить за месяц» → `None`.
+  - `test_web_plan.py`: «Создать план на ноябрь» при «Новом годе» пишет в скрытую вкладку Q:R строки цели `7_200_000`, `"UZS"` тем же запросом, что даты.
+- [ ] **Step 2:** `../venv_dev/bin/pytest tests/test_month.py tests/test_piggy_sync.py tests/test_web_plan.py -q` — FAIL.
+- [ ] **Step 3:** реализовать; `month_tab_job` и `create_next_plan` строят `goal_cells` по каталогу из `bot_data` (как `catalog()` в `api.py`).
+- [ ] **Step 4:** те же — PASS; `black . && ruff check . && pytest -q`.
+- [ ] **Step 5:** commit `feat(piggy): the new month tab gets «Отложить за месяц»`.
+
+### Task 13: «План» — цель меньше нуля, «Применить», подсказки статей
+
+**Files:**
+- Modify: `app/web/schemas.py` (`GoalIn.amount` — `ge=-MAX_SUM`; `PlanGoalHintOut`, `PlanPiggyHintOut`; `PlanOut.goal_hint`, `PlanOut.piggy_hints`), `app/web/api.py` (`month_plan`, `save_month_plan`, `create_next_plan` — подсказки в ответе), `webapp/src/api.ts`, `webapp/src/plan/draft.ts` (`applyGoal`), `webapp/src/plan/GoalSheet.tsx`, `webapp/src/plan/PlanScreen.tsx`, `webapp/src/mocks/fixtures.ts`
+- Create: `webapp/src/plan/PiggyHints.tsx`
+- Test: `tests/test_web_plan.py`, `webapp/src/plan/draft.test.ts`, `webapp/src/plan/PlanScreen.test.tsx`
+
+**Interfaces:**
+- Consumes: Task 11 — `MonthGoal`, `FromPiggy`, `goal_of`.
+- Produces: `PlanGoalHintOut {suggested, piggies, share, spent}` (сумы, `suggested` — до тысячи); `PlanPiggyHintOut {piggy, month, group, subcategory, currency, amount, need, key}` — трата из копилки со статьёй в месяце плана: `amount` — в валюте копилки, `need` — сколько не хватает плану статьи, `key` — статья вкладки (`article_key`) или `null`, если строки нет (тогда «Применить» добавляет её, как «＋ статья»); подсказка есть, пока план статьи меньше `amount`. Без открытых копилок — `goal_hint: null`, `piggy_hints: []`. TS: `applyGoal(draft, goal: PlanGoal, amount: number): Draft` — правка цели с текстом суммы со знаком и валютой `UZS`.
+
+- [ ] **Step 1: Write the failing tests**
+  - pytest: сохранение цели `−9 800 000` → 200, в Q строки цели `−9800000`; `GET /api/plan?month=2026-12` при «Новом годе» → `goal_hint.suggested == −9_800_000`, `piggy_hints[0]` — «Новый год», `🎉 ПРАЗДНИК` / `сезонный`, `amount == 12_000_000`, `need == 12_000_000`.
+  - vitest: цель `−9 800 000` — строка «💰 Из накоплений» и «9 800 000 UZS»; окно цели и «Готово» без ввода — черновик не меняется; подсказка «По копилкам — −9,80 млн: копилки 1,00 млн + 10 % 1,20 млн − из копилок 12,00 млн» и «Применить» → в сохранении `goal.value.amount == "-9800000"`; подсказка статьи «Из копилки «Новый год» в декабре — 12,00 млн: заложите в статью «ПРАЗДНИК / сезонный»» и «Применить» → план статьи (или новая строка) +12 000 000 и цель по подсказке; подсказка уходит, когда плана статьи хватает.
+- [ ] **Step 2:** `../venv_dev/bin/pytest tests/test_web_plan.py -q` и `cd webapp && rtk proxy npx vitest run src/plan` — FAIL.
+- [ ] **Step 3:** реализовать.
+- [ ] **Step 4:** те же — PASS; полные проверки Python и webapp.
+- [ ] **Step 5:** commit `feat(plan): a goal below zero and the piggy bank hints`.
+
+### Task 14: «🐷» после поступления, «Отложил всё», `?open=save`
+
+**Files:**
+- Create: `app/handlers/piggy.py`, `tests/test_piggy_bot.py`
+- Modify: `app/web/api.py` (`move_row`, `piggy_note`, `notify_others`, `author_name` переезжают в `app/handlers/piggy.py`, `api.py` их импортирует), `app/handlers/messages.py` (`save_rows`), `app/handlers/fix.py`, `app/handlers/statement_import.py`, `app/main.py`, `webapp/src/App.tsx`, `webapp/src/dashboard/DashboardScreen.tsx`, `webapp/src/dashboard/SavingsTab.tsx`
+- Test: `tests/test_messages.py`, `tests/test_fix.py`, `tests/test_statement_import.py`, `webapp/src/App.test.tsx`, `webapp/src/dashboard/SavingsTab.test.tsx`
+
+**Interfaces:**
+- Consumes: этап 2 — `AnalyticsService.savings`, `PIGGY_LOCK`, `mark_dirty`, `SAVED`; `common.app_url`.
+- Produces (`app/handlers/piggy.py`): `async income_prompt(context, chat_id: int, user_id: int, rows: Sequence[SheetRow]) -> None` — «🐷» после поступления: копилки и долгие цели с «осталось в этом месяце» больше нуля, ноль у всех — сообщения нет; `async piggy_button(update, context) -> None` — `piggy:all:` (здесь) и `piggy:no:` (Task 15); вынесенные из `api.py` `move_row`, `piggy_note`, `notify_others`, `author_name`.
+- Produces (webapp): `DashboardScreen` и `SavingsTab` получают `openSave: boolean`; `App` читает `open=save` из адреса один раз и открывает «Сводку».
+
+- [ ] **Step 1: Write the failing tests**
+  - `test_piggy_bot.py`: после записи поступления — «🐷 В копилки по плану октября осталось: «Новый год» 6 000 000 UZS», кнопки `piggy:all:2026-10` и web_app с адресом на `&open=save`; без поступления и без «осталось» — сообщения нет; расчёт упал — сообщения нет, сводка та же.
+  - «Отложил всё»: журнал получает «отложил» на «осталось в этом месяце», сообщение — «🐷 Записал: «Новый год» 6 000 000 UZS» без кнопок, второму — «🐷 Иван — отложил: Новый год 6 000 000 UZS»; второе нажатие — «Уже записано», журнал не растёт; кнопка прошлого месяца — «Подсказка за сентябрь устарела: в октябре свой план» и «Отложил часть…»; пустая `user_data` (после перезапуска) — то же поведение.
+  - Пути записи: `save_rows` с поступлением зовёт `income_prompt` один раз и после меню; `/fix` в доходы — тоже; выписка с поступлением этого месяца — тоже, прошлого месяца — нет.
+  - vitest: `?open=save` открывает «Сводку» → «Накопления» и окно «Отложил», когда есть что откладывать.
+- [ ] **Step 2:** `../venv_dev/bin/pytest tests/test_piggy_bot.py tests/test_messages.py tests/test_fix.py tests/test_statement_import.py -q` и `cd webapp && rtk proxy npx vitest run src/App.test.tsx src/dashboard` — FAIL.
+- [ ] **Step 3:** реализовать; `piggy_button` в `main.py` — до общего обработчика.
+- [ ] **Step 4:** те же — PASS; полные проверки.
+- [ ] **Step 5:** commit `feat(bot): «🐷» after an income and «Отложил всё»`.
+
+### Task 15: «🐷 Из копилки» после траты и «Не из копилки»
+
+**Files:**
+- Modify: `app/handlers/piggy.py`, `app/handlers/messages.py` (`save_rows`: строки «🐷» в `SaveResult.lines` — для ответа приложению), `app/services/piggy.py` (`row_prefix`), `README.md`, `CLAUDE.md`
+- Test: `tests/test_piggy_bot.py`, `tests/test_piggy.py`, `tests/test_web_api.py`
+
+**Interfaces:**
+- Consumes: Task 14 — `piggy_button`; этап 2 — `fact_key`, `fingerprint`, `NOT_FROM`.
+- Produces: `row_prefix(day, group, subcategory, amount, currency, source) -> str` (`piggy.py`) — ключ строки fact без комментария: трата копилки — та, чей ключ с него начинается (комментарий Sheets мог поменять при записи); `piggy_articles(bot_data, gs) -> set[tuple[str, str]]` (`app/handlers/piggy.py`); `async spend_note(context, chat_id: int, rows: Sequence[SheetRow]) -> list[str]` — строки «🐷 Из копилки…» для ответа приложению и сообщение в чат: одна строка записи — с кнопкой `piggy:no:<ID>:<отпечаток>`, несколько — по строке на копилку без кнопки.
+
+- [ ] **Step 1: Write the failing tests**
+  - трата 2 400 000 по «ПРАЗДНИК / сезонный» в окне «Нового года» с остатком 6 000 000 → «🐷 Из копилки «Новый год»: −2 400 000 UZS, осталось 3 600 000» и кнопка `piggy:no:p3k9za:<fingerprint(key)>`; трата больше остатка → «…: 600 000 UZS — всё, что было, остальное — обычные траты»; две копилки одной статьи — обе строки одним сообщением; пачка строк — по строке на копилку без кнопки; трата другой статьи — листы копилок не читаются сверх `piggy_articles`; `add_expense` приложения — строка «🐷…» в `lines` ответа.
+  - «Не из копилки»: журнал получает «не из копилки» с ключом, сообщение — «🐷 Не из копилки — учтено», второму — заметка 7.3; второе нажатие — «Уже учтено»; строку правили или отменили — «Запись изменилась — отметьте в «Накоплениях»», журнал не меняется; две копилки — после нажатия трата не уходит ни в одну.
+- [ ] **Step 2:** `../venv_dev/bin/pytest tests/test_piggy_bot.py tests/test_piggy.py tests/test_web_api.py -q` — FAIL.
+- [ ] **Step 3:** реализовать; README — абзац о сообщениях «🐷» и «Отложить за месяц», CLAUDE.md — `app/handlers/piggy.py` и Q20 новой вкладки.
+- [ ] **Step 4:** те же — PASS; полные проверки Python и webapp.
+- [ ] **Step 5:** commit `feat(bot): «🐷 Из копилки» and «Не из копилки»`.
