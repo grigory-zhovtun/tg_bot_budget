@@ -99,8 +99,10 @@ export default function PiggySheet({
   const [text, setText] = useState(
     piggy?.target ? amountText(piggy.target, piggy.currency !== "UZS") : "",
   );
+  // «Без цели» — только без срока; у копилки со сроком и без суммы («сумма?») окно
+  // сразу просит вписать сумму
   const [noTarget, setNoTarget] = useState(
-    piggy !== null && piggy.target === null,
+    piggy !== null && piggy.target === null && piggy.deadline === null,
   );
   const fallback = piggy?.deadline ?? shiftDay(today, NEW_DEADLINE_DAYS);
   const [deadline, setDeadline] = useState<string | null>(

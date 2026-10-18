@@ -109,6 +109,20 @@ describe("PiggySheet", () => {
     ).toBeTruthy();
   });
 
+  it("asks for the sum of a piggy with a deadline and no target", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    open(api, piggy(2));
+    const save = screen.getByRole("button", { name: "Сохранить" });
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    await keys(user, "5", "000", "000");
+    await user.click(save);
+    expect(api.updatePiggy).toHaveBeenCalledWith(
+      "rm0001",
+      expect.objectContaining({ target: "5000000", deadline: "2027-08-01" }),
+    );
+  });
+
   it("names the months of a longer run in the piggy's currency", () => {
     open(fakeApi(), piggy(1));
     expect(
