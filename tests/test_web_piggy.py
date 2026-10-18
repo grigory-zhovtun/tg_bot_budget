@@ -450,3 +450,16 @@ def test_piggies_need_a_signature() -> None:
     client = client_for(application)
     assert client.get("/api/savings").status_code == 401
     assert client.post("/api/piggy", json=body()).status_code == 401
+
+
+def test_journal_sums_are_rounded_to_the_currency() -> None:
+    from app.services.piggy import Piggy
+    from app.web.api import move_row
+
+    trip = Piggy("tr0001", 2, "Отпуск", 2500.0, "USD", None, False, None, None,
+                 "Тест", None)  # fmt: skip
+    assert move_row(TODAY, trip, -(0.1 + 0.2), "закрыта", "Тест")[3] == -0.3
+    sums = Piggy("p3k9za", 3, "Новый год", 12e6, "UZS", None, False, None, None,
+                 "Тест", None)  # fmt: skip
+    zero = move_row(TODAY, sums, -0.0, "закрыта", "Тест")[3]
+    assert zero == 0 and str(zero) == "0.0"

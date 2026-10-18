@@ -48,13 +48,14 @@ def _close_windows(
     for piggy in book.piggies:
         if piggy.error or not piggy.id or piggy.closed or piggy.deadline is None:
             continue
-        if not piggy.subcategory:
-            continue
         end = piggy.deadline + timedelta(days=AFTER_DAYS)
         if today <= end:
             continue
         key = window_key(piggy.deadline)
-        if not any(move.key == key for move in book.moves_of(piggy.id)):
+        # итог — только окну со статьёй: без неё трат из fact у копилки нет
+        if piggy.subcategory and not any(
+            move.key == key for move in book.moves_of(piggy.id)
+        ):
             spent = sum(
                 item.amount
                 for item in balances(book, frame, rates, end)[piggy.id].spends
@@ -64,7 +65,7 @@ def _close_windows(
                     f"{today:%d.%m.%Y}",
                     piggy.id,
                     piggy.name,
-                    -_rounded(max(spent, 0.0), piggy.currency),
+                    -_rounded(max(spent, 0.0), piggy.currency) or 0.0,  # не «-0»
                     piggy.currency,
                     WINDOW,
                     "бот",

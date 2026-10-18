@@ -1,5 +1,6 @@
 """Фоновая запись копилок: итоги окон, новый срок, колонки бота, формулы."""
 
+import math
 import re
 from datetime import date
 from typing import Any
@@ -124,3 +125,19 @@ def test_without_the_sheets_nothing_is_written() -> None:
     sheets = SyncSheets([], [])
     sheets.rows, sheets.journal = [], []
     assert sync_piggy(sheets, TODAY, *CATALOG) == 0
+
+
+def test_a_yearly_piggy_without_an_article_gets_its_next_deadline() -> None:
+    plain = [*ROW[:6], "", "", *ROW[8:]]
+    sheets = SyncSheets([plain], [SAVED])
+    sync_piggy(sheets, TODAY, *CATALOG)
+    assert sheets.updates == [("p3k9za", {"E": "20.12.2027"})]
+    assert len(sheets.journal) == 2  # окна без статьи нет — и итога нет
+
+
+def test_an_empty_window_is_written_as_a_plain_zero() -> None:
+    sheets = SyncSheets([ROW], [SAVED])
+    sheets.fact = [FACT_HEADER]  # в окне ничего не потратили
+    sync_piggy(sheets, TODAY, *CATALOG)
+    amount = sheets.journal[-1][3]
+    assert amount == 0 and math.copysign(1.0, amount) == 1.0

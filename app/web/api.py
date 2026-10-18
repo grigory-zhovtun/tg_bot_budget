@@ -418,8 +418,10 @@ def piggy_row(piggy_id: str, body: PiggyIn, author: str) -> list[Any]:
 def move_row(
     day: date, piggy: Piggy, amount: float, kind: str, author: str, key: str = ""
 ) -> list[Any]:
-    """Строка журнала копилок: сумма в валюте копилки со знаком."""
-    return [f"{day:%d.%m.%Y}", piggy.id, piggy.name, amount, piggy.currency, kind,
+    """Строка журнала копилок: сумма в валюте копилки со знаком, округлённая, как
+    сумма валюты (без хвостов вида 66.77000000000001 и без «-0»)."""
+    rounded = _rounded(amount, piggy.currency) or 0.0
+    return [f"{day:%d.%m.%Y}", piggy.id, piggy.name, rounded, piggy.currency, kind,
             author, key]  # fmt: skip
 
 
