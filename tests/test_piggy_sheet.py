@@ -7,6 +7,7 @@ from gspread.utils import ValueInputOption
 
 from app import config
 from app.services.google_sheets import (
+    PERCENT_LABEL,
     PIGGY_JOURNAL_HEADER,
     PIGGY_LIST_HEADER,
     GoogleSheetsService,
@@ -25,11 +26,19 @@ LEFT = "=INDEX($I:$I;ROW())-INDEX($J:$J;ROW())"
 
 
 class Sheet:
-    def __init__(self, title: str, rows: list[list[Any]] | None = None) -> None:
+    def __init__(
+        self, title: str, rows: list[list[Any]] | None = None, cols: int = 14
+    ) -> None:
         self.title = title
         self.rows = rows if rows is not None else []
         self.reads = 0
         self.appended: list[tuple[list[list[Any]], dict[str, Any]]] = []
+        self.col_count = cols
+        self.added_cols: list[int] = []
+
+    def add_cols(self, cols: int) -> None:
+        self.added_cols.append(cols)
+        self.col_count += cols
 
     def get_all_values(self, **options: Any) -> list[list[Any]]:
         self.reads += 1
@@ -59,7 +68,7 @@ class Spreadsheet:
 
     def add_worksheet(self, title: str, rows: int, cols: int) -> Sheet:
         self.created.append((title, rows, cols))
-        self.sheets[title] = Sheet(title)
+        self.sheets[title] = Sheet(title, cols=cols)
         return self.sheets[title]
 
     def values_batch_update(self, body: dict[str, Any]) -> None:
@@ -85,7 +94,7 @@ def test_creates_both_sheets_once_with_headers() -> None:
     service.ensure_piggy_sheets()
     service.ensure_piggy_sheets()
     book = service.sheet
-    assert book.created == [(LIST, 200, 14), (JOURNAL, 200, 8)]
+    assert book.created == [(LIST, 200, 17), (JOURNAL, 200, 8)]
     assert book.sheets[LIST].rows == [PIGGY_LIST_HEADER]
     assert book.sheets[JOURNAL].rows == [PIGGY_JOURNAL_HEADER]
 
@@ -158,3 +167,46 @@ def test_reads_both_sheets_and_keeps_a_copy_until_a_write() -> None:
 
 def test_without_the_sheets_there_are_no_piggies() -> None:
     assert service_with().get_piggy() == ([], [])
+
+
+def test_the_percent_widens_an_old_sheet_and_goes_into_p1_q1() -> None:
+    service = service_with(
+        Sheet(LIST, [PIGGY_LIST_HEADER[:14], ROW]),
+        Sheet(JOURNAL, [PIGGY_JOURNAL_HEADER]),
+    )
+    service.write_piggy_percent(5)
+    assert service.sheet.sheets[LIST].added_cols == [3]
+    assert service.sheet.batches == [
+        {
+            "valueInputOption": "RAW",
+            "data": [{"range": f"'{LIST}'!P1:Q1", "values": [[PERCENT_LABEL, 5]]}],
+        }
+    ]
+
+
+def test_the_order_goes_into_o_by_id() -> None:
+    service = service_with(
+        Sheet(LIST, [PIGGY_LIST_HEADER, ROW, OTHER], cols=17),
+        Sheet(JOURNAL, [PIGGY_JOURNAL_HEADER]),
+    )
+    assert service.write_piggy_order({"p3k9za": 2, "m4c8x1": 1})
+    assert service.sheet.sheets[LIST].added_cols == []
+    assert service.sheet.batches == [
+        {
+            "valueInputOption": "RAW",
+            "data": [
+                {"range": f"'{LIST}'!O1", "values": [["Порядок"]]},
+                {"range": f"'{LIST}'!O2", "values": [[2]]},
+                {"range": f"'{LIST}'!O3", "values": [[1]]},
+            ],
+        }
+    ]
+
+
+def test_an_unknown_id_writes_no_order() -> None:
+    service = service_with(
+        Sheet(LIST, [PIGGY_LIST_HEADER, ROW], cols=17),
+        Sheet(JOURNAL, [PIGGY_JOURNAL_HEADER]),
+    )
+    assert not service.write_piggy_order({"p3k9za": 1, "zzz999": 2})
+    assert service.sheet.batches == []

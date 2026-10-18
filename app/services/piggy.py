@@ -20,7 +20,11 @@ import pandas as pd
 from app.domain import INCOME_GROUP, Rates
 from app.services.analytics_service import TRANSFERS_GROUP, expenses, to_day
 from app.services.day_budget import DayBudget, read_forecast
-from app.services.google_sheets import PIGGY_JOURNAL_HEADER, PIGGY_LIST_HEADER
+from app.services.google_sheets import (
+    PIGGY_JOURNAL_HEADER,
+    PIGGY_LIST_HEADER,
+    PIGGY_WIDTH,
+)
 from app.services.plan import read_plan
 from app.services.savings import Cushion, month_savings, monthly_spending
 
@@ -58,6 +62,7 @@ class Piggy:
     author: str
     closed: date | None
     error: str | None = None
+    order: int | None = None  # номер важности (O); None — после пронумерованных
 
 
 @dataclass(frozen=True)
@@ -78,6 +83,8 @@ class Move:
 class Book:
     piggies: tuple[Piggy, ...]
     moves: tuple[Move, ...]  # в порядке журнала, только у копилок из списка
+    percent: float | None = None  # доля с поступлений из Q1; None — пусто или плохо
+    percent_bad: bool = False  # в Q1 не число от 0 до 100
 
     def moves_of(self, piggy_id: str) -> tuple[Move, ...]:
         return tuple(move for move in self.moves if move.piggy_id == piggy_id)
@@ -102,6 +109,25 @@ def _number(value: Any) -> float | None:
 def _cells(row: Sequence[Any], width: int) -> list[Any]:
     cells = list(row[:width])
     return cells + [""] * (width - len(cells))
+
+
+def _order(value: Any) -> int | None:
+    """Номер важности: целое от 1; иначе — без номера."""
+    number = _number(value) if _text(value) else None
+    if number is None or number < 1 or number != int(number):
+        return None
+    return int(number)
+
+
+def _percent(head: Sequence[Any]) -> tuple[float | None, bool]:
+    """Q1 шапки «Копилок» → доля и «ячейка не читается»; пусто — (None, False)."""
+    cell = _cells(head, PIGGY_WIDTH)[16]
+    if not _text(cell):
+        return None, False
+    value = _number(cell)
+    if value is None or not 0 <= value <= 100:
+        return None, True
+    return value / 100, False
 
 
 def _moves(rows: Sequence[Sequence[Any]]) -> list[Move]:
@@ -218,11 +244,20 @@ def read_book(
                 _text(cells[12]),
                 to_day(cells[13]) if _text(cells[13]) else None,
                 error,
+                _order(cells[14]),
             )
         )
     for unknown in sorted(by_id.keys() - seen):
         logger.warning("Piggy journal moves of unknown ID %s are left out", unknown)
-    return Book(tuple(piggies), tuple(move for move in moves if move.piggy_id in seen))
+    percent, bad = _percent(list_rows[0]) if list_rows else (None, False)
+    if bad:
+        logger.warning("Piggy percent in Q1 is not a number from 0 to 100")
+    return Book(
+        tuple(piggies),
+        tuple(move for move in moves if move.piggy_id in seen),
+        percent,
+        bad,
+    )
 
 
 # --- траты из копилки и остатки (спека 4.2, 4.6) ---

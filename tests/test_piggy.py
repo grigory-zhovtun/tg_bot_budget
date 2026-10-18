@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from app.services.google_sheets import PERCENT_LABEL
 from app.services.piggy import JOURNAL_HEADER, LIST_HEADER, Book, Piggy, read_book
 
 CURRENCIES = {"UZS", "USD"}
@@ -47,7 +48,7 @@ def piggy_row(**cells: Any) -> list[Any]:
         "",
         row["author"],
         row["closed"],
-    ]
+    ] + ([row["order"]] if "order" in row else [])
 
 
 def move_row(**cells: Any) -> list[Any]:
@@ -65,9 +66,13 @@ def move_row(**cells: Any) -> list[Any]:
     return [row[name] for name in row]
 
 
-def book(*piggies: list[Any], moves: tuple[list[Any], ...] = ()) -> Book:
+def book(
+    *piggies: list[Any],
+    moves: tuple[list[Any], ...] = (),
+    head: list[Any] | None = None,
+) -> Book:
     return read_book(
-        [LIST_HEADER, *piggies],
+        [head if head is not None else LIST_HEADER, *piggies],
         [JOURNAL_HEADER, *moves],
         CURRENCIES,
         GROUPS,
@@ -101,6 +106,30 @@ def test_reads_a_piggy_and_its_moves() -> None:
         (date(2026, 10, 5), -1_000_000.0, "потратил"),  # серийная дата таблицы
     ]
     assert moves[0].currency == "UZS"
+
+
+def test_reads_the_percent_and_the_order() -> None:
+    head = [*LIST_HEADER, PERCENT_LABEL, "2,5"]
+    found = book(
+        piggy_row(order="2"),
+        piggy_row(id="tr0001", name="Отпуск", order=""),
+        head=head,
+    )
+    assert found.percent == pytest.approx(0.025)
+    assert found.percent_bad is False
+    assert [piggy.order for piggy in found.piggies] == [2, None]
+
+
+@pytest.mark.parametrize("cell", ["", "abc", -5, 150])
+def test_a_bad_percent_falls_back(cell: Any) -> None:
+    found = book(piggy_row(), head=[*LIST_HEADER, PERCENT_LABEL, cell])
+    assert found.percent is None
+    assert found.percent_bad is (cell != "")
+
+
+@pytest.mark.parametrize("cell", ["0", 1.5, "x", -1])
+def test_an_order_is_a_whole_number_from_one(cell: Any) -> None:
+    assert book(piggy_row(order=cell)).piggies[0].order is None
 
 
 def test_long_goal_has_no_deadline_and_maybe_no_target() -> None:
