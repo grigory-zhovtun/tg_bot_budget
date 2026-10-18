@@ -1,4 +1,5 @@
-"""Копилки в чате (спека 7): «🐷» после поступления и «Отложил всё».
+"""Копилки в чате (спека 7): «🐷» после поступления и «Отложил всё», «🐷 Из
+копилки» после траты и «Не из копилки».
 
 Кнопки не опираются на память бота (после перезапуска её нет): всё считается по
 таблице заново под тем же замком, что правки копилок из Mini App. Хелперы строки
@@ -7,7 +8,8 @@
 
 import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+import time
+from collections.abc import Sequence
 from datetime import date
 from typing import Any
 
@@ -15,11 +17,20 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppI
 from telegram.ext import ContextTypes
 
 from app import config
-from app.domain import SheetRow, local_today
+from app.custom_icons import leading_emoji
+from app.domain import INCOME_GROUP, SheetRow, local_today
 from app.handlers.common import app_url, notify_others
 from app.handlers.receipts import mark_dirty
-from app.services.analytics_service import money
-from app.services.piggy import SAVED, Piggy, PiggyState, Screen
+from app.services.analytics_service import SavingsTab, money
+from app.services.piggy import (
+    NOT_FROM,
+    SAVED,
+    Piggy,
+    PiggyState,
+    Screen,
+    fingerprint,
+    row_prefix,
+)
 from app.services.piggy_sync import bot_catalog
 from app.services.savings import incomes
 from app.utils.keyboards import action
@@ -28,6 +39,9 @@ logger = logging.getLogger(__name__)
 
 PIGGY_LOCK = "piggy_lock"  # bot_data: в листы копилок пишет один запрос за раз
 ALL = "piggy:all:"  # «Отложил всё» месяца подсказки: piggy:all:2026-10
+NO = "piggy:no:"  # «Не из копилки»: piggy:no:<ID>:<отпечаток ключа строки fact>
+ARTICLES = "piggy_articles"  # bot_data: (время, статьи открытых копилок)
+ARTICLES_AGE = 600.0  # статьи копилок из памяти — не дольше 10 минут
 WHOLE_CURRENCIES = frozenset({"UZS", "RUB"})  # остальные валюты — до центов
 # «по плану ноября», «за октябрь», «в ноябре»
 MONTHS_OF = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля",
@@ -72,16 +86,53 @@ def piggy_lock(bot_data: dict[str, Any]) -> asyncio.Lock:
     return bot_data.setdefault(PIGGY_LOCK, asyncio.Lock())
 
 
-async def _screen(bot_data: Mapping[str, Any]) -> Screen | None:
-    """«Накопления» по таблице заново; нет сервиса или вкладки месяца — None."""
+async def _savings(bot_data: dict[str, Any]) -> SavingsTab | None:
+    """«Накопления» по таблице заново; нет сервиса или вкладки месяца — None.
+    Заодно запоминает статьи открытых копилок."""
     analytics = bot_data.get("analytics_service")
     if analytics is None:
         return None
     today = local_today(config.ANALYTICS_TIMEZONE)
-    found = await asyncio.to_thread(
+    found: SavingsTab | None = await asyncio.to_thread(
         analytics.savings, today, *bot_catalog(bot_data), 0.0
     )
+    if found is not None:
+        bot_data[ARTICLES] = (
+            time.monotonic(),
+            {
+                (state.piggy.group, state.piggy.subcategory)
+                for state in found.screen.piggies
+                if state.status != "broken"
+                and state.piggy.group
+                and state.piggy.subcategory
+            },
+        )
+    return found
+
+
+async def _screen(bot_data: dict[str, Any]) -> Screen | None:
+    found = await _savings(bot_data)
     return None if found is None else found.screen
+
+
+async def piggy_articles(bot_data: dict[str, Any], gs: Any) -> set[tuple[str, str]]:
+    """Статьи открытых копилок: обычная трата не читает таблицу — пары живут в
+    памяти и обновляются любым расчётом «Накоплений», сами — раз в 10 минут."""
+    known = bot_data.get(ARTICLES)
+    if known is not None and time.monotonic() - known[0] < ARTICLES_AGE:
+        return known[1]
+    rows, _ = await asyncio.to_thread(gs.get_piggy, ARTICLES_AGE)
+    found = {
+        (str(row[6]).strip(), str(row[7]).strip())
+        for row in rows[1:]
+        if len(row) > 7
+        and str(row[0]).strip()
+        and str(row[6]).strip()
+        and str(row[7]).strip()
+        and not (len(row) > 13 and str(row[13]).strip())
+    }
+    bot_data[ARTICLES] = (time.monotonic(), found)
+    return found
 
 
 def _left(screen: Screen | None) -> list[PiggyState]:
@@ -142,13 +193,159 @@ async def income_prompt(
         logger.exception("Piggy prompt failed for chat_id=%s", chat_id)
 
 
+def _spend_lines(
+    found: SavingsTab, rows: Sequence[SheetRow]
+) -> tuple[list[str], InlineKeyboardButton | None]:
+    """«🐷 Из копилки «Новый год»: −2 400 000 UZS, осталось 3 600 000» по копилке;
+    одна строка записи — с кнопкой «Не из копилки»."""
+    prefixes = [
+        row_prefix(row.day, row.category, row.subcategory, row.amount, row.currency,
+                   row.source) + "|"  # fmt: skip
+        for row in rows
+    ]
+    taken: list[tuple[PiggyState, float]] = []
+    keys: list[str] = []
+    for state in found.screen.piggies:
+        if state.status == "broken":
+            continue
+        mine = [
+            spend
+            for spend in state.balance.spends
+            if any(spend.key.startswith(prefix) for prefix in prefixes)
+        ]
+        if mine:
+            taken.append((state, sum(spend.amount for spend in mine)))
+            keys += [spend.key for spend in mine if spend.key not in keys]
+    if not taken:
+        return [], None
+    over = False
+    if len(rows) == 1:  # всё, что было: остаток траты ушёл в обычные
+        row = rows[0]
+        covered = sum(
+            found.rates.convert(amount, state.piggy.currency, row.currency) or 0.0
+            for state, amount in taken
+        )
+        over = covered < row.amount - 0.5
+    lines = []
+    for index, (state, amount) in enumerate(taken):
+        code = state.piggy.currency
+        name, sum_text = state.piggy.name, amount_text(rounded(amount, code))
+        if over and index == len(taken) - 1:
+            lines.append(
+                f"🐷 Из копилки «{name}»: {sum_text} {code} — всё, что было, "
+                "остальное — обычные траты"
+            )
+        else:
+            left = amount_text(rounded(max(state.balance.left, 0.0), code))
+            lines.append(f"🐷 Из копилки «{name}»: −{sum_text} {code}, осталось {left}")
+    button = None
+    if len(rows) == 1 and keys:
+        button = action(
+            "Не из копилки", f"{NO}{taken[0][0].piggy.id}:{fingerprint(keys[0])}"
+        )
+    return lines, button
+
+
+async def spend_note(
+    context: ContextTypes.DEFAULT_TYPE, chat_id: int, rows: Sequence[SheetRow]
+) -> list[str]:
+    """«🐷 Из копилки…» после траты по статье копилки (спека 7.2): сообщение в чат
+    и те же строки для ответа приложению; трата другой статьи таблицу не читает."""
+    spent = [row for row in rows if row.category != INCOME_GROUP and row.amount > 0]
+    if not spent:
+        return []
+    try:
+        articles = await piggy_articles(
+            context.bot_data, context.bot_data["gs_service"]
+        )
+        touched = [row for row in spent if (row.category, row.subcategory) in articles]
+        if not touched:
+            return []
+        found = await _savings(context.bot_data)
+        if found is None:
+            return []
+        lines, button = _spend_lines(found, touched)
+        if not lines:
+            return []
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="\n".join(lines),
+            reply_markup=InlineKeyboardMarkup([[button]]) if button else None,
+        )
+        return lines
+    except Exception:
+        logger.exception("Piggy spending note failed for chat_id=%s", chat_id)
+        return []
+
+
 async def piggy_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Кнопки «🐷»: piggy:all:<месяц> — «Отложил всё»."""
+    """Кнопки «🐷»: piggy:all:<месяц> — «Отложил всё», piggy:no:<ID>:<отпечаток> —
+    «Не из копилки»."""
     query = update.callback_query
     await query.answer()
     data = query.data or ""
     if data.startswith(ALL):
         await _set_all_aside(update, context, data.removeprefix(ALL))
+    elif data.startswith(NO):
+        piggy_id, _, mark = data.removeprefix(NO).partition(":")
+        await _not_from(update, context, piggy_id, mark)
+
+
+async def _not_from(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, piggy_id: str, mark: str
+) -> None:
+    """«Не из копилки»: строка журнала с ключом траты; fact не меняется."""
+    query, user = update.callback_query, update.effective_user
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    author = user.first_name or ""
+    gs = context.bot_data["gs_service"]
+    spend, marked = None, False
+    try:
+        async with piggy_lock(context.bot_data):
+            screen = await _screen(context.bot_data)
+            state = next(
+                (item for item in screen.piggies if item.piggy.id == piggy_id), None
+            ) if screen is not None else None  # fmt: skip
+            if state is not None:
+                spend = next(
+                    (item for item in state.balance.spends
+                     if fingerprint(item.key) == mark),
+                    None,
+                )  # fmt: skip
+            if state is not None and spend is not None:
+                await asyncio.to_thread(
+                    gs.add_piggy_moves,
+                    [move_row(today, state.piggy, 0, NOT_FROM, author, spend.key)],
+                )
+            else:
+                _, journal = await asyncio.to_thread(gs.get_piggy, 0.0)
+                marked = any(
+                    len(row) > 7
+                    and str(row[5]).strip().lower() == NOT_FROM
+                    and fingerprint(str(row[7])) == mark
+                    for row in journal[1:]
+                )
+    except Exception:
+        logger.exception("Not from the piggy failed for user_id=%s", user.id)
+        message = getattr(query, "message", None)
+        await query.edit_message_text(
+            "Не записал — таблица не ответила. Нажмите ещё раз.",
+            reply_markup=getattr(message, "reply_markup", None),
+        )
+        return
+    if spend is None:
+        text = (
+            "Уже учтено" if marked else "Запись изменилась — отметьте в «Накоплениях»"
+        )
+        await query.edit_message_text(text, reply_markup=None)
+        return
+    mark_dirty(context.bot_data)
+    await query.edit_message_text("🐷 Не из копилки — учтено", reply_markup=None)
+    _, group = leading_emoji(spend.group)
+    text = (
+        f"{spend.day:%d.%m} {group} / {spend.subcategory} {amount_text(spend.amount)}"
+    )
+    await notify_others(context.bot, user.id, piggy_note(NOT_FROM, author, text))
 
 
 async def _set_all_aside(

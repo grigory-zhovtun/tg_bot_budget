@@ -144,3 +144,200 @@ async def test_last_months_button_is_out_of_date() -> None:
     [[part]] = call.kwargs["reply_markup"].inline_keyboard
     assert part.text == "Отложил часть…" and part.web_app.url.endswith("&open=save")
     assert sheets.journal is not None and len(sheets.journal) == 1  # только шапка
+
+
+# --- «🐷 Из копилки» после траты и «Не из копилки» (спека 7.2) ---
+
+from app.services.piggy import fact_key, fingerprint  # noqa: E402
+from tests.test_day_budget import serial  # noqa: E402
+
+SHOPPING = date(2026, 12, 18)  # окно «Нового года» к 20.12 открыто
+
+
+def saved_in(piggy_id: str, name: str, amount: float) -> list[Any]:
+    return ["30.10.2026", piggy_id, name, amount, "UZS", "отложил", "Иван", ""]
+
+
+def fact(amount: float, sub: str = "сезонный", group: str = "🎉 ПРАЗДНИК") -> list[Any]:
+    return [serial(SHOPPING), group, sub, amount, "", "", "UZS", "VISA 1111 UZS"]
+
+
+def bought(
+    amount: float, sub: str = "сезонный", group: str = "🎉 ПРАЗДНИК"
+) -> SheetRow:
+    return SheetRow(SHOPPING, group, sub, amount, "", "UZS", "VISA 1111 UZS")
+
+
+def key_of(amount: float) -> str:
+    return fact_key(SHOPPING, "🎉 ПРАЗДНИК", "сезонный", amount, "UZS",
+                    "VISA 1111 UZS", "")  # fmt: skip
+
+
+class CountedSheets(PiggySheets):
+    reads = 0
+
+    def get_piggy(self, max_age: float = 0.0) -> tuple[list[Any], list[Any]]:
+        self.reads += 1
+        return super().get_piggy(max_age)
+
+
+def shopping(
+    piggies: list[list[Any]], moves: list[list[Any]], *spent: list[Any]
+) -> SimpleNamespace:
+    sheets = CountedSheets(piggies, moves)
+    return SimpleNamespace(
+        bot_data={
+            "gs_service": sheets,
+            "analytics_service": PiggyAnalytics(sheets, *spent),
+            **CATALOG,
+        },
+        bot=SimpleNamespace(send_message=AsyncMock()),
+        user_data={},
+    )
+
+
+@pytest.fixture
+def december(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(piggy, "local_today", lambda zone: SHOPPING)
+
+
+@pytest.mark.usefixtures("december")
+async def test_a_spending_from_the_piggy_says_what_is_left() -> None:
+    context = shopping(
+        [NEW_YEAR], [saved_in("p3k9za", "Новый год", 6_000_000)], fact(2_400_000)
+    )
+    lines = await piggy.spend_note(context, OWNER, [bought(2_400_000)])
+    assert lines == ["🐷 Из копилки «Новый год»: −2 400 000 UZS, осталось 3 600 000"]
+    call = context.bot.send_message.await_args
+    assert (call.kwargs["chat_id"], call.kwargs["text"]) == (OWNER, lines[0])
+    [[button]] = call.kwargs["reply_markup"].inline_keyboard
+    assert (button.text, button.callback_data) == (
+        "Не из копилки",
+        f"piggy:no:p3k9za:{fingerprint(key_of(2_400_000))}",
+    )
+    assert len(button.callback_data.encode()) <= 64
+
+
+@pytest.mark.usefixtures("december")
+async def test_a_spending_over_the_balance_takes_what_there_was() -> None:
+    context = shopping(
+        [NEW_YEAR], [saved_in("p3k9za", "Новый год", 600_000)], fact(2_400_000)
+    )
+    lines = await piggy.spend_note(context, OWNER, [bought(2_400_000)])
+    assert lines == [
+        "🐷 Из копилки «Новый год»: 600 000 UZS — всё, что было, "
+        "остальное — обычные траты"
+    ]
+
+
+@pytest.mark.usefixtures("december")
+async def test_two_piggies_of_one_article_share_one_message() -> None:
+    tree = ["k7tree", "Ёлка", 5000000, "UZS", "31.12.2026", "каждый год",
+            "🎉 ПРАЗДНИК", "сезонный", "", "", "", "", "Иван", ""]  # fmt: skip
+    context = shopping(
+        [NEW_YEAR, tree],
+        [
+            saved_in("p3k9za", "Новый год", 1_000_000),
+            saved_in("k7tree", "Ёлка", 5_000_000),
+        ],
+        fact(2_400_000),
+    )
+    lines = await piggy.spend_note(context, OWNER, [bought(2_400_000)])
+    assert lines == [
+        "🐷 Из копилки «Новый год»: −1 000 000 UZS, осталось 0",
+        "🐷 Из копилки «Ёлка»: −1 400 000 UZS, осталось 3 600 000",
+    ]
+    call = context.bot.send_message.await_args
+    assert call.kwargs["text"] == "\n".join(lines)
+
+
+@pytest.mark.usefixtures("december")
+async def test_several_rows_get_a_line_per_piggy_without_a_button() -> None:
+    context = shopping(
+        [NEW_YEAR],
+        [saved_in("p3k9za", "Новый год", 6_000_000)],
+        fact(1_000_000),
+        fact(500_000),
+    )
+    lines = await piggy.spend_note(context, OWNER, [bought(1_000_000), bought(500_000)])
+    assert lines == ["🐷 Из копилки «Новый год»: −1 500 000 UZS, осталось 4 500 000"]
+    assert context.bot.send_message.await_args.kwargs["reply_markup"] is None
+
+
+@pytest.mark.usefixtures("december")
+async def test_an_ordinary_spending_reads_nothing_more() -> None:
+    context = shopping(
+        [NEW_YEAR],
+        [saved_in("p3k9za", "Новый год", 6_000_000)],
+        fact(48_000, "кафе", "🍔 ЕДА"),
+    )
+    for _ in range(2):
+        assert (
+            await piggy.spend_note(context, OWNER, [bought(48_000, "кафе", "🍔 ЕДА")])
+            == []
+        )
+    sheets = context.bot_data["gs_service"]
+    assert sheets.reads == 1  # статьи копилок — один раз, потом из памяти
+    assert context.bot_data["analytics_service"].ages == []
+    context.bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.usefixtures("december")
+async def test_not_from_the_piggy_is_marked_once() -> None:
+    context = shopping(
+        [NEW_YEAR], [saved_in("p3k9za", "Новый год", 6_000_000)], fact(2_400_000)
+    )
+    sheets = context.bot_data["gs_service"]
+    data = f"piggy:no:p3k9za:{fingerprint(key_of(2_400_000))}"
+    update, query = press(data)
+    await piggy.piggy_button(update, context)
+    assert sheets.journal[-1] == ["18.12.2026", "p3k9za", "Новый год", 0.0, "UZS",
+                                  "не из копилки", "Иван", key_of(2_400_000)]  # fmt: skip
+    query.edit_message_text.assert_awaited_with(
+        "🐷 Не из копилки — учтено", reply_markup=None
+    )
+    assert told_wife(context) == [
+        "🐷 Иван — не из копилки: 18.12 ПРАЗДНИК / сезонный 2 400 000"
+    ]
+    rows = len(sheets.journal)
+    update, query = press(data)
+    await piggy.piggy_button(update, context)
+    assert len(sheets.journal) == rows
+    query.edit_message_text.assert_awaited_with("Уже учтено", reply_markup=None)
+
+
+@pytest.mark.usefixtures("december")
+async def test_a_changed_row_is_not_marked() -> None:
+    context = shopping(
+        [NEW_YEAR], [saved_in("p3k9za", "Новый год", 6_000_000)], fact(2_400_000)
+    )
+    sheets = context.bot_data["gs_service"]
+    rows = len(sheets.journal)
+    update, query = press(f"piggy:no:p3k9za:{fingerprint(key_of(2_500_000))}")
+    await piggy.piggy_button(update, context)
+    assert len(sheets.journal) == rows
+    query.edit_message_text.assert_awaited_with(
+        "Запись изменилась — отметьте в «Накоплениях»", reply_markup=None
+    )
+
+
+@pytest.mark.usefixtures("december")
+async def test_not_from_takes_the_spending_off_both_piggies() -> None:
+    tree = ["k7tree", "Ёлка", 5000000, "UZS", "31.12.2026", "каждый год",
+            "🎉 ПРАЗДНИК", "сезонный", "", "", "", "", "Иван", ""]  # fmt: skip
+    context = shopping(
+        [NEW_YEAR, tree],
+        [
+            saved_in("p3k9za", "Новый год", 1_000_000),
+            saved_in("k7tree", "Ёлка", 5_000_000),
+        ],
+        fact(2_400_000),
+    )
+    update, _ = press(f"piggy:no:p3k9za:{fingerprint(key_of(2_400_000))}")
+    await piggy.piggy_button(update, context)
+    screen = (
+        context.bot_data["analytics_service"]
+        .savings(SHOPPING, *[{"UZS"}, CATALOG["categories"], CATALOG["subcategories"]])
+        .screen
+    )
+    assert all(state.balance.spends == () for state in screen.piggies)

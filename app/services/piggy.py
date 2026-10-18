@@ -328,6 +328,14 @@ def fact_key(
 ) -> str:
     """Ключ строки fact для отметки «не из копилки»: правка строки его меняет."""
     note = comment.strip().removeprefix("AI:").strip()
+    return f"{row_prefix(day, group, subcategory, amount, currency, source)}|{note}"
+
+
+def row_prefix(
+    day: date, group: str, subcategory: str, amount: float, currency: str, source: str
+) -> str:
+    """Ключ строки fact без комментария: трата копилки — та, чей ключ с него
+    начинается (комментарий Sheets мог поменять при записи)."""
     return "|".join(
         (
             f"{day:%Y-%m-%d}",
@@ -336,7 +344,6 @@ def fact_key(
             f"{amount:.2f}",
             currency.strip().upper(),
             source.strip(),
-            note,
         )
     )
 

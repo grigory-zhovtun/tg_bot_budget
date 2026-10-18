@@ -785,3 +785,15 @@ def test_a_late_piggy_spends_only_what_it_collected() -> None:
 def test_the_plan_cell_is_read_in_sums() -> None:
     assert screen(piggy_row(), rows=tab(goal=2_000_000)).in_plan == 2_000_000
     assert screen(piggy_row()).in_plan is None
+
+
+def test_a_row_prefix_starts_its_key() -> None:
+    from app.services.piggy import fact_key, row_prefix
+
+    day = date(2026, 12, 18)
+    prefix = row_prefix(
+        day, "🎉 ПРАЗДНИК", "сезонный", 2_400_000, "uzs", "VISA 1111 UZS"
+    )
+    key = fact_key(day, "🎉 ПРАЗДНИК", "сезонный", 2_400_000, "UZS", "VISA 1111 UZS",
+                   "AI: подарки")  # fmt: skip
+    assert key.startswith(prefix + "|")
