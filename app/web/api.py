@@ -23,8 +23,15 @@ from telegram.ext import Application, CallbackContext
 from app import config
 from app.custom_icons import leading_emoji
 from app.domain import INCOME_GROUP, currency_of, entry_row, local_today, month_title
+from app.handlers.common import notify_others
 from app.handlers.messages import save_rows, seen_input
 from app.handlers.month import describe, tell_owner
+from app.handlers.piggy import (
+    PIGGY_LOCK,
+    amount_text,
+    move_row,
+    piggy_note,
+)
 from app.handlers.receipts import mark_dirty
 from app.handlers.undo import undo_last
 from app.services.analytics_service import TRANSFERS_GROUP, SavingsTab, money
@@ -184,7 +191,6 @@ ADVICE_SECONDS = 60
 # вкладками не ждёт Google. Запись бота копии сбрасывает, а ?fresh=1 («Обновить»
 # и первое открытие приложения) читает таблицу заново
 SCREEN_COPY_AGE = 120.0
-PIGGY_LOCK = "piggy_lock"  # bot_data: в листы копилок пишет один запрос за раз
 PIGGY_ENTRIES = "piggy_entries"  # user_data: entry_id уже записанных правок копилок
 PIGGY_YEARS = 5  # срок копилки — не дальше чем через 5 лет
 PIGGY_FIELDS = {
@@ -333,11 +339,6 @@ def cushion_out(cushion: Cushion | None) -> CushionOut | None:
     )
 
 
-def amount_text(value: float) -> str:
-    """«12 000 000», «210», «210,50» — для заметок и ошибок."""
-    return money(value) if value == int(value) else f"{value:.2f}".replace(".", ",")
-
-
 def piggy_text(
     name: str,
     target: float | None,
@@ -351,12 +352,6 @@ def piggy_text(
         return f"{text}, без срока"
     text += f" к {deadline:%d.%m}"
     return f"{text}, каждый год" if yearly else text
-
-
-def piggy_note(action: str, author: str, text: str) -> str:
-    """«🐷 Иван — новая копилка: …»; без имени — «🐷 Новая копилка: …»."""
-    head = f"{author} — {action}" if author else action[:1].upper() + action[1:]
-    return f"🐷 {head}: {text}"
 
 
 def piggy_error(fields: set[str] | dict[str, str]) -> JSONResponse:
@@ -421,16 +416,6 @@ def piggy_cells(body: PiggyIn, author: str) -> dict[str, Any]:
 def piggy_row(piggy_id: str, body: PiggyIn, author: str) -> list[Any]:
     cells = piggy_cells(body, author)
     return [piggy_id, *(cells[c] for c in "BCDEFGH"), "", "", "", "", author, ""]
-
-
-def move_row(
-    day: date, piggy: Piggy, amount: float, kind: str, author: str, key: str = ""
-) -> list[Any]:
-    """Строка журнала копилок: сумма в валюте копилки со знаком, округлённая, как
-    сумма валюты (без хвостов вида 66.77000000000001 и без «-0»)."""
-    rounded = _rounded(amount, piggy.currency) or 0.0
-    return [f"{day:%d.%m.%Y}", piggy.id, piggy.name, rounded, piggy.currency, kind,
-            author, key]  # fmt: skip
 
 
 def piggy_out(state: PiggyState) -> PiggyOut:
@@ -1187,15 +1172,6 @@ async def author_name(bot: Bot, user: WebUser) -> str | None:
         logger.warning("No name for user_id=%s", user.id)
         return None
     return chat.first_name or None
-
-
-async def notify_others(bot: Bot, author_id: int, text: str) -> None:
-    """Сообщение всем пользователям, кроме автора; сбой отправки — только в лог."""
-    for user_id in sorted(config.ALLOWED_USER_IDS - {author_id}):
-        try:
-            await bot.send_message(chat_id=user_id, text=text)
-        except Exception:
-            logger.warning("Could not tell user_id=%s about the plan", user_id)
 
 
 def routes(application: Application) -> list[Route]:

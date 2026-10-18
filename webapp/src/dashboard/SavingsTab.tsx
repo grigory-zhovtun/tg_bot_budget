@@ -22,6 +22,7 @@ interface Props {
   api: Api;
   boot: Bootstrap | null; // нет каталога — окна копилки не открыть
   refresh: number; // растёт с каждым «Обновить» «Сводки» — читать таблицу заново
+  openSave?: boolean; // кнопка бота «Отложил часть…» — сразу окно «Отложил»
 }
 
 interface SetAsideProps {
@@ -94,7 +95,14 @@ function Skeleton() {
 }
 
 /** Вкладка «Накопления»: что отложить, подушка, копилки, план на год и норма. */
-export default function SavingsTab({ api, boot, refresh }: Props) {
+/** «Отложил…» раскладывает сумму по взносам месяца — без них класть некуда. */
+function canSetAside(data: SavingsScreen): boolean {
+  return data.piggies.some(
+    (piggy) => piggy.status !== "broken" && piggy.left_this_month > 0,
+  );
+}
+
+export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
   const store = useStore();
   const load = useCallback((fresh: boolean) => api.savings(fresh), [api]);
   const { data, loading, error, reload } = useResource<SavingsScreen>(
@@ -113,6 +121,13 @@ export default function SavingsTab({ api, boot, refresh }: Props) {
     },
     [store],
   );
+  // из чата «Отложил часть…»: окно — один раз, по свежему ответу, а не по копии
+  // (правка состояния во время рендера: так React советует вместо эффекта)
+  const [asked, setAsked] = useState(false);
+  if (openSave && !asked && data && !loading) {
+    setAsked(true);
+    if (data.status === "ok" && canSetAside(data)) setSaving(true);
+  }
   // «Обновить» «Сводки» после открытия вкладки — читать таблицу заново
   const seen = useRef(refresh);
   useEffect(() => {
@@ -141,10 +156,7 @@ export default function SavingsTab({ api, boot, refresh }: Props) {
   const names = Object.fromEntries(
     data.piggies.map((piggy) => [piggy.id, piggy.name]),
   );
-  // «Отложил…» раскладывает сумму по взносам месяца — без них класть некуда
-  const canSave = data.piggies.some(
-    (piggy) => piggy.status !== "broken" && piggy.left_this_month > 0,
-  );
+  const canSave = canSetAside(data);
   return (
     <>
       {data.month && (

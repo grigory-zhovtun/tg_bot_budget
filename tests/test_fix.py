@@ -280,3 +280,24 @@ async def test_money_moved_into_income_suggests_setting_a_share_aside(
     await press(context, "fix:c:1")  # ДОХОДЫ
     text, _ = await press(context, "fix:s:0")  # зарплата
     assert "🛟 Отложите 10 % в подушку: 3 000 000 UZS (≈ $250)" in text
+
+
+async def test_money_moved_into_income_asks_the_piggies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked = AsyncMock()
+    monkeypatch.setattr(fix, "income_prompt", asked)
+    context = chat([row(amount=-17_000_000.0, comment="SMS: зачисление")])
+    await command(context)
+    await press(context, "fix:c:1")  # ДОХОДЫ
+    query = SimpleNamespace(
+        data="fix:s:0", answer=AsyncMock(), edit_message_text=AsyncMock()
+    )
+    await fix.fix_button(
+        SimpleNamespace(callback_query=query, effective_chat=SimpleNamespace(id=42)),
+        context,
+    )
+    asked.assert_awaited_once()
+    chat_id, user_id, rows = asked.await_args.args[1:]
+    assert (chat_id, user_id) == (42, 42)
+    assert [row.category for row in rows] == ["💰 ДОХОДЫ"]

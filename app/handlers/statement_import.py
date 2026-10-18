@@ -20,6 +20,7 @@ from app import config
 from app.domain import INCOME_GROUP, Catalog, currency_of, local_today
 from app.errors import user_message
 from app.handlers.common import LAST_WRITE
+from app.handlers.piggy import income_prompt
 from app.handlers.receipts import mark_dirty
 from app.services.google_sheets import GoogleSheetsService
 from app.services.savings import save_hint
@@ -379,6 +380,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         lines += ["", f"Проверьте категории ({len(review)}):"]
         lines += [_review_line(item) for item in review[:MAX_REVIEW_LINES]]
     await _show(context, chat_id, basket, "\n".join(lines))
+    await income_prompt(context, chat_id, chat_id, fresh)  # «🐷» — этого месяца
     logger.info(
         "Statement import: %d row(s), %d adjusted, %d removed",
         len(plan.rows),

@@ -557,3 +557,26 @@ async def test_an_income_not_written_suggests_nothing(
         context, update.effective_chat, [salary], [], "app:4"
     )
     assert not any("🛟" in line for line in result.lines)
+
+
+async def test_an_income_asks_the_piggies_after_the_menu(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    update, context, _ = make_chat("", {})
+    sent_before: list[int] = []
+
+    async def prompt(*args: Any) -> None:
+        sent_before.append(len(update.effective_chat.send_message.await_args_list))
+
+    asked = AsyncMock(side_effect=prompt)
+    monkeypatch.setattr(messages, "income_prompt", asked)
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    salary = entry_row(
+        17_000_000.0, True, "", "VISA 1111 UZS", "💰 ДОХОДЫ", "зарплата", today
+    )
+    await messages.save_rows(context, update.effective_chat, [salary], [], "app:9")
+    asked.assert_awaited_once()
+    chat_id, user_id, rows = asked.await_args.args[1:]
+    assert (chat_id, user_id) == (update.effective_chat.id, update.effective_chat.id)
+    assert [row.category for row in rows] == ["💰 ДОХОДЫ"]
+    assert sent_before and sent_before[0] >= 1  # сводка с меню уже ушла

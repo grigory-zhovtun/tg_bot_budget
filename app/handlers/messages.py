@@ -42,6 +42,7 @@ from app.handlers.common import (
     sources_keyboard,
     track_message,
 )
+from app.handlers.piggy import income_prompt
 from app.handlers.receipts import mark_dirty
 from app.services.analytics_service import TRANSFERS_GROUP
 from app.services.google_sheets import GoogleSheetsService
@@ -490,6 +491,8 @@ async def save_rows(
     )
     if rows and menu is not None:
         context.user_data[LAST_WRITE]["menu"] = (chat.id, menu.message_id)
+    # «🐷» — отдельным сообщением под меню: копилки, что отложить с поступления
+    await income_prompt(context, chat.id, chat.id, rows)
     return SaveResult(len(rows), first, last, tuple(lines))
 
 

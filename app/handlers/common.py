@@ -3,7 +3,14 @@ import logging
 import re
 import time
 
-from telegram import Chat, InlineKeyboardMarkup, Message, ReplyKeyboardMarkup, Update
+from telegram import (
+    Bot,
+    Chat,
+    InlineKeyboardMarkup,
+    Message,
+    ReplyKeyboardMarkup,
+    Update,
+)
 from telegram.ext import ContextTypes
 
 from app import config
@@ -179,3 +186,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ),
         )
         track_message(context, msg2)
+
+
+async def notify_others(bot: Bot, author_id: int, text: str) -> None:
+    """Сообщение всем пользователям, кроме автора; сбой отправки — только в лог."""
+    for user_id in sorted(config.ALLOWED_USER_IDS - {author_id}):
+        try:
+            await bot.send_message(chat_id=user_id, text=text)
+        except Exception:
+            logger.warning("Could not tell user_id=%s about the change", user_id)

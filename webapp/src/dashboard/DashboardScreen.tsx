@@ -140,10 +140,18 @@ interface SectionProps {
   data: Dashboard;
   section: Section;
   refresh: number;
+  openSave: boolean;
 }
 
 /** Карточки выбранной вкладки: «Накопления» — свой ответ, остальные — «Сводки». */
-function SectionCards({ api, boot, data, section, refresh }: SectionProps) {
+function SectionCards({
+  api,
+  boot,
+  data,
+  section,
+  refresh,
+  openSave,
+}: SectionProps) {
   switch (section) {
     case "today":
       return (
@@ -182,7 +190,14 @@ function SectionCards({ api, boot, data, section, refresh }: SectionProps) {
         </>
       );
     case "savings":
-      return <SavingsTab api={api} boot={boot} refresh={refresh} />;
+      return (
+        <SavingsTab
+          api={api}
+          boot={boot}
+          refresh={refresh}
+          openSave={openSave}
+        />
+      );
     case "ahead":
       return <Ahead data={data} />;
   }
@@ -194,6 +209,7 @@ interface ContentProps {
   data: Dashboard;
   section: Section;
   refresh: number;
+  openSave: boolean;
   onSection: (section: Section) => void;
 }
 
@@ -203,6 +219,7 @@ function Content({
   data,
   section,
   refresh,
+  openSave,
   onSection,
 }: ContentProps) {
   if (data.status === "no_month_tab") {
@@ -218,6 +235,7 @@ function Content({
         data={data}
         section={section}
         refresh={refresh}
+        openSave={openSave}
       />
     </>
   );
@@ -226,9 +244,11 @@ function Content({
 export default function DashboardScreen({
   api,
   boot = null,
+  openSave = false,
 }: {
   api: Api;
   boot?: Bootstrap | null; // каталог — для окон копилок
+  openSave?: boolean; // из чата «Отложил часть…» — «Накопления» и окно «Отложил»
 }) {
   const store = useStore();
   const load = useCallback((fresh: boolean) => api.dashboard(fresh), [api]);
@@ -245,7 +265,9 @@ export default function DashboardScreen({
     reload(true);
     setRefreshed((count) => count + 1);
   }, [reload]);
-  const [section, setSection] = useState<Section>(storedSection);
+  const [section, setSection] = useState<Section>(() =>
+    openSave ? "savings" : storedSection(),
+  );
   const choose = useCallback((next: Section) => {
     setSection(next);
     storeSection(next);
@@ -282,6 +304,7 @@ export default function DashboardScreen({
           data={data}
           section={section}
           refresh={refreshed}
+          openSave={openSave}
           onSection={choose}
         />
       )}
