@@ -315,6 +315,8 @@ async def test_a_salary_of_this_month_suggests_setting_a_share_aside(
     monkeypatch.setattr(statement_import, "local_today", lambda zone: DAY)
     asked = AsyncMock()  # «🐷» — тоже только о поступлениях этого месяца
     monkeypatch.setattr(statement_import, "income_prompt", asked)
+    noted = AsyncMock(return_value=[])  # «🐷 Из копилки» — по строке без кнопки
+    monkeypatch.setattr(statement_import, "spend_note", noted)
     sheets = StatementSheets([], {"VISA 9120 UZS": date(2026, 9, 30)})
     context = make_context(sheets, MerchantAI({}))
     advance = "Оплата аванс за октябрь 2026, АКБ Капиталбанк"
@@ -328,3 +330,6 @@ async def test_a_salary_of_this_month_suggests_setting_a_share_aside(
     assert "🛟 Отложите 10 % в подушку: 2 400 000 UZS (≈ $200)" in result
     asked.assert_awaited_once()
     assert [row.day for row in asked.await_args.args[3]] == [date(2026, 10, 5)]
+    noted.assert_awaited_once()
+    assert noted.await_args.kwargs == {"button": False}
+    assert len(noted.await_args.args[2]) == 2  # все записанные строки выписки

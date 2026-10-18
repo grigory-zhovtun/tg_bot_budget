@@ -27,6 +27,7 @@ from app.handlers.common import notify_others
 from app.handlers.messages import save_rows, seen_input
 from app.handlers.month import describe, tell_owner
 from app.handlers.piggy import (
+    ARTICLES,
     PIGGY_LOCK,
     amount_text,
     move_row,
@@ -1461,6 +1462,8 @@ def routes(application: Application) -> list[Route]:
     async def written(user_id: int, author: str, note: str) -> JSONResponse:
         """После записи: фоновая запись «Потрачено» и взноса, заметка второму."""
         mark_dirty(application.bot_data)
+        # статью новой или поправленной копилки бот узнаёт сразу, не через 10 минут
+        application.bot_data.pop(ARTICLES, None)
         await notify_others(application.bot, user_id, piggy_note_text(author, note))
         return await fresh_savings(user_id)
 

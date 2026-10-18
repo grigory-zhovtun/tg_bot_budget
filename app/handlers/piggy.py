@@ -28,6 +28,7 @@ from app.services.piggy import (
     Piggy,
     PiggyState,
     Screen,
+    fact_key,
     fingerprint,
     row_prefix,
 )
@@ -193,26 +194,44 @@ async def income_prompt(
         logger.exception("Piggy prompt failed for chat_id=%s", chat_id)
 
 
+def _written_keys(screen: Screen, rows: Sequence[SheetRow]) -> set[str]:
+    """Ключи трат копилок, которые дали записанные строки: та же строка раньше в
+    тот же день (тот же ключ с «#2») — не наша, берём новейшие. Комментарий Sheets
+    мог поменять при записи — тогда ищем по ключу без него."""
+    order: list[str] = []  # ключи трат копилок по порядку строк fact
+    for state in screen.piggies:
+        for spend in state.balance.spends:
+            if spend.key not in order:
+                order.append(spend.key)
+    wanted: dict[str, tuple[str, int]] = {}  # ключ строки → (без комментария, сколько)
+    for row in rows:
+        head = row_prefix(row.day, row.category, row.subcategory, row.amount,
+                          row.currency, row.source)  # fmt: skip
+        exact = fact_key(row.day, row.category, row.subcategory, row.amount,
+                         row.currency, row.source, row.comment)  # fmt: skip
+        count = wanted.get(exact, (head, 0))[1]
+        wanted[exact] = (head, count + 1)
+    chosen: set[str] = set()
+    for exact, (head, count) in wanted.items():
+        same = [key for key in order if key == exact or key.startswith(f"{exact}#")]
+        if not same:  # комментарий в таблице другой — по ключу без комментария
+            same = [key for key in order if key.startswith(f"{head}|")]
+        chosen.update(same[-count:])
+    return chosen
+
+
 def _spend_lines(
-    found: SavingsTab, rows: Sequence[SheetRow]
+    found: SavingsTab, rows: Sequence[SheetRow], button: bool = True
 ) -> tuple[list[str], InlineKeyboardButton | None]:
     """«🐷 Из копилки «Новый год»: −2 400 000 UZS, осталось 3 600 000» по копилке;
     одна строка записи — с кнопкой «Не из копилки»."""
-    prefixes = [
-        row_prefix(row.day, row.category, row.subcategory, row.amount, row.currency,
-                   row.source) + "|"  # fmt: skip
-        for row in rows
-    ]
+    chosen = _written_keys(found.screen, rows)
     taken: list[tuple[PiggyState, float]] = []
     keys: list[str] = []
     for state in found.screen.piggies:
         if state.status == "broken":
             continue
-        mine = [
-            spend
-            for spend in state.balance.spends
-            if any(spend.key.startswith(prefix) for prefix in prefixes)
-        ]
+        mine = [spend for spend in state.balance.spends if spend.key in chosen]
         if mine:
             taken.append((state, sum(spend.amount for spend in mine)))
             keys += [spend.key for spend in mine if spend.key not in keys]
@@ -238,19 +257,23 @@ def _spend_lines(
         else:
             left = amount_text(rounded(max(state.balance.left, 0.0), code))
             lines.append(f"🐷 Из копилки «{name}»: −{sum_text} {code}, осталось {left}")
-    button = None
-    if len(rows) == 1 and keys:
-        button = action(
+    found_button = None
+    if button and len(rows) == 1 and keys:
+        found_button = action(
             "Не из копилки", f"{NO}{taken[0][0].piggy.id}:{fingerprint(keys[0])}"
         )
-    return lines, button
+    return lines, found_button
 
 
 async def spend_note(
-    context: ContextTypes.DEFAULT_TYPE, chat_id: int, rows: Sequence[SheetRow]
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    rows: Sequence[SheetRow],
+    button: bool = True,
 ) -> list[str]:
     """«🐷 Из копилки…» после траты по статье копилки (спека 7.2): сообщение в чат
-    и те же строки для ответа приложению; трата другой статьи таблицу не читает."""
+    и те же строки для ответа приложению; трата другой статьи таблицу не читает.
+    button=False — выписка: по строке на копилку без «Не из копилки»."""
     spent = [row for row in rows if row.category != INCOME_GROUP and row.amount > 0]
     if not spent:
         return []
@@ -264,13 +287,15 @@ async def spend_note(
         found = await _savings(context.bot_data)
         if found is None:
             return []
-        lines, button = _spend_lines(found, touched)
+        lines, found_button = _spend_lines(found, touched, button)
         if not lines:
             return []
         await context.bot.send_message(
             chat_id=chat_id,
             text="\n".join(lines),
-            reply_markup=InlineKeyboardMarkup([[button]]) if button else None,
+            reply_markup=(
+                InlineKeyboardMarkup([[found_button]]) if found_button else None
+            ),
         )
         return lines
     except Exception:

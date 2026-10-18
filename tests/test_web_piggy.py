@@ -484,3 +484,12 @@ def test_without_piggies_there_is_no_goal() -> None:
     application, _ = setup(PiggySheets([], []))
     found = client_for(application).get("/api/savings", headers=auth()).json()
     assert found["goal"] is None
+
+
+def test_a_new_piggy_drops_the_bots_memory_of_articles() -> None:
+    # бот узнаёт статью новой копилки сразу, а не через 10 минут
+    application, _ = setup(PiggySheets([], []))
+    application.bot_data["piggy_articles"] = (time.monotonic(), set())
+    response = client_for(application).post("/api/piggy", json=body(), headers=auth())
+    assert response.status_code == 200
+    assert "piggy_articles" not in application.bot_data

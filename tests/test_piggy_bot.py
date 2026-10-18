@@ -341,3 +341,51 @@ async def test_not_from_takes_the_spending_off_both_piggies() -> None:
         .screen
     )
     assert all(state.balance.spends == () for state in screen.piggies)
+
+
+# --- финальное ревью этапа 3 ---
+
+
+@pytest.mark.usefixtures("december")
+async def test_the_same_spending_twice_counts_only_the_new_row() -> None:
+    # утром уже купили то же на ту же сумму — сообщение о новой строке
+    context = shopping(
+        [NEW_YEAR],
+        [saved_in("p3k9za", "Новый год", 6_000_000)],
+        fact(1_000_000),
+        fact(1_000_000),
+    )
+    lines = await piggy.spend_note(context, OWNER, [bought(1_000_000)])
+    assert lines == ["🐷 Из копилки «Новый год»: −1 000 000 UZS, осталось 4 000 000"]
+    [[button]] = context.bot.send_message.await_args.kwargs[
+        "reply_markup"
+    ].inline_keyboard
+    assert button.callback_data == (
+        f"piggy:no:p3k9za:{fingerprint(key_of(1_000_000) + '#2')}"
+    )
+
+
+@pytest.mark.usefixtures("december")
+async def test_a_statement_spending_gets_no_button() -> None:
+    context = shopping(
+        [NEW_YEAR], [saved_in("p3k9za", "Новый год", 6_000_000)], fact(2_400_000)
+    )
+    lines = await piggy.spend_note(context, OWNER, [bought(2_400_000)], button=False)
+    assert lines == ["🐷 Из копилки «Новый год»: −2 400 000 UZS, осталось 3 600 000"]
+    assert context.bot.send_message.await_args.kwargs["reply_markup"] is None
+
+
+async def test_set_all_aside_after_a_part_writes_the_rest() -> None:
+    # часть отложили в приложении — «Отложил всё» дописывает только остаток
+    sheets = PiggySheets(
+        [NEW_YEAR],
+        [["05.10.2026", "p3k9za", "Новый год", 2000000, "UZS", "отложил", "Иван", ""]],
+    )
+    context = context_with(sheets)
+    update, query = press("piggy:all:2026-10")
+    await piggy.piggy_button(update, context)
+    assert sheets.journal is not None
+    assert sheets.journal[-1][3] == 4_000_000
+    query.edit_message_text.assert_awaited_with(
+        "🐷 Записал: «Новый год» 4 000 000 UZS", reply_markup=None
+    )
