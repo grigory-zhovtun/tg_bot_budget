@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { ApiError, type Api } from "../api";
 import { savingsFixture } from "../mocks/fixtures";
 import { fakeApi } from "../test/fakeApi";
 import OrderSheet from "./OrderSheet";
@@ -58,5 +59,45 @@ describe("OrderSheet", () => {
     await vi.waitFor(() =>
       expect(onSaved).toHaveBeenCalledWith(savingsFixture),
     );
+  });
+
+  it("re-reads the piggies when the set changed meanwhile", async () => {
+    const [first] = savingsFixture.piggies;
+    if (!first) throw new Error("fixture");
+    const fresh = {
+      ...savingsFixture,
+      piggies: [
+        ...savingsFixture.piggies,
+        { ...first, id: "bd0001", row: 7, name: "Дни рождения", order: 3 },
+      ],
+    };
+    const api = fakeApi({
+      setOrder: vi
+        .fn<Api["setOrder"]>()
+        .mockRejectedValue(
+          new ApiError(409, "piggies_changed", "Копилки поменялись"),
+        ),
+      savings: vi.fn<Api["savings"]>().mockResolvedValue(fresh),
+    });
+    const onRefresh = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <OrderSheet
+        api={api}
+        data={savingsFixture}
+        onSaved={vi.fn()}
+        onRefresh={onRefresh}
+        onClose={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Сохранить порядок" }));
+    expect(
+      await screen.findByText(
+        "Копилки поменялись — проверьте порядок и сохраните ещё раз",
+      ),
+    ).toBeTruthy();
+    expect(api.savings).toHaveBeenCalledWith(true);
+    expect(onRefresh).toHaveBeenCalledWith(fresh);
+    expect(names()).toEqual(["Новый год", "Отпуск", "Дни рождения"]);
   });
 });

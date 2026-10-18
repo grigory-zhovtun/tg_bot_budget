@@ -955,7 +955,7 @@ def test_no_income_in_the_list_uses_the_average_income() -> None:
     found = screen(
         piggy_row(),
         fact=incomes,
-        rows=tab(items=[("Квартплата", 18, -650, "USD")]),
+        rows=tab(items=[("Аренда", 20, -400, "USD")]),
         share=0.1,
     )
     assert found.capacity == pytest.approx(1_000_000)

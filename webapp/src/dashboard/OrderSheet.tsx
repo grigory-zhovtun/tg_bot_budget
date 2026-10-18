@@ -7,18 +7,31 @@ interface Props {
   api: Api;
   data: SavingsScreen;
   onSaved: (fresh: SavingsScreen) => void;
+  onRefresh?: (fresh: SavingsScreen) => void; // экран перечитан, окно открыто
   onClose: () => void;
 }
 
 const PAUSE_MS = 300; // предпросмотр — после паузы в нажатиях
+const CHANGED = "Копилки поменялись — проверьте порядок и сохраните ещё раз";
 
-/** Окно «Порядок важности»: стрелки ↑ ↓ и что каждая копилка успеет при этом
- * порядке. */
-export default function OrderSheet({ api, data, onSaved, onClose }: Props) {
-  const startIds = data.piggies
+/** ID копилок порядка — самая важная первой. */
+function orderOf(screen: SavingsScreen): string[] {
+  return screen.piggies
     .filter((piggy) => piggy.order !== null && piggy.status !== "broken")
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     .map((piggy) => piggy.id);
+}
+
+/** Окно «Порядок важности»: стрелки ↑ ↓ и что каждая копилка успеет при этом
+ * порядке. */
+export default function OrderSheet({
+  api,
+  data,
+  onSaved,
+  onRefresh,
+  onClose,
+}: Props) {
+  const startIds = orderOf(data);
   const startKey = startIds.join(",");
   const [ids, setIds] = useState<string[]>(startIds);
   const [view, setView] = useState<SavingsScreen>(data);
@@ -56,6 +69,23 @@ export default function OrderSheet({ api, data, onSaved, onClose }: Props) {
     setBusy(true);
     setError(null);
     api.setOrder(ids).then(onSaved, (reason: unknown) => {
+      if (reason instanceof ApiError && reason.code === "piggies_changed") {
+        // набор копилок поменяли с другого телефона — перечитать и показать свежий
+        api.savings(true).then(
+          (fresh) => {
+            onRefresh?.(fresh);
+            setView(fresh);
+            setIds(orderOf(fresh));
+            setBusy(false);
+            setError(CHANGED);
+          },
+          () => {
+            setBusy(false);
+            setError(reason.message);
+          },
+        );
+        return;
+      }
       setBusy(false);
       setError(
         reason instanceof ApiError

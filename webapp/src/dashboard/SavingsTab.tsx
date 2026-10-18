@@ -292,6 +292,7 @@ export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
           api={api}
           data={data}
           onSaved={saved}
+          onRefresh={(fresh) => store.put("savings", fresh)}
           onClose={() => setSetting(null)}
         />
       )}
