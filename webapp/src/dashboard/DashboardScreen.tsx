@@ -1,19 +1,15 @@
-import { useCallback } from "react";
-import type { Api, Dashboard, SubscriptionState } from "../api";
-import { itemAmount, longDay, money, short, withCurrency } from "../format";
+import { useCallback, useState } from "react";
+import type { Api, Dashboard } from "../api";
+import { longDay, money, short, withCurrency } from "../format";
 import { useResource, useStore } from "../store";
+import Ahead, { NoForecastNote } from "./Ahead";
 import CardBalances from "./CardBalances";
 import CategoryChart from "./CategoryChart";
 import CushionCard from "./CushionCard";
 import SavingsCard from "./SavingsCard";
+import SectionSwitch from "./SectionSwitch";
 import SpendingChart from "./SpendingChart";
-
-const STATE_TEXT: Record<SubscriptionState, string> = {
-  charged: "списано",
-  twice: "⚠️ дважды",
-  expected: "ждём",
-  missed: "не было",
-};
+import { storeSection, storedSection, type Section } from "./section";
 
 function Skeleton() {
   return (
@@ -139,89 +135,78 @@ function Sums({ data }: { data: Dashboard }) {
   );
 }
 
-function Content({ data }: { data: Dashboard }) {
+/** Карточки выбранной вкладки — из одного ответа «Сводки». */
+function SectionCards({
+  data,
+  section,
+}: {
+  data: Dashboard;
+  section: Section;
+}) {
+  switch (section) {
+    case "today":
+      return (
+        <>
+          {/* лимита нет именно здесь — здесь и объясняем */}
+          {data.status === "no_forecast" && <NoForecastNote />}
+          <Today data={data} />
+          <Cards data={data} />
+          <Sums data={data} />
+          {data.cards.length > 0 && (
+            <CardBalances cards={data.cards} today={data.today} />
+          )}
+        </>
+      );
+    case "spending":
+      return (
+        <>
+          {data.categories.length > 0 && (
+            <CategoryChart
+              categories={data.categories}
+              untracked={data.untracked}
+              today={data.today}
+            />
+          )}
+          {data.spending.length > 0 && (
+            <section className="flex flex-col gap-2">
+              <h2 className="font-semibold">Траты по дням</h2>
+              <SpendingChart
+                spending={data.spending}
+                today={data.today}
+                limit={data.limit}
+                planPerDay={data.plan_per_day}
+              />
+            </section>
+          )}
+        </>
+      );
+    case "savings":
+      return (
+        <>
+          {data.cushion && <CushionCard cushion={data.cushion} />}
+          {data.savings && <SavingsCard savings={data.savings} />}
+        </>
+      );
+    case "ahead":
+      return <Ahead data={data} />;
+  }
+}
+
+interface ContentProps {
+  data: Dashboard;
+  section: Section;
+  onSection: (section: Section) => void;
+}
+
+function Content({ data, section, onSection }: ContentProps) {
   if (data.status === "no_month_tab") {
+    // в таком ответе нет данных ни для одной вкладки
     return <p>Вкладки месяца нет — бот создаёт её 1-го числа.</p>;
   }
   return (
     <>
-      <Today data={data} />
-      <Cards data={data} />
-      <Sums data={data} />
-      {data.cushion && <CushionCard cushion={data.cushion} />}
-      {data.savings && <SavingsCard savings={data.savings} />}
-      {data.cards.length > 0 && (
-        <CardBalances cards={data.cards} today={data.today} />
-      )}
-      {data.status === "no_forecast" && (
-        <p className="text-sm text-hint">
-          Во вкладке месяца нет блока прогноза — лимит на день не посчитать.
-        </p>
-      )}
-      {data.categories.length > 0 && (
-        <CategoryChart
-          categories={data.categories}
-          untracked={data.untracked}
-          today={data.today}
-        />
-      )}
-      {data.spending.length > 0 && (
-        <section className="flex flex-col gap-2">
-          <h2 className="font-semibold">Траты по дням</h2>
-          <SpendingChart
-            spending={data.spending}
-            today={data.today}
-            limit={data.limit}
-            planPerDay={data.plan_per_day}
-          />
-        </section>
-      )}
-      {data.upcoming.length > 0 && (
-        <section className="flex flex-col gap-2">
-          <h2 className="font-semibold">Впереди</h2>
-          <ul className="flex flex-col gap-1 text-sm">
-            {data.upcoming.map((item) => (
-              <li
-                key={`${item.day}-${item.name}`}
-                className="flex justify-between gap-2"
-              >
-                <span>
-                  {item.day < Number(data.today.slice(8, 10)) ? "⏳ " : ""}
-                  {String(item.day).padStart(2, "0")} — {item.name}
-                </span>
-                <span
-                  className={`font-semibold ${item.amount > 0 ? "text-earned" : "text-payment"}`}
-                >
-                  {itemAmount(item.amount, item.currency, item.uzs)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      {data.subscriptions.length > 0 && (
-        <section className="flex flex-col gap-2">
-          <h2 className="font-semibold">Подписки</h2>
-          <ul className="flex flex-col gap-1 text-sm">
-            {data.subscriptions.map((sub) => (
-              <li
-                key={`${sub.day}-${sub.name}-${sub.uzs}`}
-                className="flex justify-between gap-2"
-              >
-                <span>
-                  {String(sub.day).padStart(2, "0")} — {sub.name}
-                </span>
-                <span className="text-hint">
-                  {sub.currency === "UZS"
-                    ? money(sub.uzs)
-                    : withCurrency(sub.amount, sub.currency)}{" "}
-                  · {STATE_TEXT[sub.state]}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <SectionSwitch section={section} onSection={onSection} />
+      <SectionCards data={data} section={section} />
     </>
   );
 }
@@ -239,6 +224,11 @@ export default function DashboardScreen({ api }: { api: Api }) {
   const refresh = useCallback(() => {
     reload(true);
   }, [reload]);
+  const [section, setSection] = useState<Section>(storedSection);
+  const choose = useCallback((next: Section) => {
+    setSection(next);
+    storeSection(next);
+  }, []);
 
   return (
     <div className="flex flex-col gap-4">
@@ -264,7 +254,7 @@ export default function DashboardScreen({ api }: { api: Api }) {
           </button>
         </div>
       )}
-      {data && <Content data={data} />}
+      {data && <Content data={data} section={section} onSection={choose} />}
     </div>
   );
 }
