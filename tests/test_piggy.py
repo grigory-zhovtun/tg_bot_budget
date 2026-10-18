@@ -528,6 +528,12 @@ def test_the_share_goes_to_the_cushion_under_a_month() -> None:
     assert state(found, "car001").this_month == 0
 
 
+def test_a_goal_without_a_part_is_not_in_the_month_plan() -> None:
+    # иначе экран пишет «пополам: подушка и «Машина»», а план года — «Машина 0»
+    found = screen(piggy_row(**GOAL), fact=spending_months(), budget=frozen(500))
+    assert found.plan[0].goals == {}
+
+
 def test_the_share_splits_between_a_month_and_the_target() -> None:
     found = screen(piggy_row(**GOAL), fact=spending_months(), budget=frozen(2000))
     assert found.share_to == "split"  # 24 млн — 2,4 месяца

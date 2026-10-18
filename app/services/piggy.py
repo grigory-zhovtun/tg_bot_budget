@@ -877,8 +877,10 @@ def savings_screen(
                 if piggy.target is not None
                 else each
             )
-            parts[piggy.id] = min(each, max(wanted, 0.0))
-            collected_goals[piggy.id] += parts[piggy.id]
+            part = min(each, max(wanted, 0.0))
+            if part > 0:  # цель без доли в месяце не называют
+                parts[piggy.id] = part
+                collected_goals[piggy.id] += part
         to_goals = sum(parts.values())
         if cushion_uzs is not None:
             cushion_uzs += share_month - to_goals
