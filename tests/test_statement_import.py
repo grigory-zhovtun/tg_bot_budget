@@ -57,7 +57,7 @@ class StatementSheets:
         return list(numbers)
 
     def get_table_balances(self) -> dict[str, float]:
-        return {"VISA 9120 UZS": 14_000_000.0}
+        return {"VISA 9090 UZS": 14_000_000.0}
 
     def get_rates(self, max_age: float = 0.0) -> Rates:
         return Rates({"UZS": 1.0, "USD": 12_000.0})
@@ -117,12 +117,12 @@ def update_for(chat_id: int = 1) -> SimpleNamespace:
 
 
 def visa(*txns: Txn) -> Statement:
-    return Statement("VISA 9120 UZS", list(txns), (date(2026, 10, 1), DAY), DAY)
+    return Statement("VISA 9090 UZS", list(txns), (date(2026, 10, 1), DAY), DAY)
 
 
 def purchase(amount: float, name: str, uid: str = "a") -> Txn:
     details = f"Списание по операциям покупке {name} SLIP No 1 за 06.10.2026"
-    return Txn(uid, "VISA 9120 UZS", DAY, date(2026, 10, 6), -amount, details)
+    return Txn(uid, "VISA 9090 UZS", DAY, date(2026, 10, 6), -amount, details)
 
 
 def last_text(context: SimpleNamespace) -> str:
@@ -166,9 +166,9 @@ async def test_statement_preview_then_write() -> None:
         "",
         "ВРЕМЕННАЯ",
         "UZS",
-        "VISA 9120 UZS",
+        "VISA 9090 UZS",
     ]
-    sheets = StatementSheets([temp], {"VISA 9120 UZS": date(2026, 10, 5)})
+    sheets = StatementSheets([temp], {"VISA 9090 UZS": date(2026, 10, 5)})
     ai = MerchantAI({"NEW CAFE": ("🍔 ЕДА", "кафе")})
     context = make_context(sheets, ai)
 
@@ -196,10 +196,10 @@ async def test_statement_preview_then_write() -> None:
     [row] = sheets.appended
     assert row[1:4] == ["🍔 ЕДА", "кафе", 48000.0]
     assert sheets.deleted == [2]
-    assert sheets.marks["VISA 9120 UZS"] == date(2026, 10, 6)
+    assert sheets.marks["VISA 9090 UZS"] == date(2026, 10, 6)
     result = last_text(context)
     assert result.startswith("✅ Выписки загружены")
-    assert "VISA 9120 UZS: 14 000 000" in result
+    assert "VISA 9090 UZS: 14 000 000" in result
     assert ai.asked == [["NEW CAFE"]]  # второй раз Gemini не спрашивали
     assert statement_import.BASKET not in context.user_data
     # выписка приносит операции задним числом — «Пришло к утру» надо сверить
@@ -251,7 +251,7 @@ async def test_nothing_new_only_moves_the_mark() -> None:
         "",
         "AI: New Cafe",
         "UZS",
-        "VISA 9120 UZS",
+        "VISA 9090 UZS",
     ]
     sheets = StatementSheets([known], {})
     context = make_context(sheets)
@@ -260,7 +260,7 @@ async def test_nothing_new_only_moves_the_mark() -> None:
     text = last_text(context)
     assert "Всё из выписок уже есть в таблице" in text
     assert last_markup(context) is None
-    assert sheets.marks == {"VISA 9120 UZS": date(2026, 10, 6)}
+    assert sheets.marks == {"VISA 9090 UZS": date(2026, 10, 6)}
     assert statement_import.BASKET not in context.user_data
 
 
@@ -304,7 +304,7 @@ async def test_statement_pdf_skips_gemini(monkeypatch: pytest.MonkeyPatch) -> No
 
     received.assert_awaited_once()
     statement = received.await_args.args[2]
-    assert (statement.source, len(statement.txns)) == ("VISA 4058 USD", 2)
+    assert (statement.source, len(statement.txns)) == ("VISA 3434 USD", 2)
 
 
 async def test_a_salary_of_this_month_suggests_setting_a_share_aside(
@@ -317,12 +317,12 @@ async def test_a_salary_of_this_month_suggests_setting_a_share_aside(
     monkeypatch.setattr(statement_import, "income_prompt", asked)
     noted = AsyncMock(return_value=[])  # «🐷 Из копилки» — по строке без кнопки
     monkeypatch.setattr(statement_import, "spend_note", noted)
-    sheets = StatementSheets([], {"VISA 9120 UZS": date(2026, 9, 30)})
+    sheets = StatementSheets([], {"VISA 9090 UZS": date(2026, 9, 30)})
     context = make_context(sheets, MerchantAI({}))
-    advance = "Оплата аванс за октябрь 2026, АКБ Капиталбанк"
-    paid = Txn("s", "VISA 9120 UZS", DAY, date(2026, 10, 5), 24_000_000, advance)
+    advance = "Оплата аванс за октябрь 2026, Банк Пример"
+    paid = Txn("s", "VISA 9090 UZS", DAY, date(2026, 10, 5), 24_000_000, advance)
     # сентябрьская премия — уже не повод откладывать сейчас
-    old = Txn("o", "VISA 9120 UZS", DAY, date(2026, 9, 25), 6_000_000, advance)
+    old = Txn("o", "VISA 9090 UZS", DAY, date(2026, 9, 25), 6_000_000, advance)
     await receive(context, visa(paid, old))
     await run_preview(context)
     await statement_import.button(press(context, "import:ok:1"), context)

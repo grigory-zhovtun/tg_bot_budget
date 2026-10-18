@@ -13,7 +13,7 @@ describe("App", () => {
     render(<App api={fakeApi()} />);
     expect(
       await screen.findByRole("radio", {
-        name: "VISA 9120 UZS",
+        name: "VISA 9090 UZS",
         checked: true,
       }),
     ).toBeTruthy();

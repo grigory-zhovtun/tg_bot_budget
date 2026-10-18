@@ -34,7 +34,7 @@ def row(
         amount=amount,
         comment=comment,
         currency="UZS",
-        source="VISA 9120 UZS",
+        source="VISA 9090 UZS",
     )
 
 
@@ -110,7 +110,7 @@ async def test_single_row_goes_straight_to_groups_and_is_fixed() -> None:
     context = chat([row()])
     text, markup = await command(context)
     assert text == (
-        "✏️ 48 000 UZS • TEZKOR • 🚧 РАЗНОЕ (неучтенка) • VISA 9120 UZS\nВыберите группу:"
+        "✏️ 48 000 UZS • TEZKOR • 🚧 РАЗНОЕ (неучтенка) • VISA 9090 UZS\nВыберите группу:"
     )
     assert callbacks(markup) == [["fix:c:0", "fix:c:1"], ["fix:c:2"], ["fix:x"]]
 
@@ -124,7 +124,7 @@ async def test_single_row_goes_straight_to_groups_and_is_fixed() -> None:
     assert sheets.calls == [(4190, row(), "🍔 ЕДА", "кафе", 48000.0)]
     assert (
         text
-        == "✅ Исправил (строка 4190): 48 000 UZS • TEZKOR • 🍔 ЕДА (кафе) • VISA 9120 UZS"
+        == "✅ Исправил (строка 4190): 48 000 UZS • TEZKOR • 🍔 ЕДА (кафе) • VISA 9090 UZS"
     )
     assert markup is None
     assert context.bot_data["receipts_dirty"] is True
@@ -139,7 +139,7 @@ async def test_several_rows_ask_which_one() -> None:
     context = chat(rows)
     text, markup = await command(context)
     assert text.splitlines()[0] == "✏️ Какую операцию исправить?"
-    assert "3) 48 000 UZS • суши • 🚧 РАЗНОЕ (неучтенка) • VISA 9120 UZS" in text
+    assert "3) 48 000 UZS • суши • 🚧 РАЗНОЕ (неучтенка) • VISA 9090 UZS" in text
     assert callbacks(markup) == [["fix:r:0"], ["fix:r:1"], ["fix:r:2"], ["fix:x"]]
     assert markup.inline_keyboard[2][0].text == "3) 48 000 UZS • неучтенка"
 

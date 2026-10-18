@@ -42,7 +42,7 @@ TODAY = date(2026, 10, 11)
 
 def bought(day: date, sub: str, amount: float, place: str, group: str = "🍔 ЕДА"):
     """Строка fact с магазином в комментарии, как пишет разбор SMS."""
-    return [serial(day), group, sub, amount, "", f"AI: {place}", "UZS", "VISA 9120 UZS"]
+    return [serial(day), group, sub, amount, "", f"AI: {place}", "UZS", "VISA 9090 UZS"]
 
 
 def history_frame():

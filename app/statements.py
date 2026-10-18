@@ -159,7 +159,7 @@ class Statement:
 
 
 def detect_source(text: str, sources: list[str]) -> str:
-    """Источник по самым частым четырём цифрам из «427831******4058»."""
+    """Источник по самым частым четырём цифрам из «400000******3434»."""
     counts: dict[str, int] = defaultdict(int)
     for digits in CARD_MASK.findall(text):
         counts[digits] += 1
@@ -439,7 +439,7 @@ def title(name: str) -> str:
 
 
 def short(source: str) -> str:
-    """«VISA 9120 UZS» → «VISA 9120»; у валютных карт валюта остаётся."""
+    """«VISA 9090 UZS» → «VISA 9090»; у валютных карт валюта остаётся."""
     return " ".join(part for part in source.split() if part.upper() != "UZS")
 
 

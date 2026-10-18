@@ -30,7 +30,7 @@ def serial(day: date) -> int:
 
 
 def row(day: date, group: str, sub: str, amount: float, comment: str, cur: str = "UZS"):
-    return [serial(day), group, sub, amount, "", comment, cur, "VISA 9120 UZS"]
+    return [serial(day), group, sub, amount, "", comment, cur, "VISA 9090 UZS"]
 
 
 FACT = [

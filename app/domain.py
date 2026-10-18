@@ -203,7 +203,7 @@ def month_bounds(day: date) -> tuple[date, date]:
 
 
 def currency_of(source: str) -> str:
-    """Валюта источника — последние три буквы названия («VISA 9120 UZS» → UZS)."""
+    """Валюта источника — последние три буквы названия («VISA 9090 UZS» → UZS)."""
     return source.strip()[-3:].upper()
 
 
@@ -340,7 +340,7 @@ def resolve_source(
 ) -> str | None:
     """Источник из ответа AI → точное название из system.
 
-    AI пишет «*9120», «VISA 9120» или «HUMO» — ищем по четырём цифрам карты,
+    AI пишет «*9090», «VISA 9090» или «HUMO» — ищем по четырём цифрам карты,
     затем по совпадению названия; иначе берём выбранный пользователем источник.
     """
     if raw_source in sources:

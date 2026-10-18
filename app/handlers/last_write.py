@@ -29,7 +29,7 @@ from app.utils.keyboards import (
 
 
 def describe_write(last: dict, icons: dict[str, str] | None) -> str:
-    """«строку 4169: 48 000 UZS • 🍔 ЕДА (☕ кофе) • VISA 9120 UZS» или «строки 4169–4171»."""
+    """«строку 4169: 48 000 UZS • 🍔 ЕДА (☕ кофе) • VISA 9090 UZS» или «строки 4169–4171»."""
     rows: list[SheetRow] = last["rows"]
     if len(rows) == 1:
         row = rows[0]

@@ -23,13 +23,13 @@ SUBCATEGORIES = {
     "💳 СЧЕТА": ["переводы"],
     "💰 ДОХОДЫ": ["зарплата"],
 }
-SOURCES = ["VISA 9120 UZS", "UZCARD 5837 UZS", "VISA 4058 USD"]
+SOURCES = ["VISA 9090 UZS", "UZCARD 5656 UZS", "VISA 3434 USD"]
 
 
 class FakeSheets:
     """Таблица в памяти с тем же интерфейсом, что GoogleSheetsService."""
 
-    BALANCE_CELLS = {"VISA 9120 UZS": "N2", "UZCARD 5837 UZS": "N3"}
+    BALANCE_CELLS = {"VISA 9090 UZS": "N2", "UZCARD 5656 UZS": "N3"}
 
     def __init__(self) -> None:
         self.rows: list[list[Any]] = []
@@ -164,7 +164,7 @@ def gemini_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def manual_state(category: str = "🍔 ЕДА", sub: str = "кофе") -> dict[str, Any]:
-    return {"source": "VISA 9120 UZS", "category": category, "subcategory": sub}
+    return {"source": "VISA 9090 UZS", "category": category, "subcategory": sub}
 
 
 async def test_manual_expense_row() -> None:
@@ -175,7 +175,7 @@ async def test_manual_expense_row() -> None:
     [row] = sheets.rows
     assert row[:4] == [today, "🍔 ЕДА", "кофе", 48000.0]
     assert row[4] == BALANCE_FORMULA
-    assert row[5:] == ["латте", "UZS", "VISA 9120 UZS"]
+    assert row[5:] == ["латте", "UZS", "VISA 9090 UZS"]
     assert summary(update).startswith("✅ 48 000 UZS • 🍔 ЕДА (кофе)")
     assert "category" not in context.user_data
     update.message.delete.assert_awaited()
@@ -206,13 +206,13 @@ async def test_sms_in_usd_on_uzs_card_is_converted_and_balance_updated() -> None
             {
                 "amount": 12.21,
                 "currency": "USD",
-                "source": "*9120",
+                "source": "*9090",
                 "category": "🌛 ЕЖЕМЕСЯЧНО",
                 "subcategory": "подписка",
                 "comment": "JetBrains",
                 "date": "05.10.2026",
                 "balance": "15 000 000,50",
-                "card_identifier": "9120",
+                "card_identifier": "9090",
                 "direction": "expense",
             }
         ]
@@ -224,10 +224,10 @@ async def test_sms_in_usd_on_uzs_card_is_converted_and_balance_updated() -> None
     assert row[0] == "05.10.2026"
     assert row[3] == 146520.0
     assert row[5] == "JetBrains; ≈ 12.21 USD по курсу таблицы"
-    assert row[6:] == ["UZS", "VISA 9120 UZS"]
+    assert row[6:] == ["UZS", "VISA 9090 UZS"]
     assert sheets.cells == {"fact!N2": 15000000.5}
     assert "💳 15 000 000" in summary(update)
-    assert context.user_data["source"] == "VISA 9120 UZS"
+    assert context.user_data["source"] == "VISA 9090 UZS"
 
 
 async def test_bad_items_are_reported_not_written() -> None:
@@ -237,10 +237,10 @@ async def test_bad_items_are_reported_not_written() -> None:
             {
                 "amount": 30,
                 "currency": "SGD",
-                "source": "VISA 4058 USD",
+                "source": "VISA 3434 USD",
                 "comment": "Airalo",
             },
-            {"amount": 28000, "source": "UZCARD 5837 UZS", "category": "Прочее"},
+            {"amount": 28000, "source": "UZCARD 5656 UZS", "category": "Прочее"},
         ]
     )
     update, context, sheets = make_chat("три операции", {}, ai)
@@ -258,13 +258,13 @@ async def test_several_rows_are_written_in_one_request() -> None:
         [
             {
                 "amount": 10000,
-                "source": "VISA 9120 UZS",
+                "source": "VISA 9090 UZS",
                 "category": "🍔 ЕДА",
                 "subcategory": "кофе",
             },
             {
                 "amount": 20000,
-                "source": "VISA 9120 UZS",
+                "source": "VISA 9090 UZS",
                 "category": "🍔 ЕДА",
                 "subcategory": "кафе",
             },
@@ -289,10 +289,10 @@ async def test_sheet_failure_is_reported_without_crash() -> None:
     assert summary(update).startswith("❌ Не записал в Google Таблицу (1 шт.)")
 
 
-SMS = "Pokupka: OOO SHAVI CAFE, 48000.00 UZS, 06.10.2026 12:00, karta *9120"
+SMS = "Pokupka: OOO SHAVI CAFE, 48000.00 UZS, 06.10.2026 12:00, karta *9090"
 COFFEE = {
     "amount": 48000,
-    "source": "VISA 9120 UZS",
+    "source": "VISA 9090 UZS",
     "category": "🍔 ЕДА",
     "subcategory": "кофе",
     "comment": "Shavi",
@@ -345,10 +345,10 @@ async def test_manual_entries_may_repeat() -> None:
 @pytest.mark.parametrize(
     ("table", "expected"),
     [
-        (15_000_000.5, "🟰 VISA 9120 UZS: остаток сходится с банком"),
+        (15_000_000.5, "🟰 VISA 9090 UZS: остаток сходится с банком"),
         (
             14_900_000.0,
-            "⚠️ VISA 9120 UZS: в банке 15 000 000, в таблице 14 900 000 "
+            "⚠️ VISA 9090 UZS: в банке 15 000 000, в таблице 14 900 000 "
             "(разница 100 000)",
         ),
     ],
@@ -358,7 +358,7 @@ async def test_bank_balance_is_compared_with_the_table(
 ) -> None:
     ai = FakeAI([{**COFFEE, "balance": "15 000 000,50"}])
     update, context, sheets = make_chat(SMS, {}, ai)
-    sheets.table_balances = {"VISA 9120 UZS": table}
+    sheets.table_balances = {"VISA 9090 UZS": table}
     await messages.text_handler(update, context)
     assert expected in summary(update)
 
@@ -408,24 +408,24 @@ def visible(text: str) -> bool:
 
 
 async def test_source_button_confirms_the_card_and_shows_categories() -> None:
-    update, context, _ = make_chat("VISA 9120 UZS", {})
+    update, context, _ = make_chat("VISA 9090 UZS", {})
     await messages.text_handler(update, context)
 
     first, second = update.effective_chat.send_message.await_args_list
-    assert first.args[0] == "💳 VISA 9120 UZS"
-    assert second.args[0] == "💳 VISA 9120 UZS — выберите категорию"
-    assert context.user_data["source"] == "VISA 9120 UZS"
+    assert first.args[0] == "💳 VISA 9090 UZS"
+    assert second.args[0] == "💳 VISA 9090 UZS — выберите категорию"
+    assert context.user_data["source"] == "VISA 9090 UZS"
     keyboard = first.kwargs["reply_markup"].keyboard
-    assert any(button.text == "✅ VISA 9120 UZS" for row in keyboard for button in row)
+    assert any(button.text == "✅ VISA 9090 UZS" for row in keyboard for button in row)
 
 
 async def test_summary_shows_the_subcategory_icon() -> None:
     update, context, _ = make_chat("48000 латте", manual_state())
     context.bot_data["icons"] = {"кофе": "☕"}
     await messages.text_handler(update, context)
-    assert "🍔 ЕДА (☕ кофе) • VISA 9120 UZS" in summary(update)
+    assert "🍔 ЕДА (☕ кофе) • VISA 9090 UZS" in summary(update)
     assert (
-        context.bot_data["last_source"] == "VISA 9120 UZS"
+        context.bot_data["last_source"] == "VISA 9090 UZS"
     )  # карта на случай перезапуска
 
 
@@ -438,7 +438,7 @@ async def test_back_without_a_card_asks_to_choose_one() -> None:
 
 @pytest.mark.parametrize(
     ("user_data", "expected"),
-    [({"source": "UZCARD 5837 UZS"}, "💳 UZCARD 5837 UZS"), ({}, "Выберите карту:")],
+    [({"source": "UZCARD 5656 UZS"}, "💳 UZCARD 5656 UZS"), ({}, "Выберите карту:")],
 )
 async def test_menu_without_a_summary_still_has_text(
     user_data: dict[str, Any], expected: str
@@ -458,12 +458,12 @@ def test_no_invisible_message_texts_in_the_code() -> None:
         source = path.read_text(encoding="utf-8")
         found = [hex(ord(ch)) for ch in INVISIBLE if ch in source]
         assert not found, f"{path}: {found}"
-    assert not visible("ㅤ") and visible("💳 VISA 9120 UZS")
+    assert not visible("ㅤ") and visible("💳 VISA 9090 UZS")
 
 
 def coffee_row() -> Any:
     today = local_today(config.ANALYTICS_TIMEZONE)
-    return entry_row(48000.0, False, "латте", "VISA 9120 UZS", "🍔 ЕДА", "кофе", today)
+    return entry_row(48000.0, False, "латте", "VISA 9090 UZS", "🍔 ЕДА", "кофе", today)
 
 
 async def test_save_rows_reports_rows_and_answers_in_the_given_chat() -> None:
@@ -531,7 +531,7 @@ async def test_an_income_suggests_setting_a_share_aside(
     update, context, _ = make_chat("", {})
     today = local_today(config.ANALYTICS_TIMEZONE)
     salary = entry_row(
-        30_000_000.0, True, "", "VISA 9120 UZS", "💰 ДОХОДЫ", "зарплата", today
+        30_000_000.0, True, "", "VISA 9090 UZS", "💰 ДОХОДЫ", "зарплата", today
     )
     result = await messages.save_rows(
         context, update.effective_chat, [salary], [], "app:3"
@@ -551,7 +551,7 @@ async def test_an_income_not_written_suggests_nothing(
     context.bot_data["gs_service"] = BrokenSheets()
     today = local_today(config.ANALYTICS_TIMEZONE)
     salary = entry_row(
-        30_000_000.0, True, "", "VISA 9120 UZS", "💰 ДОХОДЫ", "зарплата", today
+        30_000_000.0, True, "", "VISA 9090 UZS", "💰 ДОХОДЫ", "зарплата", today
     )
     result = await messages.save_rows(
         context, update.effective_chat, [salary], [], "app:4"

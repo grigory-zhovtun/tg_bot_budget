@@ -26,7 +26,7 @@ def row(
     day: date, comment: str, amount: float, sub: str = "подписка", cur: str = "UZS"
 ):
     group = "🌛 ЕЖЕМЕСЯЧНО" if sub == "подписка" else "🏚️ ДОМ"
-    source = "VISA 4058 USD" if cur == "USD" else "VISA 9120 UZS"
+    source = "VISA 3434 USD" if cur == "USD" else "VISA 9090 UZS"
     return [serial(day), group, sub, amount, "", f"AI: {comment}", cur, source]
 
 
