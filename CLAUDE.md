@@ -38,7 +38,7 @@ app/
 ├── web/
 │   ├── server.py        # Starlette: POST /telegram (webhook → PTB update_queue), GET /health, security headers, PTB lifespan
 │   ├── auth.py          # Mini App auth: initData (HMAC with the bot token), signed launch links for the keyboard button, webhook secret
-│   ├── api.py           # /api/bootstrap, /api/expenses (entry_row → save_rows, idempotent by entry_id), /api/expenses/undo, /api/dashboard, /api/forecast, /api/calendar (POST, PUT/DELETE by ID)
+│   ├── api.py           # /api/bootstrap, /api/expenses (entry_row → save_rows, idempotent by entry_id), /api/expenses/undo, /api/dashboard, /api/forecast, /api/calendar (POST, PUT/DELETE by ID), /api/savings, /api/piggy (POST; PUT by ID; /save, /{id}/close|moves|exclude)
 │   └── schemas.py       # Pydantic models of the API
 ├── handlers/
 │   ├── common.py        # /start, keyboard helpers, message tracking
@@ -52,6 +52,7 @@ app/
 │   ├── live.py          # Reactions on the user's SMS (👀/👍/🤔) and «Думаю…» via send_message_draft (fallback 🔍)
 │   ├── last_write.py    # Buttons under a write summary: last:fix (start_fix), last:undo → confirm → undo_last
 │   ├── month.py         # Daily job: month plan tab exists (copy of the last one), owner notified
+│   ├── receipts.py      # Job every few minutes after writes: «Пришло к утру» (sync_receipts), then the piggy banks (sync_piggy)
 │   ├── balances.py      # Bank main-screen screenshots: «Проверка» + «Сверено», «Выровнять» buttons
 │   └── analytics.py     # /advice, /analytics, daily report
 ├── services/
@@ -63,6 +64,8 @@ app/
 │   ├── savings.py       # «Сводка»: the emergency fund («Заморожено» in months of the average spending of 3 full months, target CUSHION_MONTHS) and the savings rate (income − spending) / income of 6 full months; save_lines — «🛟 Отложите N %» in the write summary of an income
 │   ├── cards.py         # «Сводка»: card balances from the fact balance block (I name, J «Текущий баланс», N «Проверка», Q «Сверено»), the bank check
 │   ├── forecast.py      # Mini App «Прогноз»: money until the month end per currency and in total, plan and pace lines, list rows and calendar records as events; the days by fact up to today — evening, change, spending and income, totals and by article (`PastDay.articles`); today is what already happened
+│   ├── piggy.py         # Piggy banks: read_book («Копилки» + «Журнал копилок»), windows of spending, balances, the leveled plan by months, the 10 % split, savings_screen («Накопления»), distribute («Отложил…»)
+│   ├── piggy_sync.py    # Background piggy writes: a closed window → a journal row «потрачено в окне» and the next year's deadline, bot columns J and L, formulas I and K
 │   ├── calendar.py      # «Календарь» sheet: records (once, every day, days of the week, once a month), their days, closing by fact, sum hints
 │   ├── runway.py        # «💳 Сумы» card: the forecast's pace line in sums → last day, gap, dollars to exchange
 │   └── day_budget.py    # Daily limit from the month tab forecast block, frozen money, morning text
@@ -86,6 +89,8 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 
 **Calendar records**: the record window → `POST /api/calendar` (idempotent by `entry_id`), `PUT|DELETE /api/calendar/{id}` → `check_record` → `GoogleSheetsService.add_calendar_row|update_calendar_row|delete_calendar_row` (one write at a time — `CALENDAR_LOCK` in `bot_data`; row A:J RAW, found by ID in column A) → a fresh `forecast_out` and a note to the other user. Reading: `get_calendar()` (a copy for 60 s, reset by the bot's writes; a read during which the bot wrote is not kept) → `read_calendar` → `AnalyticsService._records()` → `month_forecast(..., records)` and `day_budget(..., records)`: `calendar_state` closes records by fact in the morning and now, `_book` reserves them in their articles, the open part goes out on its day (one-offs in both lines, repeats by plan only)
 
+**Piggy banks**: `GET /api/savings` → `AnalyticsService.savings(today, …)` → `read_book` + fact + the month tab → `savings_screen` (the money day is the last income day of the tab's list; the first plan month is the current one) → `api.savings_screen_out`. Writes (`/api/piggy…`, idempotent by `entry_id`, one at a time — `PIGGY_LOCK`) go through `GoogleSheetsService.add_piggy|update_piggy|add_piggy_moves` (RAW; formulas I and K are written USER_ENTERED), `mark_dirty` and a note to the other user; the answer is a fresh `savings_screen_out`. `sync_piggy` (the receipts job) closes windows and keeps J/L up to date
+
 **AI Parsing**: text/photo/document → `GeminiService.parse_transaction()` → each item validated by `domain.ParsedTransaction` → `domain.build_row` (source by card digits, currency conversion with rates from `system!H2:I10`, category/subcategory must exist in `system`, otherwise "🚧 РАЗНОЕ / неучтенка") → one `append_transactions` call → one summary message
 
 **Statement import**: PDF → `statements.pdf_text` → `is_kapitalbank_statement` → `parse_statement` (card by `******NNNN`, period, generation date) → basket in `user_data`, preview job after 4 s → `plan_import` (skip operations booked up to `system!G`, pair own transfers, categories from `MerchantBook` over fact, new shops → `GeminiService.categorize_merchants`, `reconcile`: exact duplicates skipped, `≈` rows corrected, `ВРЕМЕННАЯ` rows removed) → buttons `import:ok|no:<version>` → `apply_plan` (amount fixes → row deletions → append → marks)
@@ -104,6 +109,8 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
   - Balance block `I2:Q…`: I = source name, J = balance by the sheet, N = bank balance («Проверка», from SMS or a screenshot), O = N − J, P = −O, Q = «Сверено» (when N was written). The bot finds the row by source name.
 - **`system` sheet**: Column A: Categories, Column B: Subcategories, Column F: Sources (last 3 chars = currency code), G: statements loaded up to this day (written by the bot), H:I currency rates to UZS.
 - **`Календарь` sheet** (created by the bot with the first record): A ID (6 chars `a–z0–9`, a letter first), B date (`ДД.ММ.ГГГГ` text — the day of a one-off or the first day of a repeat), C repeat (`нет`, `каждый день`, `по дням недели`, `раз в месяц`), D days (`пн ср`), E group, F subcategory, G currency, H sum (> 0), I name, J who. Written RAW; can be edited by hand — the bot re-reads it at least once a minute (Mini App screens — within two minutes, at once on «Обновить» or a new launch), broken rows (and a row repeating an ID above it, e.g. a copied row) are skipped with a warning in the log.
+- **`Копилки` sheet** (created with the first piggy): A ID, B name, C target (empty — no target), D currency, E deadline (`ДД.ММ.ГГГГ`, empty — none), F repeat (`один раз`, `каждый год`), G group, H subcategory, I «Отложено» (formula: the journal's plus rows of the ID), J «Потрачено» (bot), K «Осталось» (formula I − J), L «В этом месяце» (bot), M who, N `закрыта`. Rows are found by ID; broken rows are shown as «Проверьте строку N»
+- **`Журнал копилок` sheet**: A date, B ID, C name, D sum (plus — saved, minus — taken), E currency, F what (`отложил`, `потратил`, `потрачено в окне`, `списал остаток`, `закрыта`, `исправление`, `не из копилки`), G who, H key (a fact row for «не из копилки», `окно:ДД.ММ.ГГГГ` for a closed window)
 - **Monthly sheets** ("Oct 26", `domain.month_title`): plan vs fact by Subcategory + Currency (`SUMIFS` on `fact` between the dates in `M1:M2`), used by `/advice`. Created by `GoogleSheetsService.ensure_month_tab` (duplicate of the latest month, new `M1:M2`, past months hidden).
 
 ## Environment Variables

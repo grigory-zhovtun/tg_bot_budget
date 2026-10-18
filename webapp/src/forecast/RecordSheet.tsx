@@ -9,6 +9,7 @@ import {
   type Repeat,
 } from "../api";
 import { amountValue, apiAmount } from "../entry/amount";
+import { FIELD, FieldError, cardCurrencies, chip, segment } from "../fields";
 import { longDay, shiftDay } from "../format";
 import AmountPad from "../plan/AmountPad";
 import { amountText } from "../plan/draft";
@@ -27,7 +28,6 @@ import { amount, isoDay } from "./view";
 
 const MAX_AHEAD_DAYS = 366; // как на сервере: не дальше чем через год
 const REPEATS: Repeat[] = ["once", "daily", "weekdays", "monthly"];
-const ORDER = ["UZS", "USD", "RUB"];
 // поля с ошибкой под собой; остальные ошибки — над кнопкой
 const FIELDS = [
   "currency",
@@ -39,7 +39,6 @@ const FIELDS = [
   "weekdays",
   "date",
 ];
-const FIELD = "rounded-xl bg-section px-3 py-2 text-base text-text";
 
 interface Props {
   api: Api;
@@ -49,31 +48,6 @@ interface Props {
   record: CalendarRecord | null; // null — новая запись
   onSaved: (fresh: Forecast) => void;
   onClose: () => void;
-}
-
-/** Валюты карт: UZS, USD, RUB, остальные по алфавиту; плюс валюта правки. */
-function cardCurrencies(boot: Bootstrap, extra: string | undefined): string[] {
-  const codes = new Set(boot.sources.map((source) => source.currency));
-  if (extra) codes.add(extra);
-  if (codes.size === 0) codes.add("UZS");
-  const rest = [...codes].filter((code) => !ORDER.includes(code)).sort();
-  return [...ORDER.filter((code) => codes.has(code)), ...rest];
-}
-
-function chip(on: boolean): string {
-  return `rounded-full px-3 py-1.5 text-sm ${
-    on ? "bg-button text-button-text" : "bg-section"
-  }`;
-}
-
-function segment(on: boolean): string {
-  return `rounded-lg px-1 py-1.5 text-sm font-medium ${
-    on ? "bg-bg shadow-sm" : "text-hint"
-  }`;
-}
-
-function FieldError({ text }: { text: string | undefined }) {
-  return text ? <p className="text-sm text-danger">{text}</p> : null;
 }
 
 /** Окно записи календаря: статья, сумма с подсказками, название, повтор, дата. */

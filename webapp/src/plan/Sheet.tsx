@@ -16,7 +16,8 @@ export default function Sheet({ title, onClose, children }: Props) {
       aria-label={title}
     >
       <div className="flex-1" onClick={onClose} />
-      <div className="mx-auto flex max-h-[92vh] w-full max-w-md flex-col gap-3 overflow-y-auto rounded-t-3xl bg-bg p-4 pb-6">
+      {/* длинное содержимое прокручивается, а не сжимает кнопки (shrink-0 у детей) */}
+      <div className="mx-auto flex max-h-[92vh] w-full max-w-md flex-col gap-3 overflow-y-auto rounded-t-3xl bg-bg p-4 pb-6 *:shrink-0">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-lg font-semibold">{title}</h3>
           <button

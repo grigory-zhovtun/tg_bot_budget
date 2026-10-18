@@ -1,0 +1,197 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import type {
+  Api,
+  Bootstrap,
+  Enough,
+  Piggy,
+  SavingsMonth,
+  SavingsScreen,
+} from "../api";
+import { short } from "../format";
+import { useResource, useStore } from "../store";
+import CushionCard from "./CushionCard";
+import PiggyCard from "./PiggyCard";
+import PiggySheet from "./PiggySheet";
+import SaveSheet from "./SaveSheet";
+import SavingsCard from "./SavingsCard";
+import YearPlan from "./YearPlan";
+import { enoughText, MONTHS_IN, monthIndex, shareText } from "./piggyText";
+
+interface Props {
+  api: Api;
+  boot: Bootstrap | null; // нет каталога — окна копилки не открыть
+  refresh: number; // растёт с каждым «Обновить» «Сводки» — читать таблицу заново
+}
+
+interface SetAsideProps {
+  month: SavingsMonth;
+  enough: Enough | null;
+  names: Record<string, string>;
+  onSave: (() => void) | null; // null — откладывать нечего
+}
+
+/** «В октябре отложить»: взносы копилок, доля 10 % и хватает ли на жизнь. */
+function SetAside({ month, enough, names, onSave }: SetAsideProps) {
+  const title = `В ${MONTHS_IN[monthIndex(month.month)] ?? month.month} отложить`;
+  return (
+    <section
+      aria-label={title}
+      className="flex flex-col gap-1 rounded-2xl bg-section p-4"
+    >
+      <h2 className="font-semibold">{title}</h2>
+      <p>
+        {month.piggy > 0
+          ? `в копилки по плану ${short(month.piggy)}, осталось ${short(month.piggy_left)}`
+          : "в копилки в этом месяце — ничего"}
+      </p>
+      {month.share > 0 && (
+        <p>{`10 % от поступлений ≈ ${short(month.share)} — ${shareText(month, names)}`}</p>
+      )}
+      {enough && (
+        <p
+          className={`text-sm font-semibold ${enough.gap < 0 ? "text-danger" : "text-ok"}`}
+        >
+          {enoughText(enough)}
+        </p>
+      )}
+      {onSave && (
+        <button
+          type="button"
+          className="mt-2 h-11 rounded-xl bg-button font-semibold text-button-text"
+          onClick={onSave}
+        >
+          Отложил…
+        </button>
+      )}
+    </section>
+  );
+}
+
+function Skeleton() {
+  return (
+    <div className="flex flex-col gap-3" aria-label="Загрузка">
+      {[0, 1, 2].map((key) => (
+        <div key={key} className="h-20 animate-pulse rounded-2xl bg-section" />
+      ))}
+    </div>
+  );
+}
+
+/** Вкладка «Накопления»: что отложить, подушка, копилки, план на год и норма. */
+export default function SavingsTab({ api, boot, refresh }: Props) {
+  const store = useStore();
+  const load = useCallback((fresh: boolean) => api.savings(fresh), [api]);
+  const { data, loading, error, reload } = useResource<SavingsScreen>(
+    store,
+    "savings",
+    load,
+    { failure: "Не получилось загрузить накопления" },
+  );
+  const [opened, setOpened] = useState<Piggy | "new" | null>(null);
+  const [saving, setSaving] = useState(false);
+  const saved = useCallback(
+    (fresh: SavingsScreen) => {
+      store.put("savings", fresh);
+      setOpened(null);
+      setSaving(false);
+    },
+    [store],
+  );
+  // «Обновить» «Сводки» после открытия вкладки — читать таблицу заново
+  const seen = useRef(refresh);
+  useEffect(() => {
+    if (refresh !== seen.current) {
+      seen.current = refresh;
+      reload(true);
+    }
+  }, [refresh, reload]);
+
+  if (!data) {
+    if (error) {
+      return (
+        <div className="flex flex-col items-start gap-2" role="alert">
+          <p>{error}</p>
+          <button type="button" className="text-link" onClick={() => reload()}>
+            Повторить
+          </button>
+        </div>
+      );
+    }
+    return loading ? <Skeleton /> : null;
+  }
+  if (data.status === "no_month_tab") {
+    return <p>Вкладки месяца нет — бот создаёт её 1-го числа.</p>;
+  }
+  const names = Object.fromEntries(
+    data.piggies.map((piggy) => [piggy.id, piggy.name]),
+  );
+  // «Отложил…» раскладывает сумму по взносам месяца — без них класть некуда
+  const canSave = data.piggies.some(
+    (piggy) => piggy.status !== "broken" && piggy.left_this_month > 0,
+  );
+  return (
+    <>
+      {data.month && (
+        <SetAside
+          month={data.month}
+          enough={data.enough}
+          names={names}
+          onSave={canSave ? () => setSaving(true) : null}
+        />
+      )}
+      {data.cushion && <CushionCard cushion={data.cushion} />}
+      <section className="flex flex-col gap-2" aria-label="Копилки">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-semibold">🐷 Копилки</h2>
+          {boot && (
+            <button
+              type="button"
+              className="font-semibold text-link"
+              onClick={() => setOpened("new")}
+            >
+              ＋ Копилка
+            </button>
+          )}
+        </div>
+        {data.piggies.length > 0 ? (
+          <ul className="flex flex-col gap-2" aria-label="Копилки">
+            {data.piggies.map((piggy) => (
+              <PiggyCard
+                key={`${piggy.row}-${piggy.id}`}
+                piggy={piggy}
+                onOpen={boot ? setOpened : undefined}
+              />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm">
+            Заведите копилку на Новый год, отпуск или другую большую трату — бот
+            разложит взносы по месяцам
+          </p>
+        )}
+      </section>
+      {data.plan.length > 0 && <YearPlan plan={data.plan} names={names} />}
+      {data.savings && <SavingsCard savings={data.savings} />}
+      {boot && opened && (
+        <PiggySheet
+          key={opened === "new" ? "new" : opened.id}
+          api={api}
+          boot={boot}
+          data={data}
+          piggy={opened === "new" ? null : opened}
+          onSaved={saved}
+          onClose={() => setOpened(null)}
+        />
+      )}
+      {saving && (
+        <SaveSheet
+          api={api}
+          boot={boot}
+          data={data}
+          onSaved={saved}
+          onClose={() => setSaving(false)}
+        />
+      )}
+    </>
+  );
+}

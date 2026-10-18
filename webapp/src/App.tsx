@@ -145,6 +145,7 @@ export default function App({ api }: { api: Api }) {
       .then(() => {
         if (!alive) return;
         void store.ensure("forecast", api.forecast).catch(quiet);
+        void store.ensure("savings", api.savings).catch(quiet);
         if (currentMonth) {
           void store
             .ensure(`plan:${currentMonth}`, (fresh) =>
@@ -200,7 +201,7 @@ export default function App({ api }: { api: Api }) {
         {tab === "entry" && boot && (
           <EntryScreen api={api} boot={boot} onCatalogChanged={reload} />
         )}
-        {tab === "dashboard" && <DashboardScreen api={api} />}
+        {tab === "dashboard" && <DashboardScreen api={api} boot={boot} />}
         {tab === "dashboard" && boot && (
           <HomeScreenButton botUsername={boot.bot_username} />
         )}

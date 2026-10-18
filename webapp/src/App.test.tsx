@@ -111,6 +111,14 @@ describe("App", () => {
     expect(api.dashboard).toHaveBeenCalledWith(true);
   });
 
+  it("loads «Накопления» in the background after the summary", async () => {
+    const api = fakeApi();
+    render(<App api={api} />);
+    await waitFor(() => {
+      expect(api.savings).toHaveBeenCalledWith(false);
+    });
+  });
+
   it("loads the forecast and the plan in the background", async () => {
     const api = fakeApi();
     const user = userEvent.setup();
@@ -190,6 +198,7 @@ describe("App", () => {
           dashboard: vi.fn<Api["dashboard"]>(refused),
           forecast: vi.fn<Api["forecast"]>(refused),
           plan: vi.fn<Api["plan"]>(refused),
+          savings: vi.fn<Api["savings"]>(refused),
         })}
       />,
     );

@@ -8,6 +8,7 @@
 import asyncio
 import logging
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -26,11 +27,22 @@ from app.handlers.messages import save_rows, seen_input
 from app.handlers.month import describe, tell_owner
 from app.handlers.receipts import mark_dirty
 from app.handlers.undo import undo_last
-from app.services.analytics_service import TRANSFERS_GROUP, money
+from app.services.analytics_service import TRANSFERS_GROUP, SavingsTab, money
 from app.services.calendar import CalendarRecord, new_id, read_calendar, record_row
 from app.services.cards import CardBalance
 from app.services.dashboard import Dashboard
 from app.services.forecast import DayArticle, Dip, Evening, MonthForecast, PastDay
+from app.services.piggy import (
+    CLOSED,
+    NOT_FROM,
+    SAVED,
+    SPENT,
+    WRITE_OFF,
+    YEARLY,
+    Piggy,
+    PiggyState,
+    distribute,
+)
 from app.services.plan import (
     ArticleChange,
     Catalog,
@@ -56,6 +68,7 @@ from app.web.auth import WebUser, authenticate
 from app.web.schemas import (
     AdviceApplyOut,
     AdvicePointOut,
+    AmountOut,
     BootstrapOut,
     CalendarIn,
     CalendarRecordOut,
@@ -67,8 +80,10 @@ from app.web.schemas import (
     DayArticleOut,
     DayPointOut,
     DaySpendOut,
+    EnoughOut,
     ErrorEnvelope,
     ErrorOut,
+    ExcludeIn,
     ExpenseIn,
     ExpenseOut,
     ForecastArticleOut,
@@ -87,6 +102,11 @@ from app.web.schemas import (
     GroupPlanOut,
     HintOut,
     MessageOut,
+    MonthPlanOut,
+    MoveIn,
+    MoveOut,
+    PiggyIn,
+    PiggyOut,
     PlanAddableOut,
     PlanAdviceIn,
     PlanAdviceOut,
@@ -100,9 +120,13 @@ from app.web.schemas import (
     PlanSaveIn,
     RowsOut,
     RunwayOut,
+    SaveIn,
     SavingMonthOut,
+    SavingsMonthOut,
     SavingsOut,
+    SavingsScreenOut,
     SourceOut,
+    SpendOut,
     SpentGroupOut,
     SpentItemOut,
     SubcategoryOut,
@@ -152,6 +176,27 @@ ADVICE_SECONDS = 60
 # вкладками не ждёт Google. Запись бота копии сбрасывает, а ?fresh=1 («Обновить»
 # и первое открытие приложения) читает таблицу заново
 SCREEN_COPY_AGE = 120.0
+PIGGY_LOCK = "piggy_lock"  # bot_data: в листы копилок пишет один запрос за раз
+PIGGY_ENTRIES = "piggy_entries"  # user_data: entry_id уже записанных правок копилок
+PIGGY_YEARS = 5  # срок копилки — не дальше чем через 5 лет
+PIGGY_FIELDS = {
+    "name": "Название — от 1 до 40 символов",
+    "target": "Цель — больше нуля, до двух знаков после запятой",
+    "currency": "Такой валюты нет у карт",
+    "deadline": "Срок — не раньше сегодня и не дальше чем через 5 лет",
+    "repeat": "Каждый год — только со сроком",
+    "group": "Такой статьи нет — обновите приложение",
+    "subcategory": "Такой подкатегории нет — обновите приложение",
+    "amount": "Сумма — больше нуля",
+    "kind": "Такого движения нет — обновите приложение",
+    "key": "Трата не подходит — обновите «Накопления»",
+}
+PIGGY_GONE = "Копилку уже закрыли — обновите «Накопления»"
+SPEND_GONE = "Трата изменилась — обновите «Накопления»"
+CURRENCY_LOCKED = (
+    "Валюту не поменять: в копилке есть движения. Закройте её и заведите новую"
+)
+KIND_TEXT = {"saved": SAVED, "spent": SPENT, "write_off": WRITE_OFF}
 
 
 def error_response(
@@ -280,6 +325,221 @@ def cushion_out(cushion: Cushion | None) -> CushionOut | None:
     )
 
 
+def amount_text(value: float) -> str:
+    """«12 000 000», «210», «210,50» — для заметок и ошибок."""
+    return money(value) if value == int(value) else f"{value:.2f}".replace(".", ",")
+
+
+def piggy_text(
+    name: str,
+    target: float | None,
+    currency: str,
+    deadline: date | None,
+    yearly: bool,
+) -> str:
+    """«Новый год 12 000 000 UZS к 20.12, каждый год», «Машина, без срока»."""
+    text = name if target is None else f"{name} {amount_text(target)} {currency}"
+    if deadline is None:
+        return f"{text}, без срока"
+    text += f" к {deadline:%d.%m}"
+    return f"{text}, каждый год" if yearly else text
+
+
+def piggy_note(action: str, author: str, text: str) -> str:
+    """«🐷 Иван — новая копилка: …»; без имени — «🐷 Новая копилка: …»."""
+    head = f"{author} — {action}" if author else action[:1].upper() + action[1:]
+    return f"🐷 {head}: {text}"
+
+
+def piggy_error(fields: set[str] | dict[str, str]) -> JSONResponse:
+    named = (
+        fields
+        if isinstance(fields, dict)
+        else {
+            name: PIGGY_FIELDS.get(name, "Повторите запись") for name in sorted(fields)
+        }
+    )
+    return error_response(422, "validation", "Проверьте введённые данные", named)
+
+
+def _years_later(day: date, years: int) -> date:
+    try:
+        return day.replace(year=day.year + years)
+    except ValueError:  # 29 февраля
+        return day.replace(year=day.year + years, day=28)
+
+
+def check_piggy(
+    body: PiggyIn, bot_data: Mapping[str, Any], today: date, current: Piggy | None
+) -> set[str]:
+    """Поля копилки, которые не подходят: валюта карт, срок с сегодня и не дальше
+    5 лет (у правки можно прежний), «каждый год» только со сроком, статья трат."""
+    bad: set[str] = set()
+    cards = {currency_of(source) for source in bot_data.get("sources", [])}
+    if body.currency.upper() not in cards:
+        bad.add("currency")
+    if body.deadline is not None:
+        kept = current is not None and current.deadline == body.deadline
+        latest = _years_later(today, PIGGY_YEARS)
+        if not kept and not today <= body.deadline <= latest:
+            bad.add("deadline")
+    elif body.repeat == "yearly":
+        bad.add("repeat")
+    if body.group or body.subcategory:
+        groups: list[str] = bot_data.get("categories", [])
+        subcategories: dict[str, list[str]] = bot_data.get("subcategories", {})
+        if body.group not in groups or body.group in CLOSED_GROUPS:
+            bad.add("group")
+        elif body.subcategory not in subcategories.get(body.group or "", []):
+            bad.add("subcategory")
+    return bad
+
+
+def piggy_cells(body: PiggyIn, author: str) -> dict[str, Any]:
+    """Колонки владельца B–H и M; формулы и колонки бота не трогаются."""
+    repeat = YEARLY if body.repeat == "yearly" else "один раз"
+    return {
+        "B": body.name,
+        "C": float(body.target) if body.target is not None else "",
+        "D": body.currency.upper(),
+        "E": f"{body.deadline:%d.%m.%Y}" if body.deadline else "",
+        "F": repeat if body.deadline else "",
+        "G": body.group or "",
+        "H": body.subcategory or "",
+        "M": author,
+    }
+
+
+def piggy_row(piggy_id: str, body: PiggyIn, author: str) -> list[Any]:
+    cells = piggy_cells(body, author)
+    return [piggy_id, *(cells[c] for c in "BCDEFGH"), "", "", "", "", author, ""]
+
+
+def move_row(
+    day: date, piggy: Piggy, amount: float, kind: str, author: str, key: str = ""
+) -> list[Any]:
+    """Строка журнала копилок: сумма в валюте копилки со знаком, округлённая, как
+    сумма валюты (без хвостов вида 66.77000000000001 и без «-0»)."""
+    rounded = _rounded(amount, piggy.currency) or 0.0
+    return [f"{day:%d.%m.%Y}", piggy.id, piggy.name, rounded, piggy.currency, kind,
+            author, key]  # fmt: skip
+
+
+def piggy_out(state: PiggyState) -> PiggyOut:
+    piggy, balance, code = state.piggy, state.balance, state.piggy.currency
+    return PiggyOut(
+        id=piggy.id,
+        row=piggy.row,
+        name=piggy.name,
+        target=piggy.target,
+        currency=code,
+        deadline=piggy.deadline,
+        repeat="yearly" if piggy.yearly else "once",
+        group=piggy.group,
+        subcategory=piggy.subcategory,
+        author=piggy.author,
+        saved=_rounded(balance.saved, code),
+        spent=_rounded(balance.spent, code),
+        balance=_rounded(balance.left, code),
+        collected=_rounded(balance.collected, code),
+        this_month=state.this_month,
+        left_this_month=_rounded(state.left_this_month, code),
+        status=state.status,  # type: ignore[arg-type]
+        short=_rounded(state.short, code),
+        leftover=_rounded(state.leftover, code),
+        error=piggy.error,
+        history=[
+            MoveOut(day=move.day, amount=move.amount, kind=move.kind, who=move.who)
+            for move in state.history
+        ],
+        spends=[
+            SpendOut(
+                key=item.key,
+                day=item.day,
+                group=item.group,
+                subcategory=item.subcategory,
+                amount=_rounded(item.amount, code),
+            )
+            for item in balance.spends
+        ],
+    )
+
+
+def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOut:
+    """«Накопления» для экрана; без вкладки месяца — только статус."""
+    if found is None:
+        return SavingsScreenOut(status="no_month_tab", today=today)
+    screen, savings, rates = found
+    first = screen.plan[0] if screen.plan else None
+    month = None
+    if first is not None:
+        left = sum(
+            state.left_this_month * rates.to_uzs.get(state.piggy.currency, 0.0)
+            for state in screen.piggies
+            if state.piggy.deadline is not None
+        )
+        month = SavingsMonthOut(
+            month=f"{first.month:%Y-%m}",
+            piggy=float(round(first.total)),
+            piggy_left=float(round(left)),
+            share=float(round(first.cushion + sum(first.goals.values()))),
+            share_to=screen.share_to,  # type: ignore[arg-type]
+            goals=[
+                AmountOut(id=key, amount=float(round(value)))
+                for key, value in first.goals.items()
+            ],
+        )
+    cushion = cushion_out(screen.cushion)
+    if cushion is not None:
+        cushion = cushion.model_copy(
+            update={
+                "frozen": (
+                    None
+                    if screen.frozen is None
+                    else _rounded(screen.frozen, cushion.currency)
+                ),
+                "piggies": _rounded(screen.envelopes, cushion.currency),
+                "over": _rounded(screen.over, cushion.currency),
+            }
+        )
+    return SavingsScreenOut(
+        status="ok",
+        today=today,
+        month=month,
+        cushion=cushion,
+        piggies=[piggy_out(state) for state in screen.piggies],
+        plan=[
+            MonthPlanOut(
+                month=f"{item.month:%Y-%m}",
+                total=float(round(item.total)),
+                items=[
+                    AmountOut(id=key, amount=float(round(value)))
+                    for key, value in item.items.items()
+                ],
+                cushion=float(round(item.cushion)),
+                goals=[
+                    AmountOut(id=key, amount=float(round(value)))
+                    for key, value in item.goals.items()
+                ],
+                ready=list(item.ready),
+            )
+            for item in screen.plan
+        ],
+        enough=(
+            None
+            if screen.enough is None
+            else EnoughOut(
+                **{
+                    key: float(round(value))
+                    for key, value in asdict(screen.enough).items()
+                }
+            )
+        ),
+        savings=savings_out(savings),
+        rates=dict(rates.to_uzs),
+    )
+
+
 def dashboard_out(
     found: Dashboard | None, today: date, icons: dict[str, str]
 ) -> DashboardOut:
@@ -357,7 +617,6 @@ def dashboard_out(
             untracked=untracked,
             cards=cards,
             categories=joined,
-            savings=savings_out(found.savings),
         )
     runway = None
     if budget.runway is not None:
@@ -426,8 +685,6 @@ def dashboard_out(
         untracked=untracked,
         cards=cards,
         categories=joined,
-        cushion=cushion_out(found.cushion),
-        savings=savings_out(found.savings),
     )
 
 
@@ -1092,6 +1349,324 @@ def routes(application: Application) -> list[Route]:
         )
         return await fresh_forecast(user.id)
 
+    def piggy_lock() -> asyncio.Lock:
+        """Записи в листы копилок — по одной: первая копилка создаёт листы, а ID
+        новой берётся из прочитанного списка."""
+        return application.bot_data.setdefault(PIGGY_LOCK, asyncio.Lock())
+
+    def catalog() -> tuple[set[str], list[str], dict[str, list[str]]]:
+        bot_data = application.bot_data
+        cards = {currency_of(source) for source in bot_data.get("sources", [])}
+        return (
+            cards or {"UZS"},
+            bot_data.get("categories", []),
+            bot_data.get("subcategories", {}),
+        )
+
+    async def read_savings(max_age: float) -> SavingsTab | None:
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        analytics = application.bot_data["analytics_service"]
+        return await asyncio.to_thread(analytics.savings, today, *catalog(), max_age)
+
+    async def fresh_savings(user_id: int, max_age: float = 0.0) -> JSONResponse:
+        """«Накопления» ответом: после записи — по таблице заново, экрану — из копии."""
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        try:
+            found = await read_savings(max_age)
+        except Exception:
+            logger.exception("Savings failed for user_id=%s", user_id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        return JSONResponse(savings_screen_out(found, today).model_dump(mode="json"))
+
+    async def savings(request: Request) -> JSONResponse:
+        user = current_user(request)
+        return await fresh_savings(user.id, screen_age(request))
+
+    async def piggy_body(request: Request, model: Any) -> Any:
+        try:
+            return model.model_validate_json(await request.body() or b"{}")
+        except ValidationError as error:
+            return piggy_error(
+                {str(e["loc"][0]) if e["loc"] else "body" for e in error.errors()}
+            )
+
+    def first_time(user_id: int, entry_id: Any) -> tuple[dict[str, None], str | None]:
+        """Ключ правки для повтора нажатия; None — ключа нет или правка уже была."""
+        entries: dict[str, None] = user_context(
+            application, user_id
+        ).user_data.setdefault(PIGGY_ENTRIES, {})
+        return entries, None if entry_id is None else str(entry_id)
+
+    def remember(entries: dict[str, None], key: str | None) -> None:
+        if key is not None:
+            entries[key] = None
+            while len(entries) > ENTRY_LIMIT:
+                entries.pop(next(iter(entries)))
+
+    def state_of(found: SavingsTab | None, piggy_id: str) -> PiggyState | None:
+        if found is None:
+            return None
+        return next(
+            (item for item in found.screen.piggies if item.piggy.id == piggy_id), None
+        )
+
+    async def written(user_id: int, author: str, note: str) -> JSONResponse:
+        """После записи: фоновая запись «Потрачено» и взноса, заметка второму."""
+        mark_dirty(application.bot_data)
+        await notify_others(application.bot, user_id, piggy_note_text(author, note))
+        return await fresh_savings(user_id)
+
+    def piggy_note_text(author: str, note: str) -> str:
+        action, text = note.split("|", 1)
+        return piggy_note(action, author, text)
+
+    async def add_piggy(request: Request) -> JSONResponse:
+        user = current_user(request)
+        logger.info("Piggy add by user_id=%s", user.id)
+        body = await piggy_body(request, PiggyIn)
+        if isinstance(body, JSONResponse):
+            return body
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        if bad := check_piggy(body, application.bot_data, today, None):
+            return piggy_error(bad)
+        entries, key = first_time(user.id, body.entry_id)
+        if key is not None and key in entries:
+            return await fresh_savings(user.id)  # повтор нажатия: строка уже есть
+        remember(entries, key)
+        author = await author_name(application.bot, user) or ""
+        gs = application.bot_data["gs_service"]
+        try:
+            async with piggy_lock():
+                rows, _ = await asyncio.to_thread(gs.get_piggy)
+                taken = {str(row[0]).strip() for row in rows[1:] if row}
+                piggy_id = new_id(taken)
+                await asyncio.to_thread(gs.add_piggy, piggy_row(piggy_id, body, author))
+        except Exception:
+            if key is not None:
+                entries.pop(key, None)
+            logger.exception("Piggy write failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        logger.info("Piggy %s added by user_id=%s", piggy_id, user.id)
+        text = piggy_text(
+            body.name,
+            None if body.target is None else float(body.target),
+            body.currency.upper(),
+            body.deadline,
+            body.repeat == "yearly",
+        )
+        return await written(user.id, author, f"новая копилка|{text}")
+
+    async def update_piggy(request: Request) -> JSONResponse:
+        user = current_user(request)
+        piggy_id = request.path_params["piggy_id"]
+        logger.info("Piggy %s update by user_id=%s", piggy_id, user.id)
+        body = await piggy_body(request, PiggyIn)
+        if isinstance(body, JSONResponse):
+            return body
+        try:
+            current = state_of(await read_savings(SCREEN_COPY_AGE), piggy_id)
+        except Exception:
+            logger.exception("Savings failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if current is None:
+            return error_response(404, "piggy_not_found", PIGGY_GONE)
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        if bad := check_piggy(body, application.bot_data, today, current.piggy):
+            return piggy_error(bad)
+        if body.currency.upper() != current.piggy.currency and current.history:
+            return piggy_error({"currency": CURRENCY_LOCKED})
+        author = await author_name(application.bot, user) or ""
+        gs = application.bot_data["gs_service"]
+        try:
+            async with piggy_lock():
+                found = await asyncio.to_thread(
+                    gs.update_piggy, piggy_id, piggy_cells(body, author)
+                )
+        except Exception:
+            logger.exception("Piggy write failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if not found:
+            return error_response(404, "piggy_not_found", PIGGY_GONE)
+        text = piggy_text(
+            body.name,
+            None if body.target is None else float(body.target),
+            body.currency.upper(),
+            body.deadline,
+            body.repeat == "yearly",
+        )
+        return await written(user.id, author, f"копилка изменена|{text}")
+
+    async def close_piggy(request: Request) -> JSONResponse:
+        user = current_user(request)
+        piggy_id = request.path_params["piggy_id"]
+        logger.info("Piggy %s close by user_id=%s", piggy_id, user.id)
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        author = await author_name(application.bot, user) or ""
+        gs = application.bot_data["gs_service"]
+        try:
+            async with piggy_lock():
+                current = state_of(await read_savings(SCREEN_COPY_AGE), piggy_id)
+                found = current is not None
+                if current is not None:
+                    left = current.balance.left
+                    if left > 0:  # остаток возвращается в подушку
+                        await asyncio.to_thread(
+                            gs.add_piggy_moves,
+                            [move_row(today, current.piggy, -left, CLOSED, author)],
+                        )
+                    found = await asyncio.to_thread(
+                        gs.update_piggy, piggy_id, {"N": f"{today:%d.%m.%Y}"}
+                    )
+        except Exception:
+            logger.exception("Piggy write failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if current is None or not found:
+            return error_response(404, "piggy_not_found", PIGGY_GONE)
+        name = current.piggy.name
+        return await written(
+            user.id, author, f"копилка закрыта|{name} (остаток — в подушку)"
+        )
+
+    async def move_piggy(request: Request) -> JSONResponse:
+        user = current_user(request)
+        piggy_id = request.path_params["piggy_id"]
+        body = await piggy_body(request, MoveIn)
+        if isinstance(body, JSONResponse):
+            return body
+        entries, key = first_time(user.id, body.entry_id)
+        if key is not None and key in entries:
+            return await fresh_savings(user.id)
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        author = await author_name(application.bot, user) or ""
+        gs = application.bot_data["gs_service"]
+        amount, too_much = float(body.amount), None
+        try:
+            async with piggy_lock():
+                current = state_of(await read_savings(SCREEN_COPY_AGE), piggy_id)
+                if current is not None:
+                    left = current.balance.left
+                    if body.kind != "saved" and amount > left + 1e-9:
+                        too_much = left  # остаток копилки не уходит ниже нуля
+                    else:
+                        signed = amount if body.kind == "saved" else -amount
+                        await asyncio.to_thread(
+                            gs.add_piggy_moves,
+                            [
+                                move_row(
+                                    today,
+                                    current.piggy,
+                                    signed,
+                                    KIND_TEXT[body.kind],
+                                    author,
+                                )
+                            ],
+                        )
+                        remember(entries, key)
+        except Exception:
+            logger.exception("Piggy write failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if current is None:
+            return error_response(404, "piggy_not_found", PIGGY_GONE)
+        code = current.piggy.currency
+        if too_much is not None:
+            return piggy_error(
+                {"amount": f"В копилке только {amount_text(too_much)} {code}"}
+            )
+        text = f"{current.piggy.name} {amount_text(amount)} {code}"
+        return await written(user.id, author, f"{KIND_TEXT[body.kind]}|{text}")
+
+    async def save_piggies(request: Request) -> JSONResponse:
+        user = current_user(request)
+        body = await piggy_body(request, SaveIn)
+        if isinstance(body, JSONResponse):
+            return body
+        currency = body.currency.upper()
+        if currency not in catalog()[0]:
+            return piggy_error({"currency"})
+        entries, key = first_time(user.id, body.entry_id)
+        if key is not None and key in entries:
+            return await fresh_savings(user.id)
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        author = await author_name(application.bot, user) or ""
+        gs = application.bot_data["gs_service"]
+        chosen: list[tuple[Piggy, float]] = []
+        try:
+            async with piggy_lock():
+                found = await read_savings(SCREEN_COPY_AGE)
+                if found is not None:
+                    named = {item.piggy.id: item.piggy for item in found.screen.piggies}
+                    chosen = [
+                        (named[piggy_id], amount)
+                        for piggy_id, amount in distribute(
+                            found.screen, float(body.amount), currency, found.rates
+                        )
+                        if amount > 0
+                    ]
+                if chosen:
+                    await asyncio.to_thread(
+                        gs.add_piggy_moves,
+                        [move_row(today, piggy, amount, SAVED, author)
+                         for piggy, amount in chosen],  # fmt: skip
+                    )
+                remember(entries, key)
+        except Exception:
+            logger.exception("Piggy write failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if not chosen:  # всё — подушке: в журнал писать нечего
+            return await fresh_savings(user.id)
+        text = ", ".join(
+            f"{piggy.name} {amount_text(amount)} {piggy.currency}"
+            for piggy, amount in chosen
+        )
+        return await written(user.id, author, f"{SAVED}|{text}")
+
+    async def exclude_spend(request: Request) -> JSONResponse:
+        user = current_user(request)
+        piggy_id = request.path_params["piggy_id"]
+        body = await piggy_body(request, ExcludeIn)
+        if isinstance(body, JSONResponse):
+            return body
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        author = await author_name(application.bot, user) or ""
+        gs = application.bot_data["gs_service"]
+        spend, marked = None, False
+        try:
+            async with piggy_lock():
+                current = state_of(await read_savings(SCREEN_COPY_AGE), piggy_id)
+                if current is not None:
+                    spend = next(
+                        (s for s in current.balance.spends if s.key == body.key), None
+                    )
+                    if spend is not None:
+                        await asyncio.to_thread(
+                            gs.add_piggy_moves,
+                            [move_row(today, current.piggy, 0, NOT_FROM, author,
+                                      body.key)],  # fmt: skip
+                        )
+                    else:  # второе нажатие: отметка уже в журнале
+                        _, journal = await asyncio.to_thread(gs.get_piggy)
+                        marked = any(
+                            len(row) > 7
+                            and str(row[5]).strip().lower() == NOT_FROM
+                            and str(row[7]) == body.key
+                            for row in journal[1:]
+                        )
+        except Exception:
+            logger.exception("Piggy write failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        if current is None:
+            return error_response(404, "piggy_not_found", PIGGY_GONE)
+        if spend is None:
+            if marked:
+                return await fresh_savings(user.id)
+            return error_response(404, "spend_not_found", SPEND_GONE)
+        _, group = leading_emoji(spend.group)
+        text = (
+            f"{spend.day:%d.%m} {group} / {spend.subcategory} "
+            f"{amount_text(spend.amount)}"
+        )
+        return await written(user.id, author, f"{NOT_FROM}|{text}")
+
     async def month_plan(request: Request) -> JSONResponse:
         user = current_user(request)
         today = local_today(config.ANALYTICS_TIMEZONE)
@@ -1262,6 +1837,13 @@ def routes(application: Application) -> list[Route]:
         Route("/calendar", add_record, methods=["POST"]),
         Route("/calendar/{record_id}", update_record, methods=["PUT"]),
         Route("/calendar/{record_id}", delete_record, methods=["DELETE"]),
+        Route("/savings", savings),
+        Route("/piggy", add_piggy, methods=["POST"]),
+        Route("/piggy/save", save_piggies, methods=["POST"]),
+        Route("/piggy/{piggy_id}", update_piggy, methods=["PUT"]),
+        Route("/piggy/{piggy_id}/close", close_piggy, methods=["POST"]),
+        Route("/piggy/{piggy_id}/moves", move_piggy, methods=["POST"]),
+        Route("/piggy/{piggy_id}/exclude", exclude_spend, methods=["POST"]),
         Route("/plan", month_plan),
         Route("/plan", save_month_plan, methods=["POST"]),
         Route("/plan/next", create_next_plan, methods=["POST"]),

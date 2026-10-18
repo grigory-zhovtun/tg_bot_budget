@@ -8,6 +8,7 @@ import {
   nextPlanFixture,
   notCreatedFixture,
   planFixture,
+  savingsFixture,
   writtenFixture,
 } from "../mocks/fixtures";
 
@@ -42,6 +43,15 @@ export function fakeApi(overrides: Partial<Api> = {}): Api {
       .fn<Api["createNextPlan"]>()
       .mockResolvedValue(nextPlanFixture),
     planAdvice: vi.fn<Api["planAdvice"]>().mockResolvedValue(adviceFixture),
+    savings: vi.fn<Api["savings"]>().mockResolvedValue(savingsFixture),
+    addPiggy: vi.fn<Api["addPiggy"]>().mockResolvedValue(savingsFixture),
+    updatePiggy: vi.fn<Api["updatePiggy"]>().mockResolvedValue(savingsFixture),
+    closePiggy: vi.fn<Api["closePiggy"]>().mockResolvedValue(savingsFixture),
+    movePiggy: vi.fn<Api["movePiggy"]>().mockResolvedValue(savingsFixture),
+    savePiggies: vi.fn<Api["savePiggies"]>().mockResolvedValue(savingsFixture),
+    excludeSpend: vi
+      .fn<Api["excludeSpend"]>()
+      .mockResolvedValue(savingsFixture),
     ...overrides,
   };
 }

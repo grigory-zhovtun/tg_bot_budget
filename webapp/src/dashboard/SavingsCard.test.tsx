@@ -1,14 +1,14 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Savings } from "../api";
-import { dashboardFixture } from "../mocks/fixtures";
+import { savingsFixture } from "../mocks/fixtures";
 import SavingsCard from "./SavingsCard";
 
 /** Между числом и «%» — неразрывный пробел, как в подписях. */
 const nb = (text: string) => text.replace(/ %/g, "\u00a0%");
 
 function fixture(): Savings {
-  const savings = dashboardFixture.savings;
+  const savings = savingsFixture.savings;
   if (!savings) throw new Error("fixture");
   return savings;
 }

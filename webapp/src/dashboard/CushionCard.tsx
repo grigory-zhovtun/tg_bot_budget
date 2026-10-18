@@ -66,6 +66,16 @@ export default function CushionCard({ cushion }: { cushion: Cushion }) {
       <p className="text-sm">
         {`${withCurrency(cushion.amount, cushion.currency)} ≈ ${short(cushion.uzs)}${spending}`}
       </p>
+      {cushion.frozen != null && !!cushion.piggies && (
+        <p className="text-sm">
+          {`${inCurrency(cushion.amount, cushion.currency)} = заморожено ${inCurrency(cushion.frozen, cushion.currency)} − копилки ${inCurrency(cushion.piggies, cushion.currency)} (на вечер вчера)`}
+        </p>
+      )}
+      {!!cushion.over && (
+        <p className="text-sm font-semibold text-danger">
+          {`В копилках на ${inCurrency(cushion.over, cushion.currency)} больше, чем на долларовой карте, — отложите разницу или поправьте копилки`}
+        </p>
+      )}
       {months === null && (
         <p className="text-sm">трат за 3 полных месяца ещё нет</p>
       )}

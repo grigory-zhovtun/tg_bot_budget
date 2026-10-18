@@ -613,6 +613,7 @@ describe("PlanScreen", () => {
     const store = new Store();
     store.put("dashboard", { today: "2026-10-10" });
     store.put("forecast", { today: "2026-10-10" });
+    store.put("savings", { today: "2026-10-10" });
     const user = userEvent.setup();
     render(
       <StoreProvider value={store}>
@@ -625,6 +626,8 @@ describe("PlanScreen", () => {
     expect(await screen.findByText(/План сохранён/)).toBeTruthy();
     expect(store.get("dashboard").at).toBe(0);
     expect(store.get("forecast").at).toBe(0);
+    // список и день денег меняют взносы копилок и долю 10 %
+    expect(store.get("savings").at).toBe(0);
   });
 
   it("says the plan could not be refreshed when it shows a copy", async () => {

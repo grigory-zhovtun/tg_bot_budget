@@ -1,13 +1,23 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { Cushion } from "../api";
-import { dashboardFixture } from "../mocks/fixtures";
+import { savingsFixture } from "../mocks/fixtures";
 import CushionCard from "./CushionCard";
 
+/** Подушка без копилок: «Заморожено» 1000 $ при тратах 40 млн в месяц. */
 function fixture(): Cushion {
-  const cushion = dashboardFixture.cushion;
+  const cushion = savingsFixture.cushion;
   if (!cushion) throw new Error("fixture");
-  return cushion;
+  return {
+    ...cushion,
+    amount: 1000,
+    uzs: 12_000_000,
+    months: 0.3,
+    short_uzs: 228_000_000,
+    short: 19_000,
+    frozen: 1000,
+    piggies: 0,
+  };
 }
 
 describe("CushionCard", () => {
