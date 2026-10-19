@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, type Api, type SavingsScreen } from "../api";
 import Sheet from "../plan/Sheet";
 import { Line } from "./blocks";
+import { ErrorLine, PRIMARY } from "./controls";
 import { dayMonth, forecastLines } from "./piggyText";
 
 interface Props {
@@ -154,17 +155,8 @@ export default function OrderSheet({
           );
         })}
       </ul>
-      {error && (
-        <p className="text-line font-bold text-danger" role="alert">
-          {error}
-        </p>
-      )}
-      <button
-        type="button"
-        disabled={busy}
-        className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
-        onClick={save}
-      >
+      <ErrorLine text={error} />
+      <button type="button" disabled={busy} className={PRIMARY} onClick={save}>
         Сохранить порядок
       </button>
     </Sheet>

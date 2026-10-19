@@ -3,6 +3,7 @@ import { ApiError, type Api, type SavingsScreen } from "../api";
 import { money } from "../format";
 import Sheet from "../plan/Sheet";
 import { Good, Warn } from "./blocks";
+import { ErrorLine, PRIMARY } from "./controls";
 import EnoughLines from "./EnoughLines";
 import { dayMonth, forecastLines, percentText } from "./piggyText";
 
@@ -127,7 +128,7 @@ export default function PercentSheet({ api, data, onSaved, onClose }: Props) {
                 key={piggy.id}
                 className="flex flex-col gap-0.5 border-b border-outline px-3 py-2 last:border-b-0"
               >
-                <p className="font-extrabold">
+                <p className="font-extrabold break-words">
                   {`${piggy.name}, к ${dayMonth(piggy.deadline ?? "")}`}
                 </p>
                 <p>{will}</p>
@@ -144,17 +145,8 @@ export default function PercentSheet({ api, data, onSaved, onClose }: Props) {
         <Good>Успеваем всё к срокам</Good>
       )}
       {shown.enough && <EnoughLines enough={shown.enough} />}
-      {error && (
-        <p className="text-line font-bold text-danger" role="alert">
-          {error}
-        </p>
-      )}
-      <button
-        type="button"
-        disabled={busy}
-        className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
-        onClick={save}
-      >
+      <ErrorLine text={error} />
+      <button type="button" disabled={busy} className={PRIMARY} onClick={save}>
         {`Сохранить ${percentText(value)} %`}
       </button>
     </Sheet>

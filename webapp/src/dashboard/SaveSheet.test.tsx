@@ -55,6 +55,14 @@ describe("SaveSheet", () => {
     expect(screen.getByText("подушка — в журнал не пишется")).toBeTruthy();
   });
 
+  it("breaks a long one-word piggy name inside its cell", () => {
+    show();
+    const table = screen.getByRole("table", { name: "Куда ляжет" });
+    expect(within(table).getByText("Новый год").className).toContain(
+      "wrap-anywhere",
+    );
+  });
+
   it("puts it all into the cushion when no piggy needs it", () => {
     show({
       ...savingsFixture,

@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import {
   ApiError,
   type Api,
@@ -19,6 +19,7 @@ import {
   BIG_FIELD,
   BIG_LABEL,
   BigFieldError,
+  ErrorLine,
   bigChip,
   bigSegment,
 } from "./controls";
@@ -123,6 +124,13 @@ export default function PiggySheet({
   const [error, setError] = useState<string | null>(null);
   const [fields, setFields] = useState<Record<string, string>>({});
   const inFlight = useRef(false); // двойной тап — один запрос
+  const id = useId();
+  // подписи связаны с полями: касание «Срок» ставит курсор в дату
+  const ids = {
+    deadline: `${id}-deadline`,
+    repeat: `${id}-repeat`,
+    article: `${id}-article`,
+  };
 
   const chosen = groups.find((item) => item.name === group);
   const latest = shiftDay(today, LATEST_DAYS);
@@ -204,11 +212,7 @@ export default function PiggySheet({
           onChange={setMoveText}
         />
         <BigFieldError text={fields.amount} />
-        {error && (
-          <p className="text-line font-bold text-danger" role="alert">
-            {error}
-          </p>
-        )}
+        <ErrorLine text={error} />
         <button
           type="button"
           disabled={amountValue(moveText) <= 0 || busy}
@@ -219,7 +223,7 @@ export default function PiggySheet({
         </button>
         <button
           type="button"
-          className="py-2 text-line font-bold text-link"
+          className="min-h-11 py-2 text-line font-bold text-link"
           onClick={() => setMove(null)}
         >
           Назад
@@ -287,12 +291,14 @@ export default function PiggySheet({
         <AmountPad text={text} currency={currency} onChange={setText} />
       )}
       <BigFieldError text={fields.target} />
-      <span className={BIG_LABEL}>Срок</span>
+      <label htmlFor={ids.deadline} className={BIG_LABEL}>
+        Срок
+      </label>
       {deadline !== null && (
         <input
+          id={ids.deadline}
           className={BIG_FIELD}
           type="date"
-          aria-label="Срок"
           min={today}
           max={latest}
           value={deadline}
@@ -317,11 +323,15 @@ export default function PiggySheet({
         Без срока
       </button>
       <BigFieldError text={fields.deadline} />
-      {deadline !== null && <span className={BIG_LABEL}>Повтор</span>}
+      {deadline !== null && (
+        <span id={ids.repeat} className={BIG_LABEL}>
+          Повтор
+        </span>
+      )}
       {deadline !== null && (
         <div
           role="radiogroup"
-          aria-label="Повтор"
+          aria-labelledby={ids.repeat}
           className="grid grid-cols-2 gap-1 rounded-xl bg-section p-1"
         >
           {(["once", "yearly"] as const).map((item) => (
@@ -339,11 +349,13 @@ export default function PiggySheet({
         </div>
       )}
       <BigFieldError text={fields.repeat} />
-      <span className={BIG_LABEL}>Статья трат</span>
+      <span id={ids.article} className={BIG_LABEL}>
+        Статья трат
+      </span>
       <div
         className="flex flex-wrap gap-1.5"
         role="group"
-        aria-label="Статья трат"
+        aria-labelledby={ids.article}
       >
         <button
           type="button"
@@ -393,11 +405,7 @@ export default function PiggySheet({
       )}
       <BigFieldError text={fields.subcategory} />
       {hint && <p className="text-line font-bold">{hint}</p>}
-      {error && (
-        <p className="text-line font-bold text-danger" role="alert">
-          {error}
-        </p>
-      )}
+      <ErrorLine text={error} />
       <button
         type="button"
         disabled={!valid || busy}
@@ -487,7 +495,7 @@ export default function PiggySheet({
                     <button
                       type="button"
                       disabled={busy}
-                      className="self-start py-1 font-bold text-link disabled:opacity-50"
+                      className="min-h-11 self-start py-1 font-bold text-link disabled:opacity-50"
                       onClick={() =>
                         send(() => api.excludeSpend(piggy.id, item.key))
                       }

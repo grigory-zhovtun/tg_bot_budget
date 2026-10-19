@@ -417,8 +417,9 @@ describe("EntryScreen", () => {
       ),
     ).toEqual(["🍔 ЕДА", "☕ кофе"]);
     const amount = screen.getByText("48 000");
-    expect(amount.className).toContain("text-big");
-    expect(amount.className).not.toContain("text-big-long");
+    expect(amount.className).toContain("whitespace-nowrap");
+    expect(amount.parentElement?.className).toContain("text-big");
+    expect(amount.parentElement?.className).not.toContain("text-big-long");
     const currency = screen.getByText("UZS");
     expect(currency.className).not.toContain("text-hint");
     for (const text of ["Комментарий", "Дата: Сегодня"]) {
@@ -442,8 +443,10 @@ describe("EntryScreen", () => {
     for (const key of ["000", "000"]) {
       await user.click(screen.getByRole("button", { name: key }));
     }
+    // число не рвётся между группами цифр, валюта может уйти строкой ниже
     const amount = screen.getByText("48 000 000 000");
-    expect(amount.className).toContain("text-big-long");
+    expect(amount.className).toContain("whitespace-nowrap");
+    expect(amount.parentElement?.className).toContain("text-big-long");
   });
 
   it("writes the answer and «Отменить» at 17 px", async () => {
@@ -457,6 +460,7 @@ describe("EntryScreen", () => {
     const undo = screen.getByRole("button", { name: "↩️ Отменить" });
     expect(undo.className).toContain("text-line");
     expect(undo.className).toContain("font-bold");
+    expect(undo.className).toContain("min-h-11"); // палец попадает с первого раза
     await user.click(undo);
     const notice = await screen.findByText(
       "↩️ Удалил из таблицы: строка 4169.",
