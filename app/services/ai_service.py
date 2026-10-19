@@ -210,7 +210,7 @@ Rules:
 4. date: DD.MM.YYYY of the transaction itself; use {today} only if no date is
    shown.
 5. source and card_identifier: the card whose number appears in the input
-   (e.g. *9120); card_identifier is its last 4 digits.
+   (e.g. *9090); card_identifier is its last 4 digits.
 6. comment: the merchant or sender name exactly as written in the input
    (e.g. OOO SHAVI CAFE) — the owner's history above is matched by it. If the
    user added their own words, put them after a comma (SHOWPRO, струны).

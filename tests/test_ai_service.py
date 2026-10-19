@@ -34,7 +34,7 @@ HEADER = ["Дата", "Категория", "Название", "Сумма", "�
         ("OOO YANDEXGO UB", "OOO YANDEXGO UB"),
         ("AI: без мерчанта (QR/Payme), ≤60 тыс.", None),
         ("AI: выравнивание к остатку", None),
-        ("AI: перевод VISA 9120 → HUMO (свой)", None),
+        ("AI: перевод VISA 9090 → HUMO (свой)", None),
         ("123", None),
         ("", None),
     ],
@@ -65,11 +65,11 @@ def test_prompt_contains_catalog_hints_and_rules() -> None:
         today="06.10.2026",
         categories=["🍔 ЕДА"],
         subcategories={"🍔 ЕДА": ["кофе", "кафе"]},
-        sources=["VISA 9120 UZS"],
+        sources=["VISA 9090 UZS"],
         hints=["OOO SHAVI CAFE → 🍔 ЕДА / кофе"],
     )
     assert "- 🍔 ЕДА: кофе, кафе" in prompt
-    assert "VISA 9120 UZS" in prompt
+    assert "VISA 9090 UZS" in prompt
     assert "OOO SHAVI CAFE → 🍔 ЕДА / кофе" in prompt
     assert "transfer_in" in prompt and "Never convert" in prompt
     assert "exactly as written in the input" in prompt  # имя магазина — ключ истории
@@ -340,7 +340,7 @@ CATALOG = Catalog(
         "🏚️ ДОМ": ["продукты"],
         "🚧 РАЗНОЕ": ["неучтенка"],
     },
-    sources=["VISA 9120 UZS"],
+    sources=["VISA 9090 UZS"],
 )
 
 
@@ -527,7 +527,7 @@ def test_mixed_merchants_get_no_hint_and_marketplaces_a_rule() -> None:
 async def test_screenshot_is_classified_in_the_same_call() -> None:
     answer = {
         "kind": "balances",
-        "balances": [{"card": "9120", "balance": 11251471, "currency": "UZS"}],
+        "balances": [{"card": "9090", "balance": 11251471, "currency": "UZS"}],
         "transactions": [{"amount": 189, "direction": "expense", "comment": "Shavi"}],
     }
     service, models, _ = make_service(json.dumps(answer))

@@ -81,10 +81,10 @@ async def test_known_merchant_is_written_without_ai() -> None:
     await messages.text_handler(update, context)
     [row] = sheets.rows
     assert row[:4] == ["14.10.2026", "🍔 ЕДА", "кафе", 48000.0]
-    assert row[5:] == ["OOO SHAVI CAFE>TASHKENT", "UZS", "VISA 9120 UZS"]
+    assert row[5:] == ["OOO SHAVI CAFE>TASHKENT", "UZS", "VISA 9090 UZS"]
     assert (ai.calls, ai.asked, ai.forgotten) == (0, [], 0)
     assert sheets.cells == {"fact!N2": 5000000.0}
-    assert summary(update).startswith("✅ 48 000 UZS • 🍔 ЕДА (кафе) • VISA 9120 UZS |")
+    assert summary(update).startswith("✅ 48 000 UZS • 🍔 ЕДА (кафе) • VISA 9090 UZS |")
     assert reactions(update) == ["👀", "👍"]
 
 
@@ -96,7 +96,7 @@ async def test_new_merchant_gets_one_ai_question_and_the_check() -> None:
     assert sheets.rows[0][1:3] == ["🍔 ЕДА", "кафе"]
     assert "• 🆕 OOO SHAVI CAFE>TASHKENT" in summary(update)
     assert menu_after_summary(update).args[0] == (
-        "🆕 OOO SHAVI CAFE>TASHKENT • 48 000 UZS • VISA 9120 UZS\n"
+        "🆕 OOO SHAVI CAFE>TASHKENT • 48 000 UZS • VISA 9090 UZS\n"
         "ИИ предлагает: 🍔 ЕДА / кафе. Верно?"
     )
     assert ai.forgotten == 1 and ai.calls == 0
@@ -164,7 +164,7 @@ async def test_only_codes_are_skipped_quietly() -> None:
 
 
 async def test_unknown_card_is_reported() -> None:
-    text = PURCHASE.replace("*9120", "*1234")
+    text = PURCHASE.replace("*9090", "*1234")
     update, context, sheets = make_chat(text, {}, RulesAI())
     await messages.text_handler(update, context)
     assert sheets.rows == []

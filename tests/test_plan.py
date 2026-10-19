@@ -159,12 +159,12 @@ def test_weekly_digest_asks_for_bank_screens_and_names_stale_cards() -> None:
 
     sheets = Sheets({"fact": FACT, "Oct 26": OCTOBER})
     sheets.checks = {
-        "VISA 9120 UZS": datetime(2026, 10, 5, 10, 0),  # 1 день — свежая
-        "UZCARD 5837 UZS": datetime(2026, 9, 24, 9, 0),  # 12 дней
+        "VISA 9090 UZS": datetime(2026, 10, 5, 10, 0),  # 1 день — свежая
+        "UZCARD 5656 UZS": datetime(2026, 9, 24, 9, 0),  # 12 дней
         "МИР 9959 RUB": None,  # не сверяли ни разу — не напоминаем
     }
     text = AnalyticsService(sheets).weekly_digest(date(2026, 10, 6)).text
     assert text.endswith(
         "📸 Пришлите скрины главных экранов банков — сверю остатки по картам.\n"
-        "Давно не сверяли: UZCARD 5837 UZS (12 дн.)"
+        "Давно не сверяли: UZCARD 5656 UZS (12 дн.)"
     )

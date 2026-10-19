@@ -128,7 +128,7 @@ def check_keyboard(
 
 
 def check_text(last: dict, index: int, prefix: str = "") -> str:
-    """«🆕 OOO SHAVI CAFE • 48 000 UZS • VISA 9120 UZS» и что с категорией."""
+    """«🆕 OOO SHAVI CAFE • 48 000 UZS • VISA 9090 UZS» и что с категорией."""
     row: SheetRow = last["rows"][index]
     flag = last["checks"].get(index, "")
     guessed = row.category != FALLBACK_CATEGORY

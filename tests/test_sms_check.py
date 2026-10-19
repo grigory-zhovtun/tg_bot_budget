@@ -27,7 +27,7 @@ ROWS = [
     row(comment="IP OOO ANGLESEY FOOD"),
     row(comment="перевод: VISA MC UZS 2 UZCARD OB"),
 ]
-MENU = "💳 VISA 9120 UZS — выберите категорию"
+MENU = "💳 VISA 9090 UZS — выберите категорию"
 
 
 def checking(rows: list[SheetRow], checks: dict[int, str]) -> SimpleNamespace:
@@ -40,7 +40,7 @@ def checking(rows: list[SheetRow], checks: dict[int, str]) -> SimpleNamespace:
             "subcategories": SUBCATEGORIES,
         },
         user_data={
-            "source": "VISA 9120 UZS",
+            "source": "VISA 9090 UZS",
             LAST_WRITE: {
                 "first": 4190,
                 "last": 4189 + len(rows),
@@ -79,14 +79,14 @@ async def test_one_flagged_row_is_checked_right_under_the_summary() -> None:
         amount=48000.0,
         comment="OOO SHAVI CAFE>TASHKENT",
         currency="UZS",
-        source="VISA 9120 UZS",
+        source="VISA 9090 UZS",
     )
     await messages.save_rows(
         context, update.effective_chat, [new], [], None, flags=["🆕"]
     )
     call = menu_after_summary(update)
     assert call.args[0] == (
-        "🆕 OOO SHAVI CAFE>TASHKENT • 48 000 UZS • VISA 9120 UZS\n"
+        "🆕 OOO SHAVI CAFE>TASHKENT • 48 000 UZS • VISA 9090 UZS\n"
         "ИИ предлагает: 🍔 ЕДА / кафе. Верно?"
     )
     keyboard = call.kwargs["reply_markup"].inline_keyboard
@@ -102,7 +102,7 @@ async def test_ok_keeps_the_category_and_brings_the_menu_back() -> None:
     fix.inline_check(context)
     text, markup = await press(context, "fix:ok")
     assert text == (
-        "👍 Оставил: 48 000 UZS • OOO SHAVI CAFE • 🍔 ЕДА (кафе) • VISA 9120 UZS\n"
+        "👍 Оставил: 48 000 UZS • OOO SHAVI CAFE • 🍔 ЕДА (кафе) • VISA 9090 UZS\n"
         + MENU
     )
     assert callbacks(markup)[0] == ["last:fix", "last:undo"]  # «🔎» больше нет
@@ -115,7 +115,7 @@ async def test_group_choice_fixes_the_row_and_brings_the_menu_back() -> None:
     context = checking(ROWS[2:], {0: "❓"})
     text, _ = fix.inline_check(context)
     assert text == (
-        "❓ перевод: VISA MC UZS 2 UZCARD OB • 48 000 UZS • VISA 9120 UZS\n"
+        "❓ перевод: VISA MC UZS 2 UZCARD OB • 48 000 UZS • VISA 9090 UZS\n"
         "Записал как: 🚧 РАЗНОЕ / неучтенка. Что это?"
     )
     await press(context, "fix:c:0")
@@ -124,7 +124,7 @@ async def test_group_choice_fixes_the_row_and_brings_the_menu_back() -> None:
     assert (number, target, changes) == (4190, ROWS[2], ["🍔 ЕДА", "кафе", 48000.0])
     assert text == (
         "✅ Исправил (строка 4190): 48 000 UZS • перевод: VISA MC UZS 2 UZCARD OB • "
-        "🍔 ЕДА (кафе) • VISA 9120 UZS\n" + MENU
+        "🍔 ЕДА (кафе) • VISA 9090 UZS\n" + MENU
     )
     assert callbacks(markup)[0] == ["last:fix", "last:undo"]
     assert context.bot_data["ai_service"].forgotten == 1
@@ -152,7 +152,7 @@ async def test_cancel_in_subgroups_leaves_the_category_and_the_check() -> None:
 async def test_check_button_goes_through_the_rows_one_by_one() -> None:
     context = checking(ROWS, {0: "🆕", 2: "❓"})
     text, markup = await open_check(context)
-    assert text.startswith("🔎 1 из 2. 🆕 OOO SHAVI CAFE • 48 000 UZS • VISA 9120 UZS")
+    assert text.startswith("🔎 1 из 2. 🆕 OOO SHAVI CAFE • 48 000 UZS • VISA 9090 UZS")
     assert callbacks(markup)[0] == ["fix:ok"] and callbacks(markup)[-1] == ["fix:x"]
 
     text, _ = await press(context, "fix:ok")

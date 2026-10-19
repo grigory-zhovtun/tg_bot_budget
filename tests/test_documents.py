@@ -72,7 +72,7 @@ async def test_table_document_goes_to_ai_and_temp_file_is_removed(name: str) -> 
         [
             {
                 "amount": 48000,
-                "source": "UZCARD 5837 UZS",
+                "source": "UZCARD 5656 UZS",
                 "category": "🍔 ЕДА",
                 "subcategory": "кофе",
             }

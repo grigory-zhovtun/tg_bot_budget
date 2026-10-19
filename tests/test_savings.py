@@ -154,7 +154,7 @@ def test_payments_bigger_than_the_frozen_money_leave_no_cushion() -> None:
 
 
 def income(amount: float, currency: str = "UZS", sub: str = "зарплата") -> SheetRow:
-    return SheetRow(TODAY, "💰 ДОХОДЫ", sub, amount, "", currency, "VISA 9120 UZS")
+    return SheetRow(TODAY, "💰 ДОХОДЫ", sub, amount, "", currency, "VISA 9090 UZS")
 
 
 def test_an_income_suggests_setting_a_share_aside() -> None:
@@ -179,15 +179,15 @@ def test_without_a_cushion_the_hint_does_not_name_it() -> None:
 
 
 def test_spending_and_the_opening_balance_suggest_nothing() -> None:
-    coffee = SheetRow(TODAY, "🍔 ЕДА", "кофе", 48_000, "", "UZS", "VISA 9120 UZS")
+    coffee = SheetRow(TODAY, "🍔 ЕДА", "кофе", 48_000, "", "UZS", "VISA 9090 UZS")
     opening = income(5_000_000, sub="нач остаток")
     assert save_lines([coffee, opening], 0.1, "USD", RATES) == []
     assert save_lines([income(30_000_000)], 0, "USD", RATES) == []  # выключено
 
 
 def test_refunds_and_money_back_suggest_nothing() -> None:
-    refund = SheetRow(TODAY, "🍔 ЕДА", "кафе", -50_000, "", "UZS", "VISA 9120 UZS")
-    back = SheetRow(TODAY, "💳 СЧЕТА", "перевод", -1e6, "", "UZS", "VISA 9120 UZS")
+    refund = SheetRow(TODAY, "🍔 ЕДА", "кафе", -50_000, "", "UZS", "VISA 9090 UZS")
+    back = SheetRow(TODAY, "💳 СЧЕТА", "перевод", -1e6, "", "UZS", "VISA 9090 UZS")
     assert save_lines([refund, back, income(-5_000_000)], 0.1, "USD", RATES) == []
 
 
@@ -206,7 +206,7 @@ def test_the_hint_reads_the_rates_only_for_an_income(
     monkeypatch.setattr(config, "SAVE_SHARE", 0.1)
     monkeypatch.setattr(config, "FROZEN_CURRENCY", "USD")
     sheets = RatesOnly()
-    coffee = SheetRow(TODAY, "🍔 ЕДА", "кофе", 48_000, "", "UZS", "VISA 9120 UZS")
+    coffee = SheetRow(TODAY, "🍔 ЕДА", "кофе", 48_000, "", "UZS", "VISA 9090 UZS")
     assert save_hint(sheets, [coffee]) == []
     assert sheets.asked == []  # трата — без лишнего чтения таблицы
     assert save_hint(sheets, [income(30_000_000)]) == [

@@ -187,10 +187,10 @@ def test_icons_and_last_card_reach_the_handlers(
         SUBCATEGORIES,
         SOURCES,
         icons={"кофе": "☕"},
-        last_source="VISA 9120 UZS",
+        last_source="VISA 9090 UZS",
     )
     assert app.bot_data["icons"] == {"кофе": "☕"}
-    assert app.bot_data["last_source"] == "VISA 9120 UZS"
+    assert app.bot_data["last_source"] == "VISA 9090 UZS"
 
 
 def test_webhook_mode_has_no_updater(monkeypatch: pytest.MonkeyPatch) -> None:

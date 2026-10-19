@@ -22,7 +22,7 @@ from app.services.day_budget import (
 from tests.test_analytics_service import serial
 
 RATES = Rates({"UZS": 1.0, "USD": 12000.0})
-UZS_CARD, USD_CARD = "VISA 9120 UZS", "VISA 4058 USD"
+UZS_CARD, USD_CARD = "VISA 9090 UZS", "VISA 3434 USD"
 FACT_HEADER = ["Дата", "Категория", "Название", "Сумма", "Баланс", "Комментарий",
                "Валюта", "Источник"]  # fmt: skip
 
