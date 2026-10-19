@@ -13,7 +13,7 @@ describe("App", () => {
     render(<App api={fakeApi()} />);
     expect(
       await screen.findByRole("radio", {
-        name: "VISA 9120 UZS",
+        name: "VISA 9090 UZS",
         checked: true,
       }),
     ).toBeTruthy();
@@ -50,8 +50,13 @@ describe("App", () => {
   it("switches to the dashboard", async () => {
     const user = userEvent.setup();
     render(<App api={fakeApi()} />);
-    await user.click(screen.getByRole("tab", { name: "Сводка" }));
-    expect(await screen.findByText("Можно сегодня")).toBeTruthy();
+    const tab = screen.getByRole("tab", { name: "Сводка" });
+    await user.click(tab);
+    expect(
+      await screen.findByRole("region", { name: "Можно сегодня" }),
+    ).toBeTruthy();
+    // вкладки приложения — крупно, как «Сводка», но все четыре в ряд
+    expect(tab.className).toContain("text-tab");
   });
 
   it("switches to the forecast", async () => {
@@ -120,7 +125,7 @@ describe("App", () => {
     render(<App api={api} />);
     expect(await screen.findByText("сверх на 300 000")).toBeTruthy();
     await user.click(screen.getByRole("tab", { name: "Сводка" }));
-    expect(screen.getByText("Можно сегодня")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Можно сегодня" })).toBeTruthy();
     expect(api.dashboard).toHaveBeenCalledTimes(1);
     // первое чтение запуска — по таблице заново: правки руками видны сразу
     expect(api.dashboard).toHaveBeenCalledWith(true);
@@ -166,7 +171,7 @@ describe("App", () => {
     // справочник и остатки на плитках — из памяти телефона, без ожидания
     expect(screen.getByText("сверх на 300 000")).toBeTruthy();
     await user.click(screen.getByRole("tab", { name: "Сводка" }));
-    expect(screen.getByText("Можно сегодня")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Можно сегодня" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Обновляю…" })).toBeTruthy();
     vi.useRealTimers();
   });

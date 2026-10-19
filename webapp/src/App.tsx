@@ -177,7 +177,7 @@ export default function App({ api }: { api: Api }) {
               type="button"
               role="tab"
               aria-selected={tab === name}
-              className={`rounded-lg py-1.5 text-sm font-medium ${
+              className={`rounded-lg py-2 text-tab font-semibold ${
                 tab === name ? "bg-bg shadow-sm" : "text-hint"
               }`}
               onClick={() => setTab(name)}

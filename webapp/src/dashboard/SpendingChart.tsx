@@ -1,6 +1,7 @@
 import type { DaySpend } from "../api";
-import { short } from "../format";
+import { money } from "../format";
 import { days } from "../plan/months";
+import { Card, Line } from "./blocks";
 import {
   daysInMonth,
   spendingBars,
@@ -12,6 +13,13 @@ const WIDTH = 320;
 const HEIGHT = 150;
 const SIZE = { width: WIDTH, top: 18, bottom: HEIGHT - 16 };
 const LABEL_DAYS = [1, 5, 10, 15, 20, 25];
+const FONT = 15; // подписи графика — крупно, как строки «Сводки»
+const CHAR = 8.4; // средняя ширина знака подписи при FONT, жирным
+
+/** Примерная ширина подписи: хватает, чтобы не уйти за край графика. */
+function labelWidth(text: string): number {
+  return text.length * CHAR;
+}
 
 /** Середина подписи не ближе margin к краям: подпись не вылезает за график. */
 function inside(x: number, margin: number): number {
@@ -39,26 +47,24 @@ interface Props {
   planPerDay: number | null;
 }
 
+/** Итог прошедших дней: запас или перерасход крупно, ниже — траты и план. */
 function Summary({ spending, today, planPerDay }: Omit<Props, "limit">) {
   const summary = spendingSummary(spending, today, planPerDay);
   if (!summary) return null;
-  const over = summary.spent - summary.plan;
+  const over = Math.round(summary.spent - summary.plan);
+  let verdict = "✓ Ровно по плану";
+  if (over > 0) verdict = `⚠️ Сверх на ${money(over)}`;
+  if (over < 0) verdict = `✓ Запас ${money(-over)}`;
   return (
-    <p className="text-sm">
-      <span className="font-semibold">{short(summary.spent)}</span>
-      <span className="text-hint">
-        {` за ${days(summary.days)} при плане ${short(summary.plan)} — `}
-      </span>
-      {over > 0 && (
-        <span className="font-semibold text-danger">{`сверх на ${short(over)}`}</span>
-      )}
-      {over < 0 && (
-        <span className="font-semibold text-ok">{`запас ${short(-over)}`}</span>
-      )}
-      {over === 0 && (
-        <span className="font-semibold text-ok">ровно по плану</span>
-      )}
-    </p>
+    <Card>
+      <p
+        className={`text-fact font-extrabold ${over > 0 ? "text-danger" : "text-ok"}`}
+      >
+        {verdict}
+      </p>
+      <Line>{`потрачено ${money(summary.spent)} за ${days(summary.days)}`}</Line>
+      <Line>{`по плану ${money(summary.plan)}`}</Line>
+    </Card>
   );
 }
 
@@ -88,9 +94,12 @@ export default function SpendingChart({
     null,
   );
   const ahead = bars.find((bar) => bar.state === "ahead");
-  // подпись про дни впереди — слева от них, пока месяц в первой половине
+  const aheadText =
+    ahead && limit !== null ? `можно ${money(limit)} в день` : "лимита нет";
+  // подпись про дни впереди — от сегодняшнего дня вправо, если влезает, иначе у края
   const aheadX = now * slot;
-  const aheadLeft = aheadX <= WIDTH * 0.55;
+  const aheadLeft = aheadX + 2 + labelWidth(aheadText) <= WIDTH;
+  const peakText = peak ? money(peak.value) : "";
   const labels = [...LABEL_DAYS, month].filter(
     (day) => Math.abs(day - now) >= 3,
   );
@@ -158,36 +167,36 @@ export default function SpendingChart({
         )}
         {peak && (
           <text
-            x={inside(peak.x + peak.width / 2, 26)}
+            x={inside(peak.x + peak.width / 2, labelWidth(peakText) / 2 + 2)}
             y={peak.y - 4}
-            fontSize={12}
+            fontSize={FONT}
             fontWeight={700}
             textAnchor="middle"
             fill="var(--color-text)"
             {...HALO}
           >
-            {short(peak.value)}
+            {peakText}
           </text>
         )}
         {now < month && limit !== null && (
           <text
             x={aheadLeft ? aheadX + 2 : WIDTH - 2}
             y={ahead ? ahead.y - 5 : SIZE.top + 8}
-            fontSize={12}
+            fontSize={FONT}
             fontWeight={700}
             textAnchor={aheadLeft ? "start" : "end"}
             fill={ahead ? "var(--color-text)" : "var(--color-danger)"}
             {...HALO}
           >
-            {ahead ? `можно ${short(limit)} в день` : "лимита нет"}
+            {aheadText}
           </text>
         )}
         {[...labels, now].map((day) => (
           <text
             key={`day-${day}`}
-            x={inside((day - 0.5) * slot, 8)}
+            x={inside((day - 0.5) * slot, 10)}
             y={HEIGHT - 2}
-            fontSize={12}
+            fontSize={FONT}
             textAnchor="middle"
             fill={day === now ? "var(--color-text)" : "var(--color-hint)"}
             fontWeight={day === now ? 800 : 600}
@@ -196,22 +205,22 @@ export default function SpendingChart({
           </text>
         ))}
       </svg>
-      <figcaption className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-hint">
-        <span className="flex items-center gap-1">
-          <i className="inline-block size-2 rounded-sm bg-over" />
+      <figcaption className="flex flex-wrap gap-x-4 gap-y-1 text-line font-semibold">
+        <span className="flex items-center gap-1.5 whitespace-nowrap">
+          <i className="inline-block size-3 rounded-sm bg-over" />
           сверх лимита дня
         </span>
-        <span className="flex items-center gap-1">
-          <i className="inline-block size-2 rounded-sm bg-ok" />в лимите
+        <span className="flex items-center gap-1.5 whitespace-nowrap">
+          <i className="inline-block size-3 rounded-sm bg-ok" />в лимите
         </span>
-        <span className="flex items-center gap-1">
-          <i className="inline-block h-0.5 w-3 bg-text" />
+        <span className="flex items-center gap-1.5 whitespace-nowrap">
+          <i className="inline-block h-1 w-4 bg-text" />
           лимит дня
         </span>
         {planPerDay !== null && planPerDay > 0 && (
-          <span className="flex items-center gap-1">
-            <i className="inline-block w-3 border-t border-dashed border-hint" />
-            {`план ${short(planPerDay)} в день`}
+          <span className="flex items-center gap-1.5 whitespace-nowrap">
+            <i className="inline-block w-4 border-t-2 border-dashed border-hint" />
+            {`план ${money(planPerDay)} в день`}
           </span>
         )}
       </figcaption>

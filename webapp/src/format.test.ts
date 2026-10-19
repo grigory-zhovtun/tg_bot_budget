@@ -3,20 +3,26 @@ import {
   dayLabel,
   deviceDay,
   daysBetween,
+  inCurrency,
   longDay,
   itemAmount,
   money,
+  moneyText,
   shiftDay,
   short,
+  signedMoney,
   withCurrency,
 } from "./format";
+
+/** Пробелы в ожидаемых строках — неразрывные, как в форматтерах. */
+const nb = (text: string) => text.replace(/ /g, "\u00a0");
 
 describe("money", () => {
   it("groups thousands like the bot", () => {
     expect(money(48000)).toBe("48 000");
   });
   it("keeps cents for currency cards", () => {
-    expect(money(1824.86, 2)).toBe("1 824,86");
+    expect(money(1312.45, 2)).toBe("1 312,45");
     expect(withCurrency(12.5, "USD")).toBe("12,50 USD");
     expect(withCurrency(48000, "UZS")).toBe("48 000 UZS");
   });
@@ -26,7 +32,7 @@ describe("money", () => {
   it("shortens millions", () => {
     expect(short(8_520_000)).toBe("8,52 млн");
     expect(short(-8_520_000)).toBe("−8,52 млн");
-    expect(short(650_000)).toBe("650 000");
+    expect(short(640_000)).toBe("640 000");
   });
 });
 
@@ -43,8 +49,8 @@ describe("days", () => {
 
 describe("itemAmount", () => {
   it("shows incomes in sums and payments in their currency", () => {
-    expect(itemAmount(2_720_000, "UZS", 2_720_000)).toBe("+2,72 млн");
-    expect(itemAmount(-650, "USD", -7_800_000)).toBe("−650,00 USD");
+    expect(itemAmount(3_150_000, "UZS", 3_150_000)).toBe("+3,15 млн");
+    expect(itemAmount(-380, "USD", -4_560_000)).toBe("−380,00 USD");
   });
 });
 
@@ -67,5 +73,34 @@ describe("deviceDay", () => {
   it("is the date on the phone clock, not in UTC", () => {
     expect(deviceDay(new Date(2026, 9, 17, 0, 30))).toBe("2026-10-17");
     expect(deviceDay(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
+  });
+});
+
+describe("inCurrency", () => {
+  it("puts the sign after the number like the bot", () => {
+    expect(inCurrency(380, "USD")).toBe(nb("380 $"));
+    expect(inCurrency(75_000, "RUB")).toBe(nb("75 000 ₽"));
+    expect(inCurrency(50, "EUR")).toBe(nb("50 EUR"));
+    expect(inCurrency(48_000, "UZS")).toBe(nb("48 000"));
+    expect(inCurrency(1312.45, "USD", true)).toBe(nb("1 312,45 $"));
+  });
+});
+
+describe("moneyText", () => {
+  it("keeps cents only for a fractional amount in a currency", () => {
+    expect(moneyText(1500.25, "USD")).toBe(nb("1 500,25 $"));
+    expect(moneyText(1000, "USD")).toBe(nb("1 000 $"));
+    expect(moneyText(5_250_000.4, "UZS")).toBe(nb("5 250 000"));
+  });
+  it("never shows a minus zero", () => {
+    expect(moneyText(-0.001, "USD")).toBe(nb("0 $"));
+  });
+});
+
+describe("signedMoney", () => {
+  it("marks incomes with a plus and payments with a minus", () => {
+    expect(signedMoney(2_000_000, "UZS")).toBe(nb("+2 000 000"));
+    expect(signedMoney(-380, "USD")).toBe(nb("−380 $"));
+    expect(signedMoney(-380.5, "USD")).toBe(nb("−380,50 $"));
   });
 });

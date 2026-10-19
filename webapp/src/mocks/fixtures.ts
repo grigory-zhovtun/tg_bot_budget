@@ -18,10 +18,10 @@ export const bootstrapFixture: Bootstrap = {
   user: { id: 1, first_name: "Тест" },
   bot_username: "budget_test_bot",
   today: "2026-10-10",
-  default_source: "VISA 9120 UZS",
+  default_source: "VISA 9090 UZS",
   sources: [
-    { name: "VISA 9120 UZS", currency: "UZS" },
-    { name: "VISA 4058 USD", currency: "USD" },
+    { name: "VISA 9090 UZS", currency: "UZS" },
+    { name: "VISA 3434 USD", currency: "USD" },
   ],
   groups: [
     {
@@ -46,7 +46,7 @@ export const writtenFixture: ExpenseResult = {
   status: "written",
   rows: { first: 4169, last: 4169 },
   lines: [
-    "✅ 48 000 UZS • 🍔 ЕДА (☕ кофе) • VISA 9120 UZS",
+    "✅ 48 000 UZS • 🍔 ЕДА (☕ кофе) • VISA 9090 UZS",
     "💸 На сегодня осталось 452 000 из 500 000",
   ],
 };
@@ -102,28 +102,28 @@ export const dashboardFixture: Dashboard = {
       uzs: 2_000_000,
     },
     {
-      name: "Квартплата",
+      name: "Аренда",
       day: 18,
-      amount: -650,
+      amount: -380,
       currency: "USD",
-      uzs: -7_800_000,
+      uzs: -4_560_000,
     },
   ],
   subscriptions: [
     {
       name: "Render.com",
       day: 1,
-      amount: 378_560,
+      amount: 312_400,
       currency: "UZS",
-      uzs: 378_560,
+      uzs: 312_400,
       state: "charged",
     },
     {
       name: "Google One",
       day: 14,
-      amount: 235_882,
+      amount: 198_700,
       currency: "UZS",
-      uzs: 235_882,
+      uzs: 198_700,
       state: "expected",
     },
   ],

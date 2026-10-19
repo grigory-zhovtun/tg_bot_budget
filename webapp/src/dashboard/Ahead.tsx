@@ -1,75 +1,90 @@
 import type { Dashboard, SubscriptionState } from "../api";
-import { itemAmount, money, withCurrency } from "../format";
+import { money, moneyText, signedMoney } from "../format";
+import { Items, Line, Warn } from "./blocks";
 
-const STATE_TEXT: Record<SubscriptionState, string> = {
-  charged: "списано",
-  twice: "⚠️ дважды",
-  expected: "ждём",
-  missed: "не было",
+/** Значок подписки перед названием и его расшифровка под списком. */
+const STATE: Record<SubscriptionState, { sign: string; text: string }> = {
+  charged: { sign: "✓", text: "списано" },
+  expected: { sign: "⏳", text: "ждём" },
+  twice: { sign: "⚠️", text: "дважды" },
+  missed: { sign: "❓", text: "не было" },
 };
+const STATES: SubscriptionState[] = ["charged", "expected", "twice", "missed"];
 
 /** Без блока прогноза во вкладке месяца нет ни лимита, ни списка впереди. */
 export function NoForecastNote() {
   return (
-    <p className="text-sm text-hint">
-      Во вкладке месяца нет блока прогноза — лимит на день не посчитать.
-    </p>
+    <div className="flex flex-col">
+      <Warn>Нет блока прогноза</Warn>
+      <Line>во вкладке месяца</Line>
+      <Line>лимит на день не посчитать</Line>
+    </div>
   );
 }
 
-/** «Впереди»: строки жёлтого списка до конца месяца и подписки. */
+/** «28-го» — весь список в текущем месяце, месяц не нужен. */
+function dayText(day: number): string {
+  return `${day}-го`;
+}
+
+/**
+ * «Впереди»: строки жёлтого списка до конца месяца и подписки. Пункты — в две
+ * строки: названия у банка длинные, а суммы бывают в восемь цифр.
+ */
 export default function Ahead({ data }: { data: Dashboard }) {
   // список без блока прогноза не прочитать — это не «платежей нет»
   if (data.status === "no_forecast") return <NoForecastNote />;
   if (data.upcoming.length === 0 && data.subscriptions.length === 0) {
-    return <p className="text-hint">До конца месяца платежей и подписок нет</p>;
+    return <p className="text-line">До конца месяца платежей и подписок нет</p>;
   }
+  const today = Number(data.today.slice(8, 10));
+  const late = data.upcoming.some((item) => item.day < today);
+  const seen = STATES.filter((state) =>
+    data.subscriptions.some((sub) => sub.state === state),
+  );
   return (
     <>
       {data.upcoming.length > 0 && (
-        <section className="flex flex-col gap-2">
-          <h2 className="font-semibold">Впереди</h2>
-          <ul className="flex flex-col gap-1 text-sm">
-            {data.upcoming.map((item) => (
-              <li
-                key={`${item.day}-${item.name}`}
-                className="flex justify-between gap-2"
-              >
-                <span>
-                  {item.day < Number(data.today.slice(8, 10)) ? "⏳ " : ""}
-                  {String(item.day).padStart(2, "0")} — {item.name}
-                </span>
-                <span
-                  className={`font-semibold ${item.amount > 0 ? "text-earned" : "text-payment"}`}
-                >
-                  {itemAmount(item.amount, item.currency, item.uzs)}
-                </span>
-              </li>
-            ))}
-          </ul>
+        <section className="flex flex-col gap-2" aria-label="Впереди">
+          <h2 className="text-fact font-extrabold">Впереди</h2>
+          <Items
+            label="Платежи и поступления"
+            items={data.upcoming.map((item) => ({
+              key: `${item.day}-${item.name}`,
+              title: `${item.day < today ? "⏳ " : ""}${item.name}`,
+              left: dayText(item.day),
+              // цветом текста: на полосе зелёный и оранжевый не держат 7:1, смысл — в знаке
+              right: signedMoney(
+                item.currency === "UZS" ? item.uzs : item.amount,
+                item.currency,
+              ),
+            }))}
+          />
+          {late && <Line>⏳ — день прошёл, записи ещё нет</Line>}
         </section>
       )}
       {data.subscriptions.length > 0 && (
-        <section className="flex flex-col gap-2">
-          <h2 className="font-semibold">Подписки</h2>
-          <ul className="flex flex-col gap-1 text-sm">
-            {data.subscriptions.map((sub) => (
-              <li
-                key={`${sub.day}-${sub.name}-${sub.uzs}`}
-                className="flex justify-between gap-2"
-              >
-                <span>
-                  {String(sub.day).padStart(2, "0")} — {sub.name}
-                </span>
-                <span className="text-hint">
-                  {sub.currency === "UZS"
-                    ? money(sub.uzs)
-                    : withCurrency(sub.amount, sub.currency)}{" "}
-                  · {STATE_TEXT[sub.state]}
-                </span>
-              </li>
+        <section className="flex flex-col gap-2" aria-label="Подписки">
+          <h2 className="text-fact font-extrabold">Подписки</h2>
+          <Items
+            label="Подписки"
+            items={data.subscriptions.map((sub) => ({
+              key: `${sub.day}-${sub.name}-${sub.uzs}`,
+              title: `${STATE[sub.state].sign} ${sub.name}`,
+              left: dayText(sub.day),
+              right:
+                sub.currency === "UZS"
+                  ? money(sub.uzs)
+                  : moneyText(sub.amount, sub.currency),
+            }))}
+          />
+          <p className="flex flex-wrap gap-x-4 gap-y-1 text-line">
+            {seen.map((state) => (
+              <span key={state} className="whitespace-nowrap">
+                {`${STATE[state].sign} ${STATE[state].text}`}
+              </span>
             ))}
-          </ul>
+          </p>
         </section>
       )}
     </>

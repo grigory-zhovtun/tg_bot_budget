@@ -32,12 +32,12 @@ export function piggyMoney(value: number, currency: string): string {
   return currency === "USD" ? `${digits} $` : `${digits} ${currency}`;
 }
 
-/** «к 20.12 · каждый год», «до 01.08.2027», «без срока». */
+/** «к 20.12, каждый год», «до 01.08.2027», «без срока». */
 export function whenText(piggy: Piggy): string {
   if (!piggy.deadline) return "без срока";
   const [year = "", month = "", day = ""] = piggy.deadline.split("-");
   return piggy.repeat === "yearly"
-    ? `к ${day}.${month} · каждый год`
+    ? `к ${day}.${month}, каждый год`
     : `до ${day}.${month}.${year}`;
 }
 

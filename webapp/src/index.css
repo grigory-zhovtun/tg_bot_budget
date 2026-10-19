@@ -29,12 +29,29 @@
   --color-payment: var(--calendar-payment, #8f4300);
   --color-outline: var(--calendar-outline, #7d8b9c);
   --color-minus: #b42318;
+  /* плашки статусов «Сводки»: белый текст на цветном фоне, одинаково в обеих
+     темах; контраст белого — от 6:1 (src/theme.test.ts) */
+  --color-chip-bad: #b42318;
+  --color-chip-mid: #8a4f00;
+  --color-chip-good: #146c2e;
+  /* полосы и шапки таблиц: отличаются и от фона страницы, и от карточки */
+  --color-stripe: var(--app-stripe, #e4e8ec);
 }
 
-/* мелкие подписи — 13 px вместо 12 */
+/* мелкие подписи — 13 px вместо 12; «Сводка» крупно: главная цифра 40 px,
+   крупная строка 21 px, строки пояснений и клетки таблиц 17 px */
 @theme {
   --text-xs: 0.8125rem;
   --text-xs--line-height: calc(1.125 / 0.8125);
+  /* не шире экрана и при крупном шрифте телефона: 11vw — 40 px на 360 px */
+  --text-big: min(2.5rem, 11vw);
+  --text-big--line-height: 1.05;
+  --text-fact: 1.3125rem;
+  --text-fact--line-height: 1.25;
+  --text-line: 1.0625rem;
+  --text-line--line-height: 1.35;
+  /* вкладки приложения: 16 px, но четыре влезают в ряд и при крупном шрифте */
+  --text-tab: min(1rem, 4.4vw);
 }
 
 :root[data-scheme="dark"] {
@@ -48,6 +65,7 @@
   --calendar-planned: #6cd4ff;
   --calendar-payment: #ff9f1c;
   --calendar-outline: #5b7089;
+  --app-stripe: #2e3b4c;
 }
 
 html,

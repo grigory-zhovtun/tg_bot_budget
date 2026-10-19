@@ -108,6 +108,16 @@ describe("theme colors", () => {
     expect(worst(pair.dark, DARK_BACKGROUNDS)).toBeGreaterThanOrEqual(6);
   });
 
+  it("keeps white text on status badges above 6:1", () => {
+    const badges = [
+      ...CSS.matchAll(/--color-chip-([a-z]+):\s*(#[0-9a-f]{6})/g),
+    ].map((m) => [m[1] ?? "", m[2] ?? ""] as const);
+    expect(badges.map(([name]) => name)).toEqual(["bad", "mid", "good"]);
+    for (const [name, color] of badges) {
+      expect(contrast("#ffffff", color), name).toBeGreaterThanOrEqual(6);
+    }
+  });
+
   it("warns in orange, never in red text", () => {
     const pair = colors.danger;
     expect(pair).toBeDefined();

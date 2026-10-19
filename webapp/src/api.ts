@@ -552,7 +552,7 @@ export interface MonthPlan {
 export interface EventValue {
   name: string;
   day: number;
-  amount: string; // «1000000», «-650.5»
+  amount: string; // «1000000», «-380.5»
   currency: string;
 }
 

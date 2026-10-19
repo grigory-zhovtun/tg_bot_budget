@@ -8,8 +8,9 @@ import type {
   SavingsMonth,
   SavingsScreen,
 } from "../api";
-import { short } from "../format";
+import { money, moneyText } from "../format";
 import { useResource, useStore } from "../store";
+import { Card, Fact, Good, Line, Table, Warn } from "./blocks";
 import CushionCard from "./CushionCard";
 import OrderSheet from "./OrderSheet";
 import PercentSheet from "./PercentSheet";
@@ -18,13 +19,7 @@ import PiggySheet from "./PiggySheet";
 import SaveSheet from "./SaveSheet";
 import SavingsCard from "./SavingsCard";
 import YearPlan from "./YearPlan";
-import {
-  enoughText,
-  MONTHS_IN,
-  monthIndex,
-  percentText,
-  piggyMoney,
-} from "./piggyText";
+import { MONTHS_IN, monthIndex, percentText } from "./piggyText";
 
 interface Props {
   api: Api;
@@ -43,19 +38,42 @@ interface SetAsideProps {
 }
 
 const GOAL_STEP = 1000; // в таблицу цель пишется до тысячи
+const NBSP = "\u00a0";
 
-/** Q20 вкладки разошлась с копилками: «В плане месяца «Отложить» — W, …». */
-function goalText(goal: SavingsGoal | null): string | null {
+/** Q20 вкладки разошлась с копилками: сколько в плане и сколько нужно; сходится — null. */
+function goalDiffers(
+  goal: SavingsGoal | null,
+): { inPlan: number; needed: number } | null {
   if (!goal) return null;
   const inPlan = goal.in_plan ?? 0;
   if (goal.in_plan !== null && Math.abs(inPlan - goal.suggested) < GOAL_STEP) {
     return null;
   }
-  return `В плане месяца «Отложить» — ${short(inPlan)}, по копилкам нужно ${short(goal.suggested)}: поправьте в «Плане»`;
+  return { inPlan, needed: goal.suggested };
 }
 
-/** «Откладываем N % с поступлений»: сколько пришло, сколько отложить и кому,
- * успеваем ли к срокам и хватает ли на жизнь. */
+/** Хватает ли на жизнь после взносов: вывод строкой, числа — строками ниже. */
+function EnoughLines({ enough }: { enough: Enough }) {
+  return (
+    <>
+      {enough.gap < 0 ? (
+        <Warn>На жизнь не хватит</Warn>
+      ) : (
+        <Good>На жизнь хватает</Good>
+      )}
+      <Line>{`останется ${money(enough.life)}`}</Line>
+      <Line>{`обычные траты ${money(enough.ordinary)}`}</Line>
+      <Line>
+        {enough.gap < 0
+          ? `разница ${money(-enough.gap)}`
+          : `запас ${money(enough.gap)}`}
+      </Line>
+    </>
+  );
+}
+
+/** «Откладываем N %»: сколько пришло, сколько отложить и куда, успеваем ли к
+ * срокам и хватает ли на жизнь. */
 function SetAside({
   month,
   piggies,
@@ -64,75 +82,72 @@ function SetAside({
   onSave,
   onPercent,
 }: SetAsideProps) {
-  const differs = goalText(goal);
+  const differs = goalDiffers(goal);
   const named = MONTHS_IN[monthIndex(month.month)] ?? month.month;
-  const parts = piggies
+  const rows = piggies
     .filter((piggy) => piggy.status !== "broken" && piggy.now > 0)
-    .map((piggy) => `«${piggy.name}» ${piggyMoney(piggy.now, piggy.currency)}`)
-    .join(", ");
-  const line = [
-    parts,
-    month.cushion > 0 ? `в подушку ${short(month.cushion)}` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
+    .map((piggy) => [piggy.name, moneyText(piggy.now, piggy.currency)]);
+  if (month.cushion > 0) rows.push(["подушка", money(month.cushion)]);
   const needed = month.percent_needed;
+  const percent = `${percentText(month.percent)}${NBSP}%`;
   return (
-    <section
-      aria-label="Откладываем с поступлений"
-      className="flex flex-col gap-1 rounded-2xl bg-section p-4"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="font-semibold">
-          {`Откладываем ${percentText(month.percent)} % с поступлений`}
-        </h2>
-        {onPercent && (
-          <button
-            type="button"
-            className="shrink-0 font-semibold text-link"
-            onClick={onPercent}
-          >
-            Изменить
-          </button>
-        )}
-      </div>
-      {month.percent_source === "bad" && (
-        <p className="text-sm font-semibold text-warn">
-          {`Процент в таблице не читается — считаю по ${percentText(month.percent)} %`}
-        </p>
+    <Card label="Откладываем с поступлений">
+      <h2 className="text-fact font-extrabold">{`Откладываем ${percent}`}</h2>
+      <Line>с каждого поступления</Line>
+      {onPercent && (
+        <button
+          type="button"
+          className="self-start text-line font-extrabold text-link"
+          onClick={onPercent}
+        >
+          Изменить процент
+        </button>
       )}
-      <p>
-        {month.received > 0
-          ? `В ${named} пришло ${short(month.received)} — отложить ${short(month.due)}`
-          : `В ${named} поступлений ещё не было`}
-      </p>
-      {line && <p>{line}</p>}
+      {month.percent_source === "bad" && (
+        <>
+          <Warn>Процент не читается</Warn>
+          <Line>{`считаю по ${percent}`}</Line>
+        </>
+      )}
+      {month.received > 0 ? (
+        <>
+          <Fact>{`Отложить ${money(month.due)}`}</Fact>
+          <Line>{`в ${named} пришло ${money(month.received)}`}</Line>
+        </>
+      ) : (
+        <Line>{`в ${named} поступлений ещё не было`}</Line>
+      )}
+      {rows.length > 0 && (
+        <Table head={["копилка", "сумма"]} align="lr" rows={rows} />
+      )}
       {needed !== null && month.percent < needed && (
-        <p className="text-sm font-semibold text-warn">
-          {`Чтобы успеть всё к срокам, нужно ${needed} %`}
-        </p>
+        <>
+          <Warn>{`К срокам нужно ${needed}${NBSP}%`}</Warn>
+          <Line>чтобы успеть все копилки</Line>
+        </>
       )}
       {needed !== null && month.percent >= needed && (
-        <p className="text-sm font-semibold text-ok">Успеваем всё к срокам ✓</p>
+        <Good>Успеваем всё к срокам</Good>
       )}
-      {enough && (
-        <p
-          className={`text-sm font-semibold ${enough.gap < 0 ? "text-danger" : "text-ok"}`}
-        >
-          {enoughText(enough)}
-        </p>
+      {enough && <EnoughLines enough={enough} />}
+      {differs && (
+        <>
+          <Warn>План месяца не сходится</Warn>
+          <Line>{`в плане «Отложить» ${money(differs.inPlan)}`}</Line>
+          <Line>{`по копилкам нужно ${money(differs.needed)}`}</Line>
+          <Line>поправьте во вкладке «План»</Line>
+        </>
       )}
-      {differs && <p className="text-sm font-semibold text-warn">{differs}</p>}
       {onSave && (
         <button
           type="button"
-          className="mt-2 h-11 rounded-xl bg-button font-semibold text-button-text"
+          className="mt-2 h-12 rounded-xl bg-button text-lg font-extrabold text-button-text"
           onClick={onSave}
         >
           Отложил…
         </button>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -203,7 +218,11 @@ export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
     return loading ? <Skeleton /> : null;
   }
   if (data.status === "no_month_tab") {
-    return <p>Вкладки месяца нет — бот создаёт её 1-го числа.</p>;
+    return (
+      <p className="text-line">
+        Вкладки месяца нет — бот создаёт её 1-го числа.
+      </p>
+    );
   }
   const names = Object.fromEntries(
     data.piggies.map((piggy) => [piggy.id, piggy.name]),
@@ -227,13 +246,13 @@ export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
       {data.cushion && <CushionCard cushion={data.cushion} />}
       <section className="flex flex-col gap-2" aria-label="Копилки">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="font-semibold">🐷 Копилки</h2>
+          <h2 className="text-fact font-extrabold">🐷 Копилки</h2>
           {boot && (
             <div className="flex gap-4">
               {ordered.length > 1 && (
                 <button
                   type="button"
-                  className="font-semibold text-link"
+                  className="text-line font-extrabold text-link"
                   onClick={() => setSetting("order")}
                 >
                   Порядок
@@ -241,7 +260,7 @@ export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
               )}
               <button
                 type="button"
-                className="font-semibold text-link"
+                className="text-line font-extrabold text-link"
                 onClick={() => setOpened("new")}
               >
                 ＋ Копилка
@@ -260,7 +279,7 @@ export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
             ))}
           </ul>
         ) : (
-          <p className="text-sm">
+          <p className="text-line">
             Заведите копилку на Новый год, отпуск или другую большую трату — бот
             разложит взносы по месяцам
           </p>

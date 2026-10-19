@@ -1,43 +1,61 @@
 import type { Piggy } from "../api";
-import { dayMonth, piggyMoney, whenText } from "./piggyText";
+import { moneyText } from "../format";
+import { Chip, Good, Line, Warn } from "./blocks";
+import { dayMonth, whenText } from "./piggyText";
 
 interface Props {
   piggy: Piggy;
   onOpen?: (piggy: Piggy) => void;
 }
 
+/** Статус внизу карточки: хорошее — зелёной плашкой, остальное — предупреждением. */
 function Status({ piggy }: { piggy: Piggy }) {
-  const money = (value: number) => piggyMoney(value, piggy.currency);
+  const money = (value: number) => moneyText(value, piggy.currency);
   switch (piggy.status) {
     case "on_track":
-      return <p className="text-sm font-semibold text-ok">успеваем</p>;
+      return (
+        <div>
+          <Chip tone="good">✓ успеваем</Chip>
+        </div>
+      );
+    case "done":
+      return (
+        <div>
+          <Chip tone="good">✓ собрано</Chip>
+        </div>
+      );
     case "late":
       return (
-        <p className="text-sm font-semibold text-danger">
-          {`к сроку не успеть — не хватает ${money(piggy.short)}`}
-        </p>
+        <>
+          <Warn>К сроку не успеть</Warn>
+          <Line>{`не хватает ${money(piggy.short)}`}</Line>
+        </>
       );
     case "short":
       return (
-        <p className="text-sm font-semibold text-danger">
-          {`⚠ к ${dayMonth(piggy.deadline ?? "")} будет ${money(piggy.forecast ?? 0)} из ${money(piggy.target ?? 0)} — не хватит ${money(piggy.short)}`}
-        </p>
+        <>
+          <Warn>{`Не хватит ${money(piggy.short)}`}</Warn>
+          <Line>
+            {`к ${dayMonth(piggy.deadline ?? "")} будет ${money(piggy.forecast ?? 0)}`}
+          </Line>
+          <Line>{`нужно ${money(piggy.target ?? 0)}`}</Line>
+        </>
       );
     case "no_target":
-      return <p className="text-sm font-semibold text-warn">сумма?</p>;
-    case "done":
-      return <p className="text-sm font-semibold text-ok">собрано ✓</p>;
+      return <Warn>Не указана сумма</Warn>;
     case "leftover":
       return (
-        <p className="text-sm font-semibold text-warn">
-          {`срок прошёл, осталось ${money(piggy.leftover)}`}
-        </p>
+        <>
+          <Warn>Срок прошёл</Warn>
+          <Line>{`осталось ${money(piggy.leftover)}`}</Line>
+        </>
       );
     case "broken":
       return (
-        <p className="text-sm font-semibold text-danger">
-          {`Проверьте строку ${piggy.row} на листе «Копилки»`}
-        </p>
+        <>
+          <Warn>{`Проверьте строку ${piggy.row}`}</Warn>
+          <Line>на листе «Копилки»</Line>
+        </>
       );
     case "goal":
       return null;
@@ -46,7 +64,7 @@ function Status({ piggy }: { piggy: Piggy }) {
 
 /** Карточка копилки: сколько накоплено, срок, взнос месяца и статус. */
 export default function PiggyCard({ piggy, onOpen }: Props) {
-  const money = (value: number) => piggyMoney(value, piggy.currency);
+  const money = (value: number) => moneyText(value, piggy.currency);
   const target = piggy.target;
   const share =
     target !== null && target > 0
@@ -58,19 +76,19 @@ export default function PiggyCard({ piggy, onOpen }: Props) {
         {piggy.order !== null && (
           <span
             aria-label={`Важность ${piggy.order}`}
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-text text-sm font-bold text-bg"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-text text-base font-black text-bg"
           >
             {piggy.order}
           </span>
         )}
-        <h3 className="font-semibold">{piggy.name}</h3>
+        <h3 className="text-fact font-extrabold">{piggy.name}</h3>
       </div>
       {piggy.status !== "broken" && (
         <>
-          <p className="text-sm">
-            {target !== null
-              ? `накоплено ${money(piggy.collected)} из ${money(target)}`
-              : `накоплено ${money(piggy.collected)}`}
+          <p className="text-line">
+            накоплено{" "}
+            <strong className="font-extrabold">{money(piggy.collected)}</strong>
+            {target !== null ? ` из ${money(target)}` : ""}
           </p>
           {share !== null && (
             <div
@@ -79,7 +97,7 @@ export default function PiggyCard({ piggy, onOpen }: Props) {
               aria-valuemin={0}
               aria-valuemax={100}
               aria-valuenow={Math.round(share * 100)}
-              className="h-2.5 overflow-hidden rounded-full border border-outline"
+              className="my-1 h-3 overflow-hidden rounded-full border border-outline"
             >
               <div
                 className={`h-full rounded-full ${share >= 1 ? "bg-ok" : "bg-warn"}`}
@@ -88,18 +106,17 @@ export default function PiggyCard({ piggy, onOpen }: Props) {
             </div>
           )}
           {piggy.balance !== piggy.collected && (
-            <p className="text-sm">{`в копилке ${money(piggy.balance)}`}</p>
+            <Line>{`в копилке ${money(piggy.balance)}`}</Line>
           )}
-          <p className="text-sm">{whenText(piggy)}</p>
+          <Line>{whenText(piggy)}</Line>
           {piggy.this_month > 0 && (
-            <p className="text-sm">
-              {`в этом месяце ${money(piggy.this_month)}${piggy.left_this_month > 0 ? "" : " — отложено ✓"}`}
-            </p>
+            <Line>{`в этом месяце ${money(piggy.this_month)}`}</Line>
+          )}
+          {piggy.this_month > 0 && piggy.left_this_month <= 0 && (
+            <Good>отложено</Good>
           )}
           {piggy.leftover > 0 && piggy.status !== "leftover" && (
-            <p className="text-sm">
-              {`осталось с прошлого раза ${money(piggy.leftover)}`}
-            </p>
+            <Line>{`осталось с прошлого раза ${money(piggy.leftover)}`}</Line>
           )}
         </>
       )}

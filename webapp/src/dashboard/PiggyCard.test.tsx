@@ -21,22 +21,23 @@ function card(changes: Partial<Piggy>) {
 describe("PiggyCard", () => {
   it("says when the deadline cannot be met", () => {
     card({ status: "late", short: 3_000_000 });
-    expect(
-      screen.getByText("к сроку не успеть — не хватает 3,00 млн").className,
-    ).toContain("text-danger");
+    expect(screen.getByText("⚠️ К сроку не успеть").className).toContain(
+      "text-danger",
+    );
+    expect(screen.getByText("не хватает 3 000 000")).toBeTruthy();
   });
 
   it("marks a collected piggy and this month's part set aside", () => {
     card({ status: "done", collected: 12_000_000, left_this_month: 0 });
-    expect(screen.getByText("собрано ✓")).toBeTruthy();
-    expect(
-      screen.getByText("в этом месяце 6,00 млн — отложено ✓"),
-    ).toBeTruthy();
+    expect(screen.getByText("✓ собрано").className).toContain("bg-chip-good");
+    expect(screen.getByText("в этом месяце 6 000 000")).toBeTruthy();
+    expect(screen.getByText("✓ отложено").className).toContain("text-ok");
   });
 
   it("says what is left after a one-time deadline", () => {
     card({ status: "leftover", repeat: "once", leftover: 1_000_000 });
-    expect(screen.getByText("срок прошёл, осталось 1,00 млн")).toBeTruthy();
+    expect(screen.getByText("⚠️ Срок прошёл")).toBeTruthy();
+    expect(screen.getByText("осталось 1 000 000")).toBeTruthy();
   });
 
   it("names what is left from last year", () => {
@@ -46,23 +47,25 @@ describe("PiggyCard", () => {
 
   it("shows what is in the piggy after spending from it", () => {
     card({ collected: 12_000_000, balance: 9_600_000, spent: 2_400_000 });
-    expect(screen.getByText("накоплено 12,00 млн из 12,00 млн")).toBeTruthy();
-    expect(screen.getByText("в копилке 9,60 млн")).toBeTruthy();
+    expect(screen.getByText("12 000 000", { selector: "strong" })).toBeTruthy();
+    expect(screen.getByText("в копилке 9 600 000")).toBeTruthy();
     const bar = screen.getByRole("progressbar", { name: "Новый год: собрано" });
     expect(bar.getAttribute("aria-valuenow")).toBe("100");
   });
 
-  it("shows the importance number", () => {
+  it("shows the importance number next to a big name", () => {
     card({ order: 1 });
     expect(screen.getByLabelText("Важность 1").textContent).toBe("1");
+    expect(screen.getByRole("heading").className).toContain("text-fact");
   });
 
   it("says what a short piggy will have by the deadline", () => {
     card({ status: "short", forecast: 3_000_000, short: 9_000_000 });
-    expect(
-      screen.getByText(
-        "⚠ к 20.12 будет 3,00 млн из 12,00 млн — не хватит 9,00 млн",
-      ).className,
-    ).toContain("text-danger");
+    expect(screen.getByText("⚠️ Не хватит 9 000 000").className).toContain(
+      "text-danger",
+    );
+    // восьмизначные суммы в одну фразу не влезают: прогноз и цель — разными строками
+    expect(screen.getByText("к 20.12 будет 3 000 000")).toBeTruthy();
+    expect(screen.getByText("нужно 12 000 000")).toBeTruthy();
   });
 });
