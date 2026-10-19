@@ -270,6 +270,13 @@ def build_application(
     app.add_handler(MessageHandler(filters.Document.ALL, messages.document_handler))
 
     app.add_error_handler(on_error)
+    # сумма квартплаты — в переменной окружения; в логе только задана ли она
+    if config.RENT_CASH_USD is None:
+        logger.info(
+            "RENT_CASH_USD not set: every USD cash withdrawal is marked for a check"
+        )
+    else:
+        logger.info("RENT_CASH_USD is set: cash rent of that sum needs no check")
     _schedule_daily_report(app)
     _schedule_month_tab(app)
     _schedule_weekly_digest(app)

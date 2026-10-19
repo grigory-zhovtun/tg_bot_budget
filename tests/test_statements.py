@@ -63,6 +63,9 @@ def txn(
     )
 
 
+RENT_CASH = 380.0  # выдуманная квартплата наличными; настоящая — в переменной Render
+
+
 def fact_values(*rows: list[object]) -> list[list[object]]:
     header = ["Дата", "Категория", "Название", "Сумма", "Баланс", "Комм", "Вал", "Ист"]
     return [header, *rows]
@@ -244,7 +247,7 @@ def test_merchant_core() -> None:
             800,
             "",
         ),
-        ("VISA 3434 USD", -650, "Списание по выд нал в POS KASSA", st.RENT, 650, ""),
+        ("VISA 3434 USD", -380, "Списание по выд нал в POS KASSA", st.RENT, 380, ""),
         (
             "VISA 3434 USD",
             -450,
@@ -330,7 +333,9 @@ def test_categorize_rules(
     column_d: float,
     review: str,
 ) -> None:
-    [item] = st.categorize([txn(source, amount, details)], {}, BOOK, CATALOG)
+    [item] = st.categorize(
+        [txn(source, amount, details)], {}, BOOK, CATALOG, rent_cash_usd=RENT_CASH
+    )
     row = item.row
     assert ((row.category, row.subcategory), row.amount, item.review) == (
         target,
@@ -540,6 +545,26 @@ def statement(*txns: st.Txn, start: date = date(2026, 10, 1)) -> st.Statement:
     return st.Statement(
         "VISA 9090 UZS", list(txns), (start, STATEMENT_DAY), STATEMENT_DAY
     )
+
+
+def test_cash_rent_is_marked_when_its_sum_is_not_set() -> None:
+    cash = txn("VISA 3434 USD", -380, "Списание по выд нал в POS KASSA")
+    [item] = st.categorize([cash], {}, BOOK, CATALOG)
+    assert ((item.row.category, item.row.subcategory), item.review) == (
+        st.RENT,
+        "квартплата?",
+    )
+
+
+def test_plan_passes_the_rent_sum_on() -> None:
+    cash = txn(
+        "VISA 3434 USD", -380, "Списание по выд нал в POS KASSA", date(2026, 10, 5)
+    )
+    usd = st.Statement(
+        "VISA 3434 USD", [cash], (date(2026, 10, 1), STATEMENT_DAY), STATEMENT_DAY
+    )
+    plan = st.plan_import([usd], CATALOG, fact_values(), {}, rent_cash_usd=RENT_CASH)
+    assert [(r.row.subcategory, r.review) for r in plan.rows] == [("квартплата", "")]
 
 
 def test_plan_skips_loaded_operations_and_moves_the_mark() -> None:

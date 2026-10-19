@@ -151,7 +151,13 @@ async def _prepare(
     names = new_merchants(fresh, catalog.sources, book, memory)
     suggestions = await _suggestions(context, chat_id, message, names, catalog)
     planned, skipped = sms_rows(
-        fresh, catalog.sources, book, memory, suggestions, rates
+        fresh,
+        catalog.sources,
+        book,
+        memory,
+        suggestions,
+        rates,
+        rent_cash_usd=config.RENT_CASH_USD,
     )
     rows: list[SheetRow] = []
     flags: list[str | None] = []

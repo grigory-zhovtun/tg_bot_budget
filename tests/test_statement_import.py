@@ -210,6 +210,24 @@ async def test_statement_preview_then_write() -> None:
     assert len(sheets.appended) == 1
 
 
+async def test_the_rent_cash_sum_comes_from_the_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[float | None] = []
+    real = statement_import.plan_import
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs.get("rent_cash_usd"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(config, "RENT_CASH_USD", 380.0)
+    monkeypatch.setattr(statement_import, "plan_import", spy)
+    context = make_context(StatementSheets([], {}))
+    await receive(context, visa(purchase(48000, "OOO SHAVI CAFE")))
+    await run_preview(context)
+    assert seen and set(seen) == {380.0}
+
+
 async def test_cancel_changes_nothing() -> None:
     sheets = StatementSheets([], {})
     context = make_context(sheets)

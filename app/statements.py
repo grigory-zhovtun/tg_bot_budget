@@ -42,7 +42,6 @@ OWN_FEE_TERMINAL = "TM0105"  # перевод на свою UZCARD с комис
 OWN_FEE_RATE = 0.005
 FX_OUT_TERMINAL, FX_IN_TERMINAL = "TM0092", "TM0093"  # обмен сумов на доллары
 SBER_DEVICE = "3664002Y"  # зачисления на HUMO со Сбербанка («Перевод за рубеж»)
-RENT_CASH_USD = 650  # наличные USD в кассе банка — квартплата
 WINDOW_DAYS = 3  # банк проводит покупку через 1–3 дня
 NEAR_SHARE = 0.07  # пересчёт по курсу таблицы расходится с банком на 1–5 %
 TEMPORARY_MARK = "ВРЕМЕННАЯ"  # строка выравнивания до следующей выписки
@@ -449,8 +448,14 @@ def categorize(
     book: MerchantBook,
     catalog: Catalog,
     ai_categories: dict[str, tuple[str, str]] | None = None,
+    *,
+    rent_cash_usd: float | None = None,
 ) -> list[ImportRow]:
-    """Операции → строки fact по правилам таблицы (знак D: расход и доход плюс)."""
+    """Операции → строки fact по правилам таблицы (знак D: расход и доход плюс).
+
+    Наличные USD в кассе банка — квартплата; ровно rent_cash_usd — без пометки
+    «квартплата?» (None — помечается каждое такое снятие).
+    """
     result: list[ImportRow] = []
     ai_categories = ai_categories or {}
 
@@ -513,7 +518,8 @@ def categorize(
         if "выд нал" in det or "выд. нал" in det:
             if txn.kind == "visa_usd":
                 note = f"наличные {abs(value):.0f} USD в кассе → квартплата"
-                review = "" if abs(value) == RENT_CASH_USD else "квартплата?"
+                rent = rent_cash_usd is not None and abs(value) == rent_cash_usd
+                review = "" if rent else "квартплата?"
                 add(txn, RENT, note, flow, review)
             else:
                 add(txn, TRANSFERS, "снятие наличных (банкомат)", flow)
@@ -719,6 +725,8 @@ def plan_import(
     fact_values: list[list[Any]],
     marks: dict[str, date],
     ai_categories: dict[str, tuple[str, str]] | None = None,
+    *,
+    rent_cash_usd: float | None = None,
 ) -> ImportPlan:
     """Выписки (можно сразу несколько карт) → что записать в fact.
 
@@ -754,6 +762,8 @@ def plan_import(
             ]
 
     book = MerchantBook((f.category, f.subcategory, f.comment) for f in facts)
-    rows = categorize(fresh, pairs, book, catalog, ai_categories)
+    rows = categorize(
+        fresh, pairs, book, catalog, ai_categories, rent_cash_usd=rent_cash_usd
+    )
     plan.rows, plan.already, plan.adjustments = reconcile(rows, facts)
     return plan

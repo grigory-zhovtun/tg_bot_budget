@@ -218,7 +218,14 @@ async def _build_plan(context: ContextTypes.DEFAULT_TYPE, basket: Basket) -> Imp
     catalog = _catalog(context)
     fact = await asyncio.to_thread(gs_service.get_values, config.FACT_SHEET_NAME)
     marks = await asyncio.to_thread(gs_service.get_statement_marks)
-    plan = plan_import(basket.statements, catalog, fact, marks, basket.ai_categories)
+    plan = plan_import(
+        basket.statements,
+        catalog,
+        fact,
+        marks,
+        basket.ai_categories,
+        rent_cash_usd=config.RENT_CASH_USD,
+    )
 
     ai_service = context.bot_data.get("ai_service")
     unknown = [name for name in plan.unknown_merchants() if name not in basket.ai_asked]
@@ -235,7 +242,14 @@ async def _build_plan(context: ContextTypes.DEFAULT_TYPE, basket: Basket) -> Imp
     if not found:
         return plan
     basket.ai_categories.update(found)
-    return plan_import(basket.statements, catalog, fact, marks, basket.ai_categories)
+    return plan_import(
+        basket.statements,
+        catalog,
+        fact,
+        marks,
+        basket.ai_categories,
+        rent_cash_usd=config.RENT_CASH_USD,
+    )
 
 
 async def _preview_job(context: ContextTypes.DEFAULT_TYPE) -> None:
