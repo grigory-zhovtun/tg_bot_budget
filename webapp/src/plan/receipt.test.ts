@@ -7,7 +7,7 @@ function event(over: Partial<PlanEvent>): PlanEvent {
     slot: 0,
     name: "Аванс",
     day: 15,
-    amount: 2_720_000,
+    amount: 3_150_000,
     currency: "UZS",
     ...over,
   };
@@ -19,35 +19,35 @@ describe("receiptHint", () => {
       receiptHint(
         event({
           status: "done",
-          received: 2_720_000,
+          received: 3_150_000,
           received_on: "2026-10-15",
         }),
         "2026-10",
       ),
-    ).toBe("✓ пришло 2,72 млн · 15.10");
+    ).toBe("✓ пришло 3,15 млн · 15.10");
   });
 
   it("says a payment is paid", () => {
     const rent = event({
-      name: "Квартплата",
-      amount: -650,
+      name: "Аренда",
+      amount: -380,
       currency: "USD",
       status: "done",
-      received: -650,
+      received: -380,
       received_on: "2026-10-17",
     });
-    expect(receiptHint(rent, "2026-10")).toBe("✓ оплачено 650,00 USD · 17.10");
+    expect(receiptHint(rent, "2026-10")).toBe("✓ оплачено 380,00 USD · 17.10");
   });
 
   it("shows a part that came in", () => {
     const part = event({
-      amount: 108_000,
+      amount: 95_000,
       currency: "RUB",
       status: "partial",
-      received: 54_000,
+      received: 47_500,
     });
     expect(receiptHint(part, "2026-10")).toBe(
-      "пришло 54 000,00 RUB из 108 000,00 RUB",
+      "пришло 47 500,00 RUB из 95 000,00 RUB",
     );
   });
 

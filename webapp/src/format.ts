@@ -10,7 +10,7 @@ export function money(value: number, fraction = 0): string {
   return sign + (cents ? `${grouped},${cents}` : grouped);
 }
 
-/** «8,52 млн» от миллиона, иначе «650 000». */
+/** «8,52 млн» от миллиона, иначе «640 000». */
 export function short(value: number): string {
   if (Math.abs(value) >= 1_000_000) {
     const millions = (Math.abs(value) / 1_000_000).toFixed(2).replace(".", ",");
@@ -74,7 +74,7 @@ export function dayLabel(isoDay: string, today: string): string {
   return `${day}.${month}`;
 }
 
-/** Пункт жёлтого списка: «+2,72 млн» или «−650,00 USD». */
+/** Пункт жёлтого списка: «+3,15 млн» или «−380,00 USD». */
 export function itemAmount(
   amount: number,
   currency: string,

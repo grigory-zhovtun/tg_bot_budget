@@ -96,19 +96,19 @@ describe("plan draft", () => {
   });
 
   it("sends payments with a minus and cents with a dot", () => {
-    let draft = editRow(emptyDraft("2026-10"), row("квартплата|USD"), "650,5");
+    let draft = editRow(emptyDraft("2026-10"), row("квартплата|USD"), "380,5");
     draft = editEvent(draft, slot(2), {
       name: "Квартплата",
       day: 18,
       income: false,
-      text: "650,5",
+      text: "380,5",
       currency: "USD",
     });
     const body = toSave(draft);
     expect(body.rows).toEqual([
-      { key: "квартплата|USD", base: 500, plan: "650.5" },
+      { key: "квартплата|USD", base: 500, plan: "380.5" },
     ]);
-    expect(body.events[0]?.value?.amount).toBe("-650.5");
+    expect(body.events[0]?.value?.amount).toBe("-380.5");
     expect(body.goal).toBeNull();
   });
 

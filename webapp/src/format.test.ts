@@ -16,7 +16,7 @@ describe("money", () => {
     expect(money(48000)).toBe("48 000");
   });
   it("keeps cents for currency cards", () => {
-    expect(money(1824.86, 2)).toBe("1 824,86");
+    expect(money(1312.45, 2)).toBe("1 312,45");
     expect(withCurrency(12.5, "USD")).toBe("12,50 USD");
     expect(withCurrency(48000, "UZS")).toBe("48 000 UZS");
   });
@@ -26,7 +26,7 @@ describe("money", () => {
   it("shortens millions", () => {
     expect(short(8_520_000)).toBe("8,52 млн");
     expect(short(-8_520_000)).toBe("−8,52 млн");
-    expect(short(650_000)).toBe("650 000");
+    expect(short(640_000)).toBe("640 000");
   });
 });
 
@@ -43,8 +43,8 @@ describe("days", () => {
 
 describe("itemAmount", () => {
   it("shows incomes in sums and payments in their currency", () => {
-    expect(itemAmount(2_720_000, "UZS", 2_720_000)).toBe("+2,72 млн");
-    expect(itemAmount(-650, "USD", -7_800_000)).toBe("−650,00 USD");
+    expect(itemAmount(3_150_000, "UZS", 3_150_000)).toBe("+3,15 млн");
+    expect(itemAmount(-380, "USD", -4_560_000)).toBe("−380,00 USD");
   });
 });
 

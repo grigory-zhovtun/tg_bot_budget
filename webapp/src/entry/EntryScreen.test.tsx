@@ -65,7 +65,7 @@ describe("EntryScreen", () => {
       screen.getByRole("button", { name: /Записать 48\s000 UZS/ }),
     );
     expect(sent(api)).toMatchObject({
-      source: "VISA 9120 UZS",
+      source: "VISA 9090 UZS",
       category: "🍔 ЕДА",
       subcategory: "кофе",
       amount: "48000",
@@ -169,7 +169,7 @@ describe("EntryScreen", () => {
     const api = fakeApi();
     const user = userEvent.setup();
     renderEntry(api);
-    await user.click(screen.getByRole("radio", { name: "VISA 4058 USD" }));
+    await user.click(screen.getByRole("radio", { name: "VISA 3434 USD" }));
     await user.click(screen.getByRole("button", { name: "ЕДА" }));
     await user.click(screen.getByRole("button", { name: "кофе" }));
     for (const key of ["1", "2", ",", "5"]) {
@@ -179,7 +179,7 @@ describe("EntryScreen", () => {
       screen.getByRole("button", { name: /Записать 12,50 USD/ }),
     );
     expect(sent(api)).toMatchObject({
-      source: "VISA 4058 USD",
+      source: "VISA 3434 USD",
       amount: "12.5",
     });
   });
@@ -342,12 +342,12 @@ describe("EntryScreen", () => {
     rerender(
       <EntryScreen
         api={api}
-        boot={{ ...bootstrapFixture, default_source: "VISA 4058 USD" }}
+        boot={{ ...bootstrapFixture, default_source: "VISA 3434 USD" }}
         onCatalogChanged={changed}
       />,
     );
     expect(
-      screen.getByRole("radio", { name: "VISA 4058 USD", checked: true }),
+      screen.getByRole("radio", { name: "VISA 3434 USD", checked: true }),
     ).toBeTruthy();
   });
 
@@ -362,7 +362,7 @@ describe("EntryScreen", () => {
         onCatalogChanged={changed}
       />,
     );
-    await user.click(screen.getByRole("radio", { name: "VISA 4058 USD" }));
+    await user.click(screen.getByRole("radio", { name: "VISA 3434 USD" }));
     rerender(
       <EntryScreen
         api={api}
@@ -371,7 +371,7 @@ describe("EntryScreen", () => {
       />,
     );
     expect(
-      screen.getByRole("radio", { name: "VISA 4058 USD", checked: true }),
+      screen.getByRole("radio", { name: "VISA 3434 USD", checked: true }),
     ).toBeTruthy();
   });
 });

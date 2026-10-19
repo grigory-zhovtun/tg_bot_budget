@@ -56,7 +56,7 @@ describe("DashboardScreen", () => {
     render(<DashboardScreen api={fakeApi()} />);
     await show(user, "Впереди");
     // платёж списка — оранжевым, как точки платежей в календаре
-    expect(screen.getByText("−650,00 USD").className).toContain("text-payment");
+    expect(screen.getByText("−380,00 USD").className).toContain("text-payment");
     expect(screen.getByText(/ждём/)).toBeTruthy();
   });
 
