@@ -41,12 +41,15 @@ function Tile({ emoji, title, color, plan, minHeight, onPick }: TileProps) {
       >
         {emoji || "•"}
       </span>
-      <span className="mt-3 text-lg leading-tight font-semibold">{title}</span>
+      <span className="mt-3 text-lg leading-tight font-extrabold">{title}</span>
       {line && (
-        // строка плана прижата к низу: названия в ряду стоят на одной высоте
+        // строки плана прижаты к низу: названия в ряду стоят на одной высоте
         <span className="mt-auto flex w-full flex-col gap-1 pt-1">
-          <span id={id} className="text-[13px] text-hint">
-            {line.text}
+          <span id={id} className="flex flex-col">
+            <span className="text-line">{line.head}</span>{" "}
+            <span className="text-line font-extrabold whitespace-nowrap tabular-nums">
+              {line.sum}
+            </span>
           </span>
           <span
             className="h-1.5 w-full overflow-hidden rounded-full bg-[rgba(127,127,127,0.2)]"

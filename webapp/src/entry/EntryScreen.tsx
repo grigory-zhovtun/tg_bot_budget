@@ -25,6 +25,9 @@ import SourceChips from "./SourceChips";
 import { GroupTiles, SubTiles } from "./Tiles";
 
 const MAX_DAYS_BACK = 31;
+// «12 345 678» — ещё 40 px; длиннее — на ступень мельче, чтобы сумма с валютой
+// осталась в строке (как у главной цифры «Сводки»)
+const AMOUNT_FITS = 10;
 const CATALOG_FIELDS = ["source", "category", "subcategory"];
 // трата и её отмена меняют сводку, прогноз, факт плана и траты из копилок
 const CHANGED_BY_WRITES = ["dashboard", "forecast", "plan:", "savings"];
@@ -49,13 +52,13 @@ function Header({
       {onBack && (
         <button
           type="button"
-          className="shrink-0 whitespace-nowrap text-link"
+          className="shrink-0 whitespace-nowrap text-line font-bold text-link"
           onClick={onBack}
         >
           ← Назад
         </button>
       )}
-      <h2 className="text-xl font-bold">{title}</h2>
+      <h2 className="text-fact font-extrabold">{title}</h2>
     </div>
   );
 }
@@ -101,6 +104,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
     boot.sources.find((s) => s.name === source)?.currency ?? "UZS";
   const decimals = currency !== "UZS";
   const value = amountValue(amount);
+  const shown = displayAmount(amount);
   const label = `Записать ${withCurrency(value, currency)}`;
   const tg = telegram();
 
@@ -277,7 +281,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
       />
       {done && (
         <div
-          className="flex flex-col gap-1 rounded-2xl bg-section p-3 text-sm"
+          className="flex flex-col gap-1 rounded-2xl bg-section p-3 text-line"
           role="status"
         >
           {lines.map((line, index) => (
@@ -285,7 +289,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
           ))}
           <button
             type="button"
-            className="self-start text-danger disabled:opacity-50"
+            className="self-start py-1 text-line font-bold text-danger disabled:opacity-50"
             disabled={undoing}
             aria-busy={undoing}
             onClick={undo}
@@ -295,12 +299,12 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
         </div>
       )}
       {notice && (
-        <p className="rounded-2xl bg-section p-3 text-sm" role="status">
+        <p className="rounded-2xl bg-section p-3 text-line" role="status">
           {notice}
         </p>
       )}
       {error && (
-        <p className="text-sm text-danger" role="alert">
+        <p className="text-line font-bold text-danger" role="alert">
           {error}
         </p>
       )}
@@ -324,27 +328,31 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
       {step === "amount" && group && sub && (
         <div className="flex flex-col gap-3">
           <Header
-            title={`${group.title} · ${sub.icon} ${sub.name}`}
+            title={`${group.name} · ${sub.icon} ${sub.name}`}
             onBack={tg ? null : back}
           />
-          <p className="text-center text-4xl font-semibold" aria-live="polite">
-            {displayAmount(amount)}{" "}
-            <span className="text-xl text-hint">{currency}</span>
+          <p
+            className={`text-center font-black tabular-nums ${
+              shown.length > AMOUNT_FITS ? "text-big-long" : "text-big"
+            }`}
+            aria-live="polite"
+          >
+            {shown} <span className="text-fact font-extrabold">{currency}</span>
           </p>
-          <label className="flex flex-col gap-1 text-sm text-hint">
+          <label className="flex flex-col gap-1 text-line font-bold">
             Комментарий
             <input
-              className="rounded-xl bg-section px-3 py-2 text-base text-text"
+              className="min-h-12 rounded-xl bg-section px-3 py-2 text-lg font-normal text-text"
               value={comment}
               maxLength={200}
               onChange={(event) => setComment(event.target.value)}
             />
           </label>
-          <label className="flex items-center justify-between gap-3 text-sm text-hint">
+          <label className="flex items-center justify-between gap-3 text-line font-bold">
             <span>Дата: {dayLabel(day ?? boot.today, boot.today)}</span>
             <input
               type="date"
-              className="rounded-xl bg-section px-3 py-2 text-text"
+              className="rounded-xl bg-section px-3 py-2 text-lg font-normal text-text"
               value={day ?? boot.today}
               min={shiftDay(boot.today, -MAX_DAYS_BACK)}
               max={boot.today}
@@ -355,6 +363,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
             />
           </label>
           <Keypad
+            big
             decimals={decimals}
             onKey={(key: Key) =>
               setAmount((text) => press(text, key, decimals))
@@ -363,7 +372,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
           {!tg && (
             <button
               type="button"
-              className="h-12 rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
+              className="h-14 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
               disabled={value <= 0 || sending}
               onClick={submit}
             >

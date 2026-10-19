@@ -2,7 +2,7 @@
 
 import type { Dashboard } from "../api";
 import { filled, statusOf, type Status } from "../dashboard/status";
-import { short } from "../format";
+import { money } from "../format";
 
 export interface PlanFact {
   plan: number;
@@ -10,7 +10,8 @@ export interface PlanFact {
 }
 
 export interface PlanLine {
-  text: string;
+  head: string; // «осталось», «⚠️ сверх на», «вне плана»
+  sum: string; // целиком: «1 500 000»
   status: Status;
   filled: number;
 }
@@ -20,7 +21,8 @@ export interface PlanIndex {
   sub(group: string, name: string): PlanFact | undefined;
 }
 
-/** «осталось 200 000», «сверх на 50 000», «вне плана · 120 000»; null — нечего показать. */
+/** «осталось» / «200 000», «⚠️ сверх на» / «50 000», «вне плана» / «120 000» —
+ * двумя строками на плитке; null — нечего показать. */
 export function planLine(value: PlanFact | undefined): PlanLine | null {
   if (!value) return null;
   const { plan, fact } = value;
@@ -28,13 +30,11 @@ export function planLine(value: PlanFact | undefined): PlanLine | null {
   const status = statusOf(plan, fact);
   const share = filled(plan, fact);
   if (plan <= 0) {
-    return { text: `вне плана · ${short(fact)}`, status, filled: share };
+    return { head: "вне плана", sum: money(fact), status, filled: share };
   }
-  const text =
-    fact > plan
-      ? `сверх на ${short(fact - plan)}`
-      : `осталось ${short(plan - fact)}`;
-  return { text, status, filled: share };
+  return fact > plan
+    ? { head: "⚠️ сверх на", sum: money(fact - plan), status, filled: share }
+    : { head: "осталось", sum: money(plan - fact), status, filled: share };
 }
 
 export function planIndex(dashboard: Dashboard | null): PlanIndex {
