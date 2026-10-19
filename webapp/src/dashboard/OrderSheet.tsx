@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, type Api, type SavingsScreen } from "../api";
 import Sheet from "../plan/Sheet";
-import { dayMonth, forecastText } from "./piggyText";
+import { Line } from "./blocks";
+import { dayMonth, forecastLines } from "./piggyText";
 
 interface Props {
   api: Api;
@@ -96,36 +97,40 @@ export default function OrderSheet({
   }
 
   const arrow =
-    "flex h-11 w-11 items-center justify-center rounded-xl bg-bg text-2xl font-bold disabled:opacity-30";
+    "flex size-11 shrink-0 items-center justify-center rounded-xl bg-bg text-[26px] font-black disabled:opacity-30";
   return (
     <Sheet title="Порядок важности" onClose={onClose}>
-      <p>Если на все сроки не хватает, первой собирается копилка сверху.</p>
+      <div>
+        <Line>если на все сроки не хватает,</Line>
+        <Line>первой собирается копилка сверху</Line>
+      </div>
       <ul aria-label="Порядок важности" className="flex flex-col gap-2">
         {ids.map((id, index) => {
           const piggy = byId.get(id);
           if (!piggy) return null;
+          const { will, of } = forecastLines(
+            piggy,
+            `к ${dayMonth(piggy.deadline ?? "")}`,
+          );
           return (
             <li
               key={id}
-              className="flex items-center gap-3 rounded-2xl bg-section p-3"
+              className="flex items-center gap-3 rounded-2xl bg-section p-3 text-line"
             >
-              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-text text-sm font-bold text-bg">
-                {index + 1}
-              </span>
+              {/* стрелки — столбиком справа: строкам прогноза остаётся почти вся ширина */}
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <h4 className="font-semibold">{piggy.name}</h4>
-                <p className="text-sm">
-                  {`к ${dayMonth(piggy.deadline ?? "")} · `}
-                  <span
-                    className={`font-semibold ${
-                      piggy.status === "short" ? "text-danger" : "text-ok"
-                    }`}
-                  >
-                    {`будет ${forecastText(piggy)}`}
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-text text-line font-black text-bg">
+                    {index + 1}
                   </span>
-                </p>
+                  <h4 className="min-w-0 text-fact font-extrabold break-words">
+                    {piggy.name}
+                  </h4>
+                </div>
+                <p>{will}</p>
+                <p>{of}</p>
               </div>
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-2">
                 <button
                   type="button"
                   aria-label={`Выше «${piggy.name}»`}
@@ -150,14 +155,14 @@ export default function OrderSheet({
         })}
       </ul>
       {error && (
-        <p className="text-sm text-danger" role="alert">
+        <p className="text-line font-bold text-danger" role="alert">
           {error}
         </p>
       )}
       <button
         type="button"
         disabled={busy}
-        className="h-12 rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
+        className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
         onClick={save}
       >
         Сохранить порядок

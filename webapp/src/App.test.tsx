@@ -8,6 +8,9 @@ import { CACHE_KEY } from "./store";
 import { editRow, emptyDraft } from "./plan/draft";
 import { fakeApi } from "./test/fakeApi";
 
+// плитка «ЕДА» из dashboardFixture: перерасход — двумя строками
+const FOOD_TILE = { name: "ЕДА", description: /^⚠️ сверх на 300\s000$/ };
+
 describe("App", () => {
   it("opens the entry screen on the user's card", async () => {
     render(<App api={fakeApi()} />);
@@ -123,7 +126,7 @@ describe("App", () => {
     const api = fakeApi();
     const user = userEvent.setup();
     render(<App api={api} />);
-    expect(await screen.findByText("сверх на 300 000")).toBeTruthy();
+    expect(await screen.findByRole("button", FOOD_TILE)).toBeTruthy();
     await user.click(screen.getByRole("tab", { name: "Сводка" }));
     expect(screen.getByRole("region", { name: "Можно сегодня" })).toBeTruthy();
     expect(api.dashboard).toHaveBeenCalledTimes(1);
@@ -156,7 +159,7 @@ describe("App", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-10T09:00:00"));
     const first = render(<App api={fakeApi()} />);
-    expect(await screen.findByText("сверх на 300 000")).toBeTruthy();
+    expect(await screen.findByRole("button", FOOD_TILE)).toBeTruthy();
     first.unmount();
     const waiting = () => new Promise<never>(() => undefined);
     const user = userEvent.setup();
@@ -169,7 +172,7 @@ describe("App", () => {
       />,
     );
     // справочник и остатки на плитках — из памяти телефона, без ожидания
-    expect(screen.getByText("сверх на 300 000")).toBeTruthy();
+    expect(screen.getByRole("button", FOOD_TILE)).toBeTruthy();
     await user.click(screen.getByRole("tab", { name: "Сводка" }));
     expect(screen.getByRole("region", { name: "Можно сегодня" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Обновляю…" })).toBeTruthy();
@@ -203,7 +206,7 @@ describe("App", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-10T09:00:00"));
     const first = render(<App api={fakeApi()} />);
-    expect(await screen.findByText("сверх на 300 000")).toBeTruthy();
+    expect(await screen.findByRole("button", FOOD_TILE)).toBeTruthy();
     first.unmount();
     expect(localStorage.getItem(CACHE_KEY)).not.toBeNull();
     // подпись не та: сервер отказывает каждому запросу
@@ -227,7 +230,7 @@ describe("App", () => {
     ).toBeTruthy();
     expect(localStorage.getItem(CACHE_KEY)).toBeNull();
     // и на экране — не цифры с прошлого раза
-    expect(screen.queryByText("сверх на 300 000")).toBeNull();
+    expect(screen.queryByText("300 000")).toBeNull();
     vi.useRealTimers();
   });
 });

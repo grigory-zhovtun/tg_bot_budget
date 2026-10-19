@@ -175,7 +175,7 @@ async function show(user: ReturnType<typeof userEvent.setup>, name: string) {
 - «shows what is left today, the plan by groups and the chart» делится на три теста:
   - `"opens on «Сегодня» with what is left today"` — «Можно сегодня», «380 000», `/лимит 500 000 · потрачено 120 000/`, `aria-checked="true"` у «Сегодня», `queryByRole("region", { name: "План-факт по категориям" })` — `null`;
   - `"«Траты» shows the plan by groups and the daily chart"` — после `show(user, "Траты")`: `[data-status="over"]`, картинка «Траты по дням: 9 дней, сверх лимита — 2», «за 9 дней при плане 4,05 млн», «запас 1,10 млн», «можно 500 000 в день», «план 450 000 в день»; «Можно сегодня» — `null`;
-  - `"«Впереди» shows the list and the subscriptions"` — «−650,00 USD» с классом `text-payment`, `/ждём/`.
+  - `"«Впереди» shows the list and the subscriptions"` — «−380,00 USD» с классом `text-payment`, `/ждём/`.
 - «puts the daily spending right after the plan vs fact chart» → `"each section has its own cards"`: заголовки `h2` по вкладкам — «Сегодня» `["Остатки на картах"]`, «Траты» `["План-факт по категориям", "Траты по дням"]`, «Накопления» `["🛟 Подушка безопасности", "Норма сбережений"]`, «Впереди» `["Впереди", "Подписки"]`.
 - На «Траты» перед проверками: «says how far the finished days went over the plan», «says when the finished days match the plan exactly», «opens a group to show its subcategories», вторая половина «shows the cards now and where the money went this month» (регион «План-факт по категориям») и «лимита нет» в «says there is no limit today when the month is behind the plan».
 - На «Впереди»: «marks a row of the list that is late».

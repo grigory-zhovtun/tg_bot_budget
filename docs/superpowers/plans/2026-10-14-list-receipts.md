@@ -76,7 +76,7 @@ OCTOBER = date(2026, 10, 1)
 ADVANCE = Line(12, 15, 2_000_000, "UZS")
 SALARY = Line(13, 30, 10_000_000, "UZS")
 RUB_SALARY = Line(14, 28, 100_000, "RUB")
-RENT = Line(15, 18, -650, "USD")
+RENT = Line(15, 18, -380, "USD")
 LINES = [ADVANCE, SALARY, RUB_SALARY, RENT]
 
 
@@ -139,16 +139,16 @@ def test_small_purchases_do_not_close_a_payment() -> None:
 
 
 def test_one_spending_closes_one_payment() -> None:
-    twice = [RENT, Line(16, 20, -650, "USD")]
-    frame = transactions_frame([FACT_HEADER, rent(18, 650)], RATES)
+    twice = [RENT, Line(16, 20, -380, "USD")]
+    frame = transactions_frame([FACT_HEADER, rent(18, 380)], RATES)
     found = match_receipts(frame, twice, OCTOBER, date(2026, 10, 31))
     assert list(found) == [RENT.row]  # первой по дню
 
 
 def test_transfers_refunds_and_the_opening_balance_do_not_count() -> None:
     rows = [
-        fact_row(date(2026, 10, 18), "💳 СЧЕТА", "переводы", 650, "USD"),
-        rent(18, -650),  # возврат
+        fact_row(date(2026, 10, 18), "💳 СЧЕТА", "переводы", 380, "USD"),
+        rent(18, -380),  # возврат
         income(15, 2_000_000, sub="нач остаток"),
     ]
     assert received(*rows) == {}
@@ -353,7 +353,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
     assert forecast.items == (
         ForecastItem("Аванс", 15, 2_000_000, "UZS", 2_000_000, 12),
         ForecastItem("ЗП", 30, 10_000_000, "UZS", 10_000_000, 13),
-        ForecastItem("Квартплата", 18, -650, "USD", -7_800_000, 14),
+        ForecastItem("Квартплата", 18, -380, "USD", -4_560_000, 14),
     )
 ```
 
@@ -361,7 +361,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 
 ```python
 ADVANCE_PAID = fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000)
-RENT_PAID = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 650, "USD")
+RENT_PAID = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 380, "USD")
 
 
 def test_an_early_salary_is_not_counted_twice() -> None:
@@ -396,7 +396,7 @@ def test_a_payment_a_bit_off_its_sum_does_not_eat_the_day() -> None:
 
 
 def test_rent_paid_before_its_day_leaves_the_frozen_dollars() -> None:
-    early = fact_row(date(2026, 10, 16), "🏚️ ДОМ", "квартплата", 650, "USD")
+    early = fact_row(date(2026, 10, 16), "🏚️ ДОМ", "квартплата", 380, "USD")
     assert budget(date(2026, 10, 17), early).frozen == 350
 
 
@@ -1343,7 +1343,7 @@ function event(over: Partial<PlanEvent>): PlanEvent {
     slot: 0,
     name: "Аванс",
     day: 15,
-    amount: 2_720_000,
+    amount: 3_150_000,
     currency: "UZS",
     ...over,
   };
@@ -1353,27 +1353,27 @@ describe("receiptHint", () => {
   it("says what came in and when", () => {
     expect(
       receiptHint(
-        event({ status: "done", received: 2_720_000, received_on: "2026-10-15" }),
+        event({ status: "done", received: 3_150_000, received_on: "2026-10-15" }),
         "2026-10",
       ),
-    ).toBe("✓ пришло 2,72 млн · 15.10");
+    ).toBe("✓ пришло 3,15 млн · 15.10");
   });
 
   it("says a payment is paid", () => {
     const rent = event({
       name: "Квартплата",
-      amount: -650,
+      amount: -380,
       currency: "USD",
       status: "done",
-      received: -650,
+      received: -380,
       received_on: "2026-10-17",
     });
-    expect(receiptHint(rent, "2026-10")).toBe("✓ оплачено 650,00 USD · 17.10");
+    expect(receiptHint(rent, "2026-10")).toBe("✓ оплачено 380,00 USD · 17.10");
   });
 
   it("shows a part that came in", () => {
     const part = event({
-      amount: 108_000,
+      amount: 95_000,
       currency: "RUB",
       status: "partial",
       received: 54_000,

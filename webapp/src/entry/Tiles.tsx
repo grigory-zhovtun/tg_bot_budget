@@ -18,12 +18,15 @@ interface TileProps {
 function Tile({ emoji, title, color, plan, minHeight, onPick }: TileProps) {
   const id = useId();
   const line = planLine(plan);
+  // одно слово длиннее полплитки переносится с дефисом;
+  // несколько слов — по пробелам, без дефисов внутри слов
+  const oneWord = !title.trim().includes(" ");
   return (
     <button
       type="button"
       aria-label={title}
       aria-describedby={line ? id : undefined}
-      className="flex flex-col items-start rounded-3xl border p-4 text-left transition-transform duration-100 active:scale-[0.97]"
+      className="flex flex-col items-start rounded-3xl border px-3 py-4 text-left transition-transform duration-100 active:scale-[0.97]"
       style={{
         minHeight,
         background: tint(color, 0.14),
@@ -41,12 +44,21 @@ function Tile({ emoji, title, color, plan, minHeight, onPick }: TileProps) {
       >
         {emoji || "•"}
       </span>
-      <span className="mt-3 text-lg leading-tight font-semibold">{title}</span>
+      <span
+        className={`mt-3 w-full text-lg leading-tight font-extrabold break-words ${
+          oneWord ? "hyphens-auto" : ""
+        }`}
+      >
+        {title}
+      </span>
       {line && (
-        // строка плана прижата к низу: названия в ряду стоят на одной высоте
+        // строки плана прижаты к низу: названия в ряду стоят на одной высоте
         <span className="mt-auto flex w-full flex-col gap-1 pt-1">
-          <span id={id} className="text-[13px] text-hint">
-            {line.text}
+          <span id={id} className="flex flex-col">
+            <span className="text-line">{line.head}</span>{" "}
+            <span className="text-line font-extrabold whitespace-nowrap tabular-nums">
+              {line.sum}
+            </span>
           </span>
           <span
             className="h-1.5 w-full overflow-hidden rounded-full bg-[rgba(127,127,127,0.2)]"

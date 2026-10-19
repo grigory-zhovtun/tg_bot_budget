@@ -12,6 +12,7 @@ import { money, moneyText } from "../format";
 import { useResource, useStore } from "../store";
 import { Card, Fact, Good, Line, Table, Warn } from "./blocks";
 import CushionCard from "./CushionCard";
+import EnoughLines from "./EnoughLines";
 import OrderSheet from "./OrderSheet";
 import PercentSheet from "./PercentSheet";
 import PiggyCard from "./PiggyCard";
@@ -50,26 +51,6 @@ function goalDiffers(
     return null;
   }
   return { inPlan, needed: goal.suggested };
-}
-
-/** Хватает ли на жизнь после взносов: вывод строкой, числа — строками ниже. */
-function EnoughLines({ enough }: { enough: Enough }) {
-  return (
-    <>
-      {enough.gap < 0 ? (
-        <Warn>На жизнь не хватит</Warn>
-      ) : (
-        <Good>На жизнь хватает</Good>
-      )}
-      <Line>{`останется ${money(enough.life)}`}</Line>
-      <Line>{`обычные траты ${money(enough.ordinary)}`}</Line>
-      <Line>
-        {enough.gap < 0
-          ? `разница ${money(-enough.gap)}`
-          : `запас ${money(enough.gap)}`}
-      </Line>
-    </>
-  );
 }
 
 /** «Откладываем N %»: сколько пришло, сколько отложить и куда, успеваем ли к

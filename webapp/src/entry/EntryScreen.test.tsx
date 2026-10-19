@@ -22,6 +22,7 @@ import {
 } from "../mocks/fixtures";
 import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
+import { nb } from "../test/text";
 import EntryScreen from "./EntryScreen";
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -42,6 +43,15 @@ async function fillCoffee(user: User): Promise<void> {
   for (const key of ["4", "8", "000"]) {
     await user.click(screen.getByRole("button", { name: key }));
   }
+}
+
+/** Строка плана на плитке: «⚠️ сверх на 300 000»; null — плитка без плана. */
+function tilePlan(name: string): string | null {
+  const id = screen
+    .getByRole("button", { name })
+    .getAttribute("aria-describedby");
+  const note = id ? document.getElementById(id) : null;
+  return note ? (note.textContent ?? "") : null;
 }
 
 function sent(api: Api, call = 0): ExpenseInput {
@@ -224,10 +234,12 @@ describe("EntryScreen", () => {
   it("shows what is left in the plan on the tiles", async () => {
     const user = userEvent.setup();
     renderEntry(fakeApi());
-    expect(await screen.findByText("сверх на 300 000")).toBeTruthy(); // ЕДА
+    await waitFor(() => {
+      expect(tilePlan("ЕДА")).toBe(nb("⚠️ сверх на 300 000"));
+    });
     await user.click(screen.getByRole("button", { name: /ЕДА/ }));
-    expect(await screen.findByText("осталось 50 000")).toBeTruthy(); // кофе
-    expect(screen.getByText("сверх на 350 000")).toBeTruthy(); // кафе
+    expect(tilePlan("кофе")).toBe(nb("осталось 50 000"));
+    expect(tilePlan("кафе")).toBe(nb("⚠️ сверх на 350 000"));
   });
 
   it("works without the plan when the sheet does not answer", async () => {
@@ -293,12 +305,13 @@ describe("EntryScreen", () => {
     renderEntry(fakeApi({ dashboard }));
     await fillCoffee(user);
     await user.click(screen.getByRole("button", { name: /Записать/ }));
-    expect(await screen.findByText("сверх на 400 000")).toBeTruthy();
+    await waitFor(() => {
+      expect(tilePlan("ЕДА")).toBe(nb("⚠️ сверх на 400 000"));
+    });
     await act(async () => {
       answerFirst(dashboardFixture);
     });
-    expect(screen.getByText("сверх на 400 000")).toBeTruthy();
-    expect(screen.queryByText("сверх на 300 000")).toBeNull();
+    expect(tilePlan("ЕДА")).toBe(nb("⚠️ сверх на 400 000"));
   });
 
   it("hides the plan it could not refresh after a write", async () => {
@@ -308,13 +321,16 @@ describe("EntryScreen", () => {
       .mockRejectedValueOnce(new ApiError(503, "sheets_unavailable", "нет"));
     const user = userEvent.setup();
     renderEntry(fakeApi({ dashboard }));
-    expect(await screen.findByText("сверх на 300 000")).toBeTruthy();
+    await waitFor(() => {
+      expect(tilePlan("ЕДА")).toBe(nb("⚠️ сверх на 300 000"));
+    });
     await fillCoffee(user);
     await user.click(screen.getByRole("button", { name: /Записать/ }));
     await screen.findByText(/✅ 48 000 UZS/);
     await waitFor(() => {
-      expect(screen.queryByText(/^(осталось|сверх на)/)).toBeNull();
+      expect(tilePlan("ЕДА")).toBeNull();
     });
+    expect(screen.queryByText(/^(осталось|⚠️ сверх на|вне плана)$/)).toBeNull();
   });
 
   it("updates what is left after an undo", async () => {
@@ -373,5 +389,93 @@ describe("EntryScreen", () => {
     expect(
       screen.getByRole("radio", { name: "VISA 3434 USD", checked: true }),
     ).toBeTruthy();
+  });
+
+  it("shows the cards as big bold buttons", () => {
+    renderEntry(fakeApi());
+    const card = screen.getByRole("radio", { name: "VISA 9090 UZS" });
+    expect(card.className).toContain("text-line");
+    expect(card.className).toContain("font-extrabold");
+    expect(card.className).not.toContain("text-sm");
+  });
+
+  it("writes the amount step big, in the text colour", async () => {
+    const user = userEvent.setup();
+    renderEntry(fakeApi());
+    await fillCoffee(user);
+    const back = screen.getByRole("button", { name: "← Назад" });
+    expect(back.className).toContain("text-line");
+    expect(back.className).toContain("font-bold");
+    const title = screen.getByRole("heading", {
+      name: "🍔 ЕДА · ☕ кофе",
+    });
+    expect(title.className).toContain("text-fact");
+    // длинная пара переносится только между группой и подкатегорией
+    expect(
+      [...title.querySelectorAll(".whitespace-nowrap")].map(
+        (part) => part.textContent,
+      ),
+    ).toEqual(["🍔 ЕДА", "☕ кофе"]);
+    const amount = screen.getByText("48 000");
+    expect(amount.className).toContain("text-big");
+    expect(amount.className).not.toContain("text-big-long");
+    const currency = screen.getByText("UZS");
+    expect(currency.className).not.toContain("text-hint");
+    for (const text of ["Комментарий", "Дата: Сегодня"]) {
+      const label = screen.getByText(text).closest("label");
+      expect(label?.className).toContain("text-line");
+      expect(label?.className).toContain("font-bold");
+      expect(label?.className).not.toContain("text-hint");
+    }
+    expect(screen.getByLabelText("Комментарий").className).toContain("text-lg");
+    const five = screen.getByRole("button", { name: "5" });
+    expect(five.className).toContain("text-[28px]");
+    const write = screen.getByRole("button", { name: /Записать 48\s000 UZS/ });
+    expect(write.className).toContain("text-lg");
+    expect(write.className).toContain("font-extrabold");
+  });
+
+  it("makes a long amount a step smaller so it stays on one line", async () => {
+    const user = userEvent.setup();
+    renderEntry(fakeApi());
+    await fillCoffee(user);
+    for (const key of ["000", "000"]) {
+      await user.click(screen.getByRole("button", { name: key }));
+    }
+    const amount = screen.getByText("48 000 000 000");
+    expect(amount.className).toContain("text-big-long");
+  });
+
+  it("writes the answer and «Отменить» at 17 px", async () => {
+    const user = userEvent.setup();
+    renderEntry(fakeApi());
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    const answer = await screen.findByRole("status");
+    expect(answer.className).toContain("text-line");
+    expect(answer.className).not.toContain("text-sm");
+    const undo = screen.getByRole("button", { name: "↩️ Отменить" });
+    expect(undo.className).toContain("text-line");
+    expect(undo.className).toContain("font-bold");
+    await user.click(undo);
+    const notice = await screen.findByText(
+      "↩️ Удалил из таблицы: строка 4169.",
+    );
+    expect(notice.className).toContain("text-line");
+  });
+
+  it("writes an error at 17 px", async () => {
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(
+        new ApiError(503, "sheets_unavailable", "Таблица не ответила"),
+      );
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.className).toContain("text-line");
+    expect(alert.className).not.toContain("text-sm");
   });
 });

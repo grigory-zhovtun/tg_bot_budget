@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, type Api, type SavingsScreen } from "../api";
-import { short } from "../format";
+import { money } from "../format";
 import Sheet from "../plan/Sheet";
-import { dayMonth, enoughText, forecastText, percentText } from "./piggyText";
+import { Good, Warn } from "./blocks";
+import EnoughLines from "./EnoughLines";
+import { dayMonth, forecastLines, percentText } from "./piggyText";
 
 interface Props {
   api: Api;
@@ -12,6 +14,7 @@ interface Props {
 }
 
 const QUICK = [3, 5, 10, 15, 20];
+const NBSP = "\u00a0";
 const PAUSE_MS = 300; // предпросмотр — после паузы в нажатиях
 
 function clamp(value: number): number {
@@ -98,7 +101,7 @@ export default function PercentSheet({ api, data, onSaved, onClose }: Props) {
             type="button"
             role="radio"
             aria-checked={value === quick}
-            className={`rounded-full px-4 py-2 font-bold ${
+            className={`rounded-full px-4 py-2 text-line font-extrabold ${
               value === quick
                 ? "bg-button text-button-text ring-2 ring-text"
                 : "bg-section"
@@ -109,54 +112,47 @@ export default function PercentSheet({ api, data, onSaved, onClose }: Props) {
           </button>
         ))}
       </div>
-      {month && <p>{`в месяц ≈ ${short(month.capacity)}`}</p>}
+      {month && (
+        <p className="text-center text-line">{`в месяц ≈ ${money(month.capacity)}`}</p>
+      )}
       {ordered.length > 0 && (
         <ul
           aria-label="К срокам"
-          className="flex flex-col gap-2 rounded-2xl bg-section p-3"
+          className="flex flex-col overflow-hidden rounded-xl border border-outline text-line"
         >
-          {ordered.map((piggy) => (
-            <li key={piggy.id} className="flex justify-between gap-3">
-              <span className="font-semibold">
-                {`${piggy.name} · ${dayMonth(piggy.deadline ?? "")}`}
-              </span>
-              <span
-                className={`text-right font-semibold ${
-                  piggy.status === "short" ? "text-danger" : "text-ok"
-                }`}
+          {ordered.map((piggy) => {
+            const { will, of } = forecastLines(piggy);
+            return (
+              <li
+                key={piggy.id}
+                className="flex flex-col gap-0.5 border-b border-outline px-3 py-2 last:border-b-0"
               >
-                {forecastText(piggy)}
-              </span>
-            </li>
-          ))}
+                <p className="font-extrabold">
+                  {`${piggy.name}, к ${dayMonth(piggy.deadline ?? "")}`}
+                </p>
+                <p>{will}</p>
+                <p>{of}</p>
+              </li>
+            );
+          })}
         </ul>
       )}
       {needed !== null && month && month.percent < needed && (
-        <p className="font-semibold text-warn">
-          {`Чтобы успеть всё к срокам — ${needed} %`}
-        </p>
+        <Warn>{`К срокам нужно ${needed}${NBSP}%`}</Warn>
       )}
       {needed !== null && month && month.percent >= needed && (
-        <p className="font-semibold text-ok">Успеваем всё к срокам ✓</p>
+        <Good>Успеваем всё к срокам</Good>
       )}
-      {shown.enough && (
-        <p
-          className={`text-sm font-semibold ${
-            shown.enough.gap < 0 ? "text-danger" : "text-ok"
-          }`}
-        >
-          {enoughText(shown.enough).replace("остаётся", "останется")}
-        </p>
-      )}
+      {shown.enough && <EnoughLines enough={shown.enough} />}
       {error && (
-        <p className="text-sm text-danger" role="alert">
+        <p className="text-line font-bold text-danger" role="alert">
           {error}
         </p>
       )}
       <button
         type="button"
         disabled={busy}
-        className="h-12 rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
+        className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
         onClick={save}
       >
         {`Сохранить ${percentText(value)} %`}
