@@ -3,13 +3,19 @@ import {
   dayLabel,
   deviceDay,
   daysBetween,
+  inCurrency,
   longDay,
   itemAmount,
   money,
+  moneyText,
   shiftDay,
   short,
+  signedMoney,
   withCurrency,
 } from "./format";
+
+/** Пробелы в ожидаемых строках — неразрывные, как в форматтерах. */
+const nb = (text: string) => text.replace(/ /g, "\u00a0");
 
 describe("money", () => {
   it("groups thousands like the bot", () => {
@@ -67,5 +73,34 @@ describe("deviceDay", () => {
   it("is the date on the phone clock, not in UTC", () => {
     expect(deviceDay(new Date(2026, 9, 17, 0, 30))).toBe("2026-10-17");
     expect(deviceDay(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
+  });
+});
+
+describe("inCurrency", () => {
+  it("puts the sign after the number like the bot", () => {
+    expect(inCurrency(380, "USD")).toBe(nb("380 $"));
+    expect(inCurrency(75_000, "RUB")).toBe(nb("75 000 ₽"));
+    expect(inCurrency(50, "EUR")).toBe(nb("50 EUR"));
+    expect(inCurrency(48_000, "UZS")).toBe(nb("48 000"));
+    expect(inCurrency(1312.45, "USD", true)).toBe(nb("1 312,45 $"));
+  });
+});
+
+describe("moneyText", () => {
+  it("keeps cents only for a fractional amount in a currency", () => {
+    expect(moneyText(1500.25, "USD")).toBe(nb("1 500,25 $"));
+    expect(moneyText(1000, "USD")).toBe(nb("1 000 $"));
+    expect(moneyText(5_250_000.4, "UZS")).toBe(nb("5 250 000"));
+  });
+  it("never shows a minus zero", () => {
+    expect(moneyText(-0.001, "USD")).toBe(nb("0 $"));
+  });
+});
+
+describe("signedMoney", () => {
+  it("marks incomes with a plus and payments with a minus", () => {
+    expect(signedMoney(2_000_000, "UZS")).toBe(nb("+2 000 000"));
+    expect(signedMoney(-380, "USD")).toBe(nb("−380 $"));
+    expect(signedMoney(-380.5, "USD")).toBe(nb("−380,50 $"));
   });
 });

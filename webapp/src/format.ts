@@ -24,6 +24,30 @@ export function withCurrency(value: number, currency: string): string {
   return `${money(value, currency === "UZS" ? 0 : 2)} ${currency}`;
 }
 
+const SYMBOLS: Record<string, string> = { USD: "$", RUB: "₽" };
+
+/** Как в боте (app/rich.py): «380 $», «75 000 ₽», «50 EUR»; сумы — без единицы. */
+export function inCurrency(
+  amount: number,
+  currency: string,
+  cents = false,
+): string {
+  const number = money(amount, cents ? 2 : 0);
+  if (currency === "UZS") return number;
+  return `${number}${NBSP}${SYMBOLS[currency] ?? currency}`;
+}
+
+/** Сумма карты или копилки: копейки — только у дробной суммы не в сумах. */
+export function moneyText(amount: number, currency: string): string {
+  const whole = Number.isInteger(Math.round(amount * 100) / 100);
+  return inCurrency(amount, currency, currency !== "UZS" && !whole);
+}
+
+/** Строка списка со знаком: «+2 000 000», «−380 $», «−380,50 $». */
+export function signedMoney(amount: number, currency: string): string {
+  return `${amount < 0 ? "−" : "+"}${moneyText(Math.abs(amount), currency)}`;
+}
+
 /** Сколько дней от from до to (ISO-даты): «2026-10-09» → «2026-10-15» — 6. */
 export function daysBetween(from: string, to: string): number {
   const day = 24 * 60 * 60 * 1000;
