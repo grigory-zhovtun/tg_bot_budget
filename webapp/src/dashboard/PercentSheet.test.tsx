@@ -67,6 +67,13 @@ describe("PercentSheet", () => {
     ]);
   });
 
+  it("breaks a long one-word piggy name inside the list", () => {
+    show();
+    const list = screen.getByRole("list", { name: "К срокам" });
+    const title = within(list).getByText("Новый год, к 20.12");
+    expect(title.className).toContain("break-words");
+  });
+
   it("warns as the summary does: deadlines and money for life", () => {
     show();
     const deadlines = screen.getByText("⚠️ К срокам нужно 30 %");

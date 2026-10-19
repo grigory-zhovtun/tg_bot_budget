@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import {
   ApiError,
   type Api,
@@ -13,7 +13,7 @@ import AmountPad from "../plan/AmountPad";
 import { amountText } from "../plan/draft";
 import Sheet from "../plan/Sheet";
 import { Line, Table } from "./blocks";
-import { BigFieldError, bigSegment } from "./controls";
+import { BigFieldError, ErrorLine, PRIMARY, bigSegment } from "./controls";
 
 interface Props {
   api: Api;
@@ -90,7 +90,11 @@ export default function SaveSheet({
   const uzs = amountValue(text) * (data.rates[currency] ?? 0);
   const { parts, rest } = layout(data, uzs);
   const cushion = rest > 0.5;
-  const rows = parts.map((part) => [part.name, part.text]);
+  // длинное имя копилки одним словом переносится внутри клетки, не раздвигая таблицу
+  const rows: ReactNode[][] = parts.map((part) => [
+    <span className="wrap-anywhere">{part.name}</span>,
+    part.text,
+  ]);
   if (cushion) rows.push(["подушка", money(rest)]);
 
   function save() {
@@ -153,15 +157,11 @@ export default function SaveSheet({
         />
       )}
       {cushion && <Line>подушка — в журнал не пишется</Line>}
-      {error && (
-        <p className="text-line font-bold text-danger" role="alert">
-          {error}
-        </p>
-      )}
+      <ErrorLine text={error} />
       <button
         type="button"
         disabled={amountValue(text) <= 0 || busy}
-        className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
+        className={PRIMARY}
         onClick={save}
       >
         Записать

@@ -111,6 +111,24 @@ describe("PiggySheet", () => {
     expect(hint.className).toContain("text-line");
   });
 
+  it("ties the visible labels to their fields", () => {
+    open(fakeApi(), piggy(0));
+    const deadline = screen.getByText("Срок");
+    expect(deadline.tagName).toBe("LABEL");
+    expect((deadline as HTMLLabelElement).htmlFor).toBe(
+      screen.getByLabelText("Срок").id,
+    );
+    for (const [role, name] of [
+      ["radiogroup", "Повтор"],
+      ["group", "Статья трат"],
+    ] as const) {
+      const control = screen.getByRole(role, { name });
+      expect(control.getAttribute("aria-labelledby")).toBe(
+        screen.getByText(name).id,
+      );
+    }
+  });
+
   it("writes the field labels big, in the text colour", () => {
     open(fakeApi(), piggy(0));
     for (const text of ["Название", "Цель", "Срок", "Повтор", "Статья трат"]) {
@@ -177,6 +195,9 @@ describe("PiggySheet", () => {
     const user = userEvent.setup();
     open(api, piggy(1));
     await user.click(screen.getByRole("button", { name: "Потратил…" }));
+    expect(screen.getByRole("button", { name: "Назад" }).className).toContain(
+      "min-h-11",
+    );
     await keys(user, "1", "5", "0");
     await user.click(screen.getByRole("button", { name: "Записать" }));
     expect(api.movePiggy).toHaveBeenCalledWith(
@@ -250,6 +271,9 @@ describe("PiggySheet", () => {
       ["08.10 ПРАЗДНИК / сезонный", nb("400 000")],
     ]);
     expect(history.querySelector("ul")?.className).toContain("text-line");
+    expect(
+      screen.getByRole("button", { name: "Не из копилки" }).className,
+    ).toContain("min-h-11");
     await user.click(screen.getByRole("button", { name: "Не из копилки" }));
     expect(api.excludeSpend).toHaveBeenCalledWith(
       "p3k9za",

@@ -25,6 +25,7 @@ import {
   press,
   type Key,
 } from "./amount";
+import { BIG_FIELD, ErrorLine, PRIMARY } from "../dashboard/controls";
 import Keypad from "./Keypad";
 import { groupColor } from "./palette";
 import { planIndex } from "./plan";
@@ -305,7 +306,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
           ))}
           <button
             type="button"
-            className="self-start py-1 text-line font-bold text-danger disabled:opacity-50"
+            className="min-h-11 self-start py-1 text-line font-bold text-danger disabled:opacity-50"
             disabled={undoing}
             aria-busy={undoing}
             onClick={undo}
@@ -319,11 +320,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
           {notice}
         </p>
       )}
-      {error && (
-        <p className="text-line font-bold text-danger" role="alert">
-          {error}
-        </p>
-      )}
+      <ErrorLine text={error} />
       {step === "group" && (
         <GroupTiles groups={boot.groups} plan={plan} onPick={chooseGroup} />
       )}
@@ -353,12 +350,14 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
             }`}
             aria-live="polite"
           >
-            {shown} <span className="text-fact font-extrabold">{currency}</span>
+            {/* число не рвётся между группами цифр; валюта может уйти ниже */}
+            <span className="whitespace-nowrap">{shown}</span>{" "}
+            <span className="text-fact font-extrabold">{currency}</span>
           </p>
           <label className="flex flex-col gap-1 text-line font-bold">
             Комментарий
             <input
-              className="min-h-12 rounded-xl bg-section px-3 py-2 text-lg font-normal text-text"
+              className={`${BIG_FIELD} min-h-12`}
               value={comment}
               maxLength={200}
               onChange={(event) => setComment(event.target.value)}
@@ -368,7 +367,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
             <span>Дата: {dayLabel(day ?? boot.today, boot.today)}</span>
             <input
               type="date"
-              className="rounded-xl bg-section px-3 py-2 text-lg font-normal text-text"
+              className={BIG_FIELD}
               value={day ?? boot.today}
               min={shiftDay(boot.today, -MAX_DAYS_BACK)}
               max={boot.today}
@@ -388,7 +387,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
           {!tg && (
             <button
               type="button"
-              className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
+              className={PRIMARY}
               disabled={value <= 0 || sending}
               onClick={submit}
             >

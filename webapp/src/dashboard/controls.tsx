@@ -1,5 +1,5 @@
-/** Поля и кнопки окон копилок крупно. Общие классы fields.tsx берёт и окно записи
- * «Прогноза» — его вид не меняем, поэтому здесь свои. */
+/** Поля, кнопки и сообщения крупно — «Ввод» и окна копилок. Общие классы fields.tsx
+ * берёт и окно записи «Прогноза» — его вид не меняем, поэтому здесь свои. */
 
 /** Поле ввода — 18 px. */
 export const BIG_FIELD =
@@ -27,5 +27,18 @@ export function bigSegment(on: boolean): string {
 export function BigFieldError({ text }: { text: string | undefined }) {
   return text ? (
     <p className="text-line font-bold text-danger">{text}</p>
+  ) : null;
+}
+
+/** Главная кнопка окна — 18 px сверхжирная. */
+export const PRIMARY =
+  "h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50";
+
+/** Ошибка над кнопкой — 17 px жирно. */
+export function ErrorLine({ text }: { text: string | null }) {
+  return text ? (
+    <p className="text-line font-bold text-danger" role="alert">
+      {text}
+    </p>
   ) : null;
 }
