@@ -53,15 +53,10 @@ export default function Ahead({ data }: { data: Dashboard }) {
               key: `${item.day}-${item.name}`,
               title: `${item.day < today ? "⏳ " : ""}${item.name}`,
               left: dayText(item.day),
-              right: (
-                <span
-                  className={item.amount > 0 ? "text-earned" : "text-payment"}
-                >
-                  {signedMoney(
-                    item.currency === "UZS" ? item.uzs : item.amount,
-                    item.currency,
-                  )}
-                </span>
+              // цветом текста: на полосе зелёный и оранжевый не держат 7:1, смысл — в знаке
+              right: signedMoney(
+                item.currency === "UZS" ? item.uzs : item.amount,
+                item.currency,
               ),
             }))}
           />

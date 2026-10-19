@@ -71,10 +71,11 @@ describe("CardBalances", () => {
       card({ name: "МИР 3333", checked: null, stale: true }),
     ]);
     expect(cells("VISA 6666")[2]).toBe("✓ 6 дн.");
-    // сверке больше недели — отметка жёлтая, как раньше
-    expect(screen.getByText("✓ 8 дн.").className).toContain("text-warn");
-    // остаток банка без времени сверки — вписан давно, тоже жёлтым
-    expect(screen.getByText("✓ давно").className).toContain("text-warn");
+    // отметки — цветом текста: на полосе таблицы жёлтый и зелёный не держат 7:1,
+    // давность говорит число дней или «давно»
+    for (const mark of ["✓", "✓ 6 дн.", "✓ 8 дн.", "✓ давно"]) {
+      expect(screen.getByText(mark).className).not.toMatch(/text-(warn|ok)/);
+    }
   });
 
   it("warns under the table when the bank shows another balance", () => {

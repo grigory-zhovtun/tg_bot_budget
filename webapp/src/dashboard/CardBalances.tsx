@@ -2,7 +2,8 @@ import type { CardBalance } from "../api";
 import { dayLabel, daysBetween, money, moneyText } from "../format";
 import { Fact, Line, Table, Warn } from "./blocks";
 
-/** ✓ — остаток таблицы сходится с банком, рядом — когда сверяли; ⚠️ — не сходится. */
+/** ✓ — остаток таблицы сходится с банком, рядом — когда сверяли; ⚠️ — не сходится.
+ * Цветом текста: на полосе таблицы жёлтый и зелёный не держат 7:1. */
 function Mark({ card, today }: { card: CardBalance; today: string }) {
   if (card.matches === false) return <span>⚠️</span>;
   if (card.matches !== true) return null;
@@ -13,7 +14,7 @@ function Mark({ card, today }: { card: CardBalance; today: string }) {
     const days = daysBetween(card.checked, today);
     if (days > 0) label = `✓ ${days} дн.`;
   }
-  return <span className={card.stale ? "text-warn" : "text-ok"}>{label}</span>;
+  return <span>{label}</span>;
 }
 
 interface Props {

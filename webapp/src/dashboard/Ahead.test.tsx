@@ -29,9 +29,12 @@ describe("Ahead", () => {
       ["Аванс", "15-го", nb("+2 000 000")],
       ["Аренда", "18-го", nb("−380 $")],
     ]);
-    // поступление — зелёным, платёж — оранжевым, как в календаре
-    expect(screen.getByText("+2 000 000").className).toContain("text-earned");
-    expect(screen.getByText("−380 $").className).toContain("text-payment");
+    // на полосах цветной текст не держит 7:1 — суммы цветом текста, смысл в знаке
+    for (const sum of ["+2 000 000", "−380 $"]) {
+      expect(screen.getByText(sum).className).not.toMatch(
+        /text-(earned|payment)/,
+      );
+    }
     expect(screen.queryByText(/день прошёл/)).toBeNull();
   });
 
