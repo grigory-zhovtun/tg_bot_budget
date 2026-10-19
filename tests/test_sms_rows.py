@@ -33,26 +33,26 @@ from tests.test_sms import (
     UZCARD_QR,
 )
 
-SOURCES = ["VISA 9120 UZS", "UZCARD 5837 UZS", "VISA 4058 USD"]
+SOURCES = ["VISA 9090 UZS", "UZCARD 5656 UZS", "VISA 3434 USD"]
 RATES = Rates({"UZS": 1.0, "USD": 12000.0, "RUB": 150.0})
 TODAY = date(2026, 10, 14)
 HEADER = ["Дата", "Категория", "Название", "Сумма", "Баланс", "Комментарий"]
 EMPTY = AmountMemory({})
 
 OWN_OUT = (
-    "Snyatiye, 07.10.26 v 15:23. Karta (*9120). Summa: 300300.00 UZS. "
+    "Snyatiye, 07.10.26 v 15:23. Karta (*9090). Summa: 300300.00 UZS. "
     "VISA MC UZS 2 UZCARD KB>Tashkent UZ. Dostupno: 9000000.00 UZS"
 )
 OWN_IN = (
-    "Kartaga o'tkazma: VISA UZS KB TO UZCARD KB, UZ,07.10.26 15:24,karta ***5837. "
+    "Kartaga o'tkazma: VISA UZS KB TO UZCARD KB, UZ,07.10.26 15:24,karta ***5656. "
     "Miqdor:300000.00 UZS Qoldiq:800000.00 UZS"
 )
 FX_OUT = (
-    "Snyatiye, 05.10.26 v 10:00. Karta (*9120). Summa: 1210000.00 UZS. "
+    "Snyatiye, 05.10.26 v 10:00. Karta (*9090). Summa: 1210000.00 UZS. "
     "VISA MC UZS 2 VISA MC USD>Tashkent UZ. Dostupno: 9000000.00 UZS"
 )
 FX_IN = (
-    'Karta *4058. vznos "VISA MC UZS 2 VISA M", +100.00, USD, "05-10-2026 10:01". '
+    'Karta *3434. vznos "VISA MC UZS 2 VISA M", +100.00, USD, "05-10-2026 10:01". '
     "Dostupno: 1100.00, USD."
 )
 
@@ -77,7 +77,7 @@ def rows_of(
 def fact_row(
     day: str, category: str, sub: str, amount: Any, comment: str, source: str = ""
 ) -> list[Any]:
-    source = source or "VISA 9120 UZS"
+    source = source or "VISA 9090 UZS"
     return [day, category, sub, amount, "", comment, source[-3:], source]
 
 
@@ -112,9 +112,9 @@ def test_aggregator_with_a_name_is_a_merchant() -> None:
 
 
 def test_card_is_found_by_its_four_digits_only_once() -> None:
-    assert card_source("9120", SOURCES) == "VISA 9120 UZS"
+    assert card_source("9090", SOURCES) == "VISA 9090 UZS"
     assert card_source("1234", SOURCES) is None
-    assert card_source("9120", [*SOURCES, "HUMO 9120 UZS"]) is None
+    assert card_source("9090", [*SOURCES, "HUMO 9090 UZS"]) is None
 
 
 def test_known_merchant_takes_the_history_category() -> None:
@@ -129,8 +129,8 @@ def test_known_merchant_takes_the_history_category() -> None:
         "category": "🍔 ЕДА",
         "subcategory": "кафе",
         "comment": "OOO SHAVI CAFE>TASHKENT",
-        "source": "VISA 9120 UZS",
-        "card_identifier": "9120",
+        "source": "VISA 9090 UZS",
+        "card_identifier": "9090",
         "direction": "expense",
         "balance": 5000000.0,
     }
@@ -204,7 +204,7 @@ def test_amount_memory_decides_an_anonymous_payment() -> None:
             fact_row("13.10.2026", "🍔 ЕДА", "кафе", 65000, ""),
         ],
         [fact_row("01.08.2026", "🍔 ЕДА", "кофе", 65000, "")],  # старше 60 дней
-        [fact_row("12.10.2026", "🍔 ЕДА", "кофе", 65000, "", "UZCARD 5837 UZS")],
+        [fact_row("12.10.2026", "🍔 ЕДА", "кофе", 65000, "", "UZCARD 5656 UZS")],
         [fact_row("12.10.2026", "🍔 ЕДА", "кофе", "-65 000", "")],  # приход
         [fact_row("12.10.2026", "💰 ДОХОДЫ", "зарплата", 65000, "")],
     ],
@@ -213,7 +213,7 @@ def test_amount_memory_needs_one_recent_expense_category_on_the_card(
     rows: list[list[Any]],
 ) -> None:
     memory = AmountMemory.from_sheet([HEADER, *rows], TODAY)
-    assert memory.find("VISA 9120 UZS", "", 65000) is None
+    assert memory.find("VISA 9090 UZS", "", 65000) is None
 
 
 def test_amount_memory_tells_coffee_from_lunch_in_one_cafe() -> None:
@@ -294,7 +294,7 @@ def test_operations_without_a_merchant(
 
 def test_cash_in_sums_is_misc_to_check() -> None:
     text = (
-        CASH.replace("*4058", "*9120")
+        CASH.replace("*3434", "*9090")
         .replace("-650.00, USD", "-500000.00, UZS")
         .replace("1000.00, USD", "1000.00, UZS")
     )
@@ -303,7 +303,7 @@ def test_cash_in_sums_is_misc_to_check() -> None:
 
 
 def test_unknown_card_is_reported_not_guessed() -> None:
-    rows, [skipped] = rows_of(PURCHASE.replace("*9120", "*1234"))
+    rows, [skipped] = rows_of(PURCHASE.replace("*9090", "*1234"))
     assert rows == []
     assert skipped == Skipped("карта *1234 не найдена в листе system", "OOO SHAVI CAFE")
 
@@ -343,9 +343,9 @@ def test_amount_in_another_currency_is_left_for_conversion() -> None:
     book = MerchantBook([("🌛 ЕЖЕМЕСЯЧНО", "подписка", "GOOGLE *Google One")])
     [row], _ = rows_of(USD_ON_UZS, book=book)
     assert (row.item["amount"], row.item["currency"], row.item["source"]) == (
-        19.99,
+        12.34,
         "USD",
-        "VISA 9120 UZS",
+        "VISA 9090 UZS",
     )
     assert row.flag is None
 
@@ -364,15 +364,15 @@ def test_own_transfer_in_one_message_is_a_pair_with_the_fee_apart() -> None:
         for row in rows
     ] == [
         (
-            "VISA 9120 UZS",
+            "VISA 9090 UZS",
             ("💳 СЧЕТА", "переводы"),
             300000.0,
-            "перевод VISA 9120 → UZCARD 5837 (свой)",
+            "перевод VISA 9090 → UZCARD 5656 (свой)",
             "transfer_out",
             None,
         ),
         (
-            "VISA 9120 UZS",
+            "VISA 9090 UZS",
             ("🚧 РАЗНОЕ", "неучтенка"),
             300.0,
             "комиссия за перевод на свою карту",
@@ -380,10 +380,10 @@ def test_own_transfer_in_one_message_is_a_pair_with_the_fee_apart() -> None:
             None,
         ),
         (
-            "UZCARD 5837 UZS",
+            "UZCARD 5656 UZS",
             ("💳 СЧЕТА", "переводы"),
             300000.0,
-            "перевод UZCARD 5837 ← VISA 9120 (свой)",
+            "перевод UZCARD 5656 ← VISA 9090 (свой)",
             "transfer_in",
             None,
         ),
@@ -396,12 +396,12 @@ def test_exchange_between_own_cards_is_a_pair() -> None:
     assert [(target(row), row.item["comment"], row.flag) for row in rows] == [
         (
             ("💳 СЧЕТА", "обмен валюты"),
-            "конвертация VISA 9120 → VISA 4058 USD (свой)",
+            "конвертация VISA 9090 → VISA 3434 USD (свой)",
             None,
         ),
         (
             ("💳 СЧЕТА", "обмен валюты"),
-            "конвертация VISA 4058 USD ← VISA 9120 (свой)",
+            "конвертация VISA 3434 USD ← VISA 9090 (свой)",
             None,
         ),
     ]
@@ -412,7 +412,7 @@ def test_exchange_between_own_cards_is_a_pair() -> None:
     [
         OWN_IN.replace("15:24", "15:40"),  # больше 10 минут
         OWN_IN.replace("Miqdor:300000.00", "Miqdor:250000.00"),  # суммы не сходятся
-        OWN_IN.replace("***5837", "***9120"),  # та же карта — не пара
+        OWN_IN.replace("***5656", "***9090"),  # та же карта — не пара
     ],
 )
 def test_far_or_different_operations_are_not_a_pair(credit: str) -> None:

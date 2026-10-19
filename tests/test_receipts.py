@@ -20,7 +20,7 @@ OCTOBER = date(2026, 10, 1)
 ADVANCE = Line(12, 15, 2_000_000, "UZS")
 SALARY = Line(13, 30, 10_000_000, "UZS")
 RUB_SALARY = Line(14, 28, 100_000, "RUB")
-RENT = Line(15, 18, -650, "USD")
+RENT = Line(15, 18, -400, "USD")
 LINES = [ADVANCE, SALARY, RUB_SALARY, RENT]
 
 
@@ -69,9 +69,9 @@ def test_ninety_percent_closes_a_row_and_less_leaves_the_rest_ahead() -> None:
 
 
 def test_a_payment_is_one_spending_close_to_its_sum() -> None:
-    paid = received(rent(17, 20), rent(17, 640), rent(18, 500))[RENT.row]
+    paid = received(rent(17, 20), rent(17, 390), rent(18, 300))[RENT.row]
     assert (paid.received, paid.on, len(paid.operations)) == (
-        -640,
+        -390,
         date(2026, 10, 17),
         1,
     )
@@ -79,20 +79,20 @@ def test_a_payment_is_one_spending_close_to_its_sum() -> None:
 
 
 def test_small_purchases_do_not_close_a_payment() -> None:
-    assert RENT.row not in received(rent(18, 20), rent(19, 500))
+    assert RENT.row not in received(rent(18, 20), rent(19, 300))
 
 
 def test_one_spending_closes_one_payment() -> None:
-    twice = [RENT, Line(16, 20, -650, "USD")]
-    frame = transactions_frame([FACT_HEADER, rent(18, 650)], RATES)
+    twice = [RENT, Line(16, 20, -400, "USD")]
+    frame = transactions_frame([FACT_HEADER, rent(18, 400)], RATES)
     found = match_receipts(frame, twice, OCTOBER, date(2026, 10, 31))
     assert list(found) == [RENT.row]  # первой по дню
 
 
 def test_transfers_refunds_and_the_opening_balance_do_not_count() -> None:
     rows = [
-        fact_row(date(2026, 10, 18), "💳 СЧЕТА", "переводы", 650, "USD"),
-        rent(18, -650),  # возврат
+        fact_row(date(2026, 10, 18), "💳 СЧЕТА", "переводы", 400, "USD"),
+        rent(18, -400),  # возврат
         income(15, 2_000_000, sub="нач остаток"),
     ]
     assert received(*rows) == {}

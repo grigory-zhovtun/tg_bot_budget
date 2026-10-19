@@ -18,7 +18,7 @@ def sheet_row(amount: float, category: str, sub: str, comment: str) -> SheetRow:
         amount=amount,
         comment=comment,
         currency="UZS",
-        source="VISA 9120 UZS",
+        source="VISA 9090 UZS",
     )
 
 
@@ -43,10 +43,10 @@ async def test_flagged_rows_show_the_name_and_notes_close_the_summary() -> None:
     )
     lines = summary(update).splitlines()
     assert lines[0] == (
-        "✅ 48 000 UZS • 🍔 ЕДА (кафе) • VISA 9120 UZS • 🆕 OOO SHAVI CAFE>TASHKENT"
+        "✅ 48 000 UZS • 🍔 ЕДА (кафе) • VISA 9090 UZS • 🆕 OOO SHAVI CAFE>TASHKENT"
     )
-    assert lines[1].endswith("• VISA 9120 UZS • ❓ VSMCUZSKB to QRonlin")
-    assert lines[2] == "✅ 30 000 UZS • 🏚️ ДОМ (продукты) • VISA 9120 UZS"
+    assert lines[1].endswith("• VISA 9090 UZS • ❓ VSMCUZSKB to QRonlin")
+    assert lines[2] == "✅ 30 000 UZS • 🏚️ ДОМ (продукты) • VISA 9090 UZS"
     assert lines[-1] == "⏭ Пропустил: код подтверждения"
 
 

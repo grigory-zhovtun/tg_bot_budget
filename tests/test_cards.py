@@ -101,7 +101,7 @@ def test_a_currency_without_a_rate_has_no_sum_equivalent() -> None:
 def test_the_totals_row_and_rows_below_the_block_are_not_cards() -> None:
     rows = fact(
         card("VISA 1111 UZS", 100),
-        ["", "", 23_553_075, 157_020, 1963],  # итоги блока: в I пусто
+        ["", "", 12_345_678, 98_765, 4321],  # итоги блока: в I пусто
     )
     rows += [[""] * 17 for _ in range(30)]
     rows[30][NAME] = "Заметка ниже блока"  # строка 31 — уже не блок I2:I30

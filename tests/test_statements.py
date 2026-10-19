@@ -7,7 +7,7 @@ import pytest
 from app import statements as st
 from app.domain import Catalog, MerchantBook, merchant_core
 
-SOURCES = ["VISA 9120 UZS", "UZCARD 5837 UZS", "HUMO 6845 UZS", "VISA 4058 USD"]
+SOURCES = ["VISA 9090 UZS", "UZCARD 5656 UZS", "HUMO 7007 UZS", "VISA 3434 USD"]
 CATALOG = Catalog(
     categories=["🍔 ЕДА", "🏚️ ДОМ", "👶 ДЕТИ", "🚧 РАЗНОЕ", "💳 СЧЕТА", "💰 ДОХОДЫ"],
     subcategories={
@@ -39,16 +39,16 @@ LAYOUT = """\
                          Сумма                 Детали операции
  операции
 
-                                               Списание по операциям покупке TEST STORE ONE SLIP No 56167 за 01.07.2026 Номер
- 03.07.2026              -32,81
-                                               карты: 400000******4058; TID: 57070564 RRN:_1_7605
+                                               Списание по операциям покупке TEST STORE ONE SLIP No 12345 за 01.07.2026 Номер
+ 03.07.2026              -12,34
+                                               карты: 400000******3434; TID: 12345678 RRN:_1_1234
 
 Управляющий директор
 АКБ «Капиталбанк»
 \f Дата проведения
                     Сумма     Детали операции
   29.09.2026                1 000,00          Перевод с HUMO KB TO VISA USD KB через МП ТЕR.ID: TM0065; за 28.09.2026; Номер карты:
-                              400000******4058; RRN:627114116548 15028_1
+                              400000******3434; RRN:123456789012 12345_1
 
 Дата и время генерации выписки
 06.10.2026г., 15:24
@@ -77,9 +77,9 @@ def serial(day: date) -> int:
 
 def test_parse_statement_reads_operations_period_and_generation_date() -> None:
     statement = st.parse_statement(LAYOUT, SOURCES)
-    assert statement.source == "VISA 4058 USD"
+    assert statement.source == "VISA 3434 USD"
     assert [(t.posted, t.op_date, t.amount) for t in statement.txns] == [
-        (date(2026, 7, 3), date(2026, 7, 1), -32.81),
+        (date(2026, 7, 3), date(2026, 7, 1), -12.34),
         (date(2026, 9, 29), date(2026, 9, 28), 1000.0),
     ]
     assert st.MERCHANT.search(statement.txns[0].details).group(1) == "TEST STORE ONE"
@@ -96,7 +96,7 @@ def test_statement_detection() -> None:
 
 def test_unknown_card_is_reported() -> None:
     with pytest.raises(ValueError, match="не нашёл карту"):
-        st.parse_statement(LAYOUT, ["VISA 9120 UZS"])
+        st.parse_statement(LAYOUT, ["VISA 9090 UZS"])
 
 
 def test_card_is_chosen_by_currency_when_digits_repeat() -> None:
@@ -112,7 +112,7 @@ def test_statement_without_operations() -> None:
 
 
 def test_broken_block_is_an_error() -> None:
-    text = LAYOUT.replace(" 03.07.2026              -32,81", " ??")
+    text = LAYOUT.replace(" 03.07.2026              -12,34", " ??")
     with pytest.raises(ValueError, match="не разобрал"):
         st.parse_statement(text, SOURCES)
 
@@ -136,16 +136,16 @@ def test_pdf_text_of_garbage_is_empty() -> None:
 
 def test_merge_statements_drops_repeated_operations() -> None:
     first = st.Statement(
-        "VISA 9120 UZS",
-        [txn("VISA 9120 UZS", -1, "A", date(2026, 10, 1))],
+        "VISA 9090 UZS",
+        [txn("VISA 9090 UZS", -1, "A", date(2026, 10, 1))],
         (date(2026, 9, 1), date(2026, 10, 1)),
         date(2026, 10, 2),
     )
     second = st.Statement(
-        "VISA 9120 UZS",
+        "VISA 9090 UZS",
         [
-            txn("VISA 9120 UZS", -1, "A", date(2026, 10, 1)),
-            txn("VISA 9120 UZS", -2, "B", date(2026, 10, 3)),
+            txn("VISA 9090 UZS", -1, "A", date(2026, 10, 1)),
+            txn("VISA 9090 UZS", -2, "B", date(2026, 10, 3)),
         ],
         (date(2026, 10, 1), date(2026, 10, 5)),
         date(2026, 10, 5),
@@ -206,14 +206,14 @@ def test_title_matches_existing_rows() -> None:
 
 def test_merchant_core() -> None:
     assert merchant_core("Markthof MCHJ QK") == "MARKTHOF"
-    assert merchant_core("Transit 30750615172966") == "TRANSIT"
+    assert merchant_core("Transit 12345678901234") == "TRANSIT"
 
 
 @pytest.mark.parametrize(
     ("source", "amount", "details", "target", "column_d", "review"),
     [
         (
-            "UZCARD 5837 UZS",
+            "UZCARD 5656 UZS",
             -48000,
             "UzCard: 963 Эмитент взаиморасчёты",
             st.COFFEE,
@@ -221,7 +221,7 @@ def test_merchant_core() -> None:
             "",
         ),
         (
-            "UZCARD 5837 UZS",
+            "UZCARD 5656 UZS",
             -180000,
             "UzCard: 963 Эмитент взаиморасчёты",
             st.MISC,
@@ -229,57 +229,57 @@ def test_merchant_core() -> None:
             "",
         ),
         (
-            "HUMO 6845 UZS",
-            -424551.34,
+            "HUMO 7007 UZS",
+            -123456.78,
             "Расчеты ТСП др. банка при оплате",
             st.FOOD,
-            424551.34,
+            123456.78,
             "",
         ),
         (
-            "VISA 4058 USD",
-            750,
+            "VISA 3434 USD",
+            800,
             "Перевод с VISA USD KB на VISA USD KB через МП ТЕR.ID: TM0059; за 15.07.2026;",
             st.SALARY,
-            750,
+            800,
             "",
         ),
-        ("VISA 4058 USD", -650, "Списание по выд нал в POS KASSA", st.RENT, 650, ""),
+        ("VISA 3434 USD", -650, "Списание по выд нал в POS KASSA", st.RENT, 650, ""),
         (
-            "VISA 4058 USD",
+            "VISA 3434 USD",
             -450,
             "Списание по выд нал в POS KASSA",
             st.RENT,
             450,
             "квартплата?",
         ),
-        ("VISA 9120 UZS", -500000, "Списание по выд нал ATM", st.TRANSFERS, 500000, ""),
+        ("VISA 9090 UZS", -500000, "Списание по выд нал ATM", st.TRANSFERS, 500000, ""),
         (
-            "VISA 9120 UZS",
-            2720000,
+            "VISA 9090 UZS",
+            2000000,
             "Оплата аванс за август 2026 сотруд",
             st.SALARY,
-            2720000,
+            2000000,
             "",
         ),
         (
-            "VISA 9120 UZS",
-            3045000,
+            "VISA 9090 UZS",
+            1000000,
             "АКБ Капиталбанк Оплата премия к празднику",
             st.BONUS,
-            3045000,
+            1000000,
             "",
         ),
         (
-            "VISA 9120 UZS",
-            -50500,
+            "VISA 9090 UZS",
+            -55000,
             "Перевод с VISA UZS KB на UZCARD другого банка через МП",
             st.MISC,
-            50500,
+            55000,
             "кому?",
         ),
         (
-            "VISA 9120 UZS",
+            "VISA 9090 UZS",
             -300000,
             "Перевод с VISA UZS KB на VISA UZS KB через МП ТЕR.ID:TM0053; за 14.08.2026;",
             st.POCKET,
@@ -287,24 +287,24 @@ def test_merchant_core() -> None:
             "карманные?",
         ),
         (
-            "HUMO 6845 UZS",
-            13180631.36,
-            "Зачисление средств на карту 986010******6845 через устройство 3664002Y",
+            "HUMO 7007 UZS",
+            11111111.11,
+            "Зачисление средств на карту 900000******7007 через устройство 3664002Y",
             st.TRANSFERS,
-            -13180631.36,
+            -11111111.11,
             "",
         ),
         (
-            "HUMO 6845 UZS",
-            595931.49,
-            "Зачисление средств на карту через устройство 36623005",
+            "HUMO 7007 UZS",
+            222222.22,
+            "Зачисление средств на карту через устройство 12345678",
             st.TRANSFERS,
-            -595931.49,
+            -222222.22,
             "откуда?",
         ),
-        ("VISA 9120 UZS", -1500, "Комиссия за SMS", st.MISC, 1500, ""),
+        ("VISA 9090 UZS", -1500, "Комиссия за SMS", st.MISC, 1500, ""),
         (
-            "VISA 9120 UZS",
+            "VISA 9090 UZS",
             -98000,
             "покупке NEW PLACE SLIP No 1 за 01.08.2026",
             st.MISC,
@@ -312,14 +312,14 @@ def test_merchant_core() -> None:
             "новый магазин",
         ),
         (
-            "VISA 9120 UZS",
+            "VISA 9090 UZS",
             -48000,
             "покупке OOO SHAVI CAFE SLIP No 2 за 01.08.2026",
             st.COFFEE,
             48000,
             "",
         ),
-        ("VISA 9120 UZS", -7, "что-то странное", st.MISC, 7, "не разобрал"),
+        ("VISA 9090 UZS", -7, "что-то странное", st.MISC, 7, "не разобрал"),
     ],
 )
 def test_categorize_rules(
@@ -343,7 +343,7 @@ def test_categorize_rules(
 
 def test_new_merchant_is_remembered_for_ai_and_ai_answer_is_used() -> None:
     operation = txn(
-        "VISA 9120 UZS", -98000, "покупке NEW PLACE SLIP No 1 за 01.08.2026"
+        "VISA 9090 UZS", -98000, "покупке NEW PLACE SLIP No 1 за 01.08.2026"
     )
     [item] = st.categorize([operation], {}, BOOK, CATALOG)
     assert item.merchant == "NEW PLACE"
@@ -361,7 +361,7 @@ def test_new_merchant_is_remembered_for_ai_and_ai_answer_is_used() -> None:
 def test_category_missing_in_system_goes_to_misc() -> None:
     catalog = Catalog(["🚧 РАЗНОЕ"], {"🚧 РАЗНОЕ": ["неучтенка"]}, SOURCES)
     [item] = st.categorize(
-        [txn("UZCARD 5837 UZS", -1000, "UzCard: Эмитент")], {}, BOOK, catalog
+        [txn("UZCARD 5656 UZS", -1000, "UzCard: Эмитент")], {}, BOOK, catalog
     )
     assert (item.row.category, item.review) == (
         "🚧 РАЗНОЕ",
@@ -372,64 +372,64 @@ def test_category_missing_in_system_goes_to_misc() -> None:
 def test_own_transfer_pairs_and_fee() -> None:
     txns = [
         txn(
-            "VISA 9120 UZS",
+            "VISA 9090 UZS",
             -1_000_000,
             "Перевод с VISA UZS KB на HUMO KB через МП ТЕR.ID:TM0056;",
         ),
         txn(
-            "HUMO 6845 UZS",
+            "HUMO 7007 UZS",
             1_000_000,
             "Перевод с VISA UZS KB на HUMO KB через МП ТЕR.ID1067001L;",
         ),
         txn(
-            "VISA 9120 UZS",
+            "VISA 9090 UZS",
             -3_015_000,
             "Перевод с VISA UZS KB на UZCARD KB через МП ТЕR.ID: TM0105;",
         ),
         txn(
-            "UZCARD 5837 UZS",
+            "UZCARD 5656 UZS",
             3_000_000,
             "UzCard: 91105515 Эквайер взаиморасчёты по безналичным",
         ),
     ]
     rows = st.categorize(txns, st.match_pairs(txns), BOOK, CATALOG)
     assert sorted((r.row.source, r.row.subcategory, r.row.amount) for r in rows) == [
-        ("HUMO 6845 UZS", "переводы", -1_000_000),
-        ("UZCARD 5837 UZS", "переводы", -3_000_000),
-        ("VISA 9120 UZS", "неучтенка", 15_000),
-        ("VISA 9120 UZS", "переводы", 1_000_000),
-        ("VISA 9120 UZS", "переводы", 3_000_000),
+        ("HUMO 7007 UZS", "переводы", -1_000_000),
+        ("UZCARD 5656 UZS", "переводы", -3_000_000),
+        ("VISA 9090 UZS", "неучтенка", 15_000),
+        ("VISA 9090 UZS", "переводы", 1_000_000),
+        ("VISA 9090 UZS", "переводы", 3_000_000),
     ]
     notes = {r.row.comment for r in rows}
-    assert "AI: перевод VISA 9120 → HUMO 6845 (свой)" in notes
-    assert "AI: перевод HUMO 6845 ← VISA 9120 (свой)" in notes
+    assert "AI: перевод VISA 9090 → HUMO 7007 (свой)" in notes
+    assert "AI: перевод HUMO 7007 ← VISA 9090 (свой)" in notes
 
 
 def test_currency_exchange_pairs() -> None:
     txns = [
         txn(
-            "VISA 9120 UZS",
-            -11_830_000,
+            "VISA 9090 UZS",
+            -12_000_000,
             "Перевод с VISA UZS KB на VISA UZS KB ТЕR.ID: TM0092;",
         ),
         txn(
-            "VISA 4058 USD",
+            "VISA 3434 USD",
             1000,
             "Перевод с VISA USD KB на VISA USD KB ТЕR.ID: TM0093;",
         ),
     ]
     rows = st.categorize(txns, st.match_pairs(txns), BOOK, CATALOG)
     assert {(r.row.source, r.row.subcategory, r.row.amount) for r in rows} == {
-        ("VISA 9120 UZS", "обмен валюты", 11_830_000),
-        ("VISA 4058 USD", "обмен валюты", -1000),
+        ("VISA 9090 UZS", "обмен валюты", 12_000_000),
+        ("VISA 3434 USD", "обмен валюты", -1000),
     }
 
 
 def test_income_comes_first_within_day() -> None:
     txns = [
-        txn("VISA 9120 UZS", -7_692_750, "Перевод с VISA UZS KB на чужую через МП"),
+        txn("VISA 9090 UZS", -4_500_000, "Перевод с VISA UZS KB на чужую через МП"),
         txn(
-            "VISA 9120 UZS", 33_385_000, "АКБ Капиталбанк ЗП за сентябрь 2026 сог расч."
+            "VISA 9090 UZS", 25_000_000, "АКБ Капиталбанк ЗП за сентябрь 2026 сог расч."
         ),
     ]
     rows = st.categorize(txns, {}, BOOK, CATALOG)
@@ -450,19 +450,19 @@ def coffee(source: str, amount: float, day: date = DAY) -> st.ImportRow:
 def test_rows_already_in_fact_are_skipped_once() -> None:
     facts = st.fact_rows(
         fact_values(
-            [serial(DAY), "🍔 ЕДА", "кофе", 48000, "", "", "UZS", "UZCARD 5837 UZS"]
+            [serial(DAY), "🍔 ЕДА", "кофе", 48000, "", "", "UZS", "UZCARD 5656 UZS"]
         )
     )
     rows = [
-        coffee("UZCARD 5837 UZS", 48000),
-        coffee("UZCARD 5837 UZS", 48000, DAY + timedelta(days=2)),  # вторая такая же
-        coffee("HUMO 6845 UZS", 48000),
+        coffee("UZCARD 5656 UZS", 48000),
+        coffee("UZCARD 5656 UZS", 48000, DAY + timedelta(days=2)),  # вторая такая же
+        coffee("HUMO 7007 UZS", 48000),
     ]
     fresh, already, adjustments = st.reconcile(rows, facts)
     assert already == 1 and adjustments == []
     assert [(r.row.source, r.row.day) for r in fresh] == [
-        ("UZCARD 5837 UZS", DAY + timedelta(days=2)),
-        ("HUMO 6845 UZS", DAY),
+        ("UZCARD 5656 UZS", DAY + timedelta(days=2)),
+        ("HUMO 7007 UZS", DAY),
     ]
 
 
@@ -473,38 +473,38 @@ def test_amount_converted_by_the_bot_is_corrected_not_duplicated() -> None:
                 serial(DAY),
                 "🍔 ЕДА",
                 "кафе",
-                9.43,
+                7.69,
                 "",
-                "AI: Cafe; ≈ 9.43 USD по курсу таблицы",
+                "AI: Cafe; ≈ 7.69 USD по курсу таблицы",
                 "USD",
-                "VISA 4058 USD",
+                "VISA 3434 USD",
             ],
             [
                 serial(DAY),
                 "🍔 ЕДА",
                 "кафе",
-                9.40,
+                7.65,
                 "",
                 "AI: Cafe (без пересчёта)",
                 "USD",
-                "VISA 4058 USD",
+                "VISA 3434 USD",
             ],
         )
     )
-    operation = txn("VISA 4058 USD", -9.51, "покупке OOO SHAVI CAFE SLIP No 3", DAY)
+    operation = txn("VISA 3434 USD", -7.77, "покупке OOO SHAVI CAFE SLIP No 3", DAY)
     rows = st.categorize([operation], {}, BOOK, CATALOG)
     fresh, already, [adjustment] = st.reconcile(rows, facts)
     assert (fresh, already) == ([], 0)
-    assert (adjustment.fact.number, adjustment.amount) == (2, 9.51)
+    assert (adjustment.fact.number, adjustment.amount) == (2, 7.77)
 
 
 def test_far_amount_is_not_a_correction() -> None:
     facts = st.fact_rows(
         fact_values(
-            [serial(DAY), "🍔 ЕДА", "кафе", 8.0, "", "≈ 8 USD", "USD", "VISA 4058 USD"]
+            [serial(DAY), "🍔 ЕДА", "кафе", 6.0, "", "≈ 6 USD", "USD", "VISA 3434 USD"]
         )
     )
-    operation = txn("VISA 4058 USD", -9.51, "покупке X SLIP No 3", DAY)
+    operation = txn("VISA 3434 USD", -7.77, "покупке X SLIP No 3", DAY)
     fresh, _, adjustments = st.reconcile(
         st.categorize([operation], {}, BOOK, CATALOG), facts
     )
@@ -538,36 +538,36 @@ STATEMENT_DAY = date(2026, 11, 10)
 
 def statement(*txns: st.Txn, start: date = date(2026, 10, 1)) -> st.Statement:
     return st.Statement(
-        "VISA 9120 UZS", list(txns), (start, STATEMENT_DAY), STATEMENT_DAY
+        "VISA 9090 UZS", list(txns), (start, STATEMENT_DAY), STATEMENT_DAY
     )
 
 
 def test_plan_skips_loaded_operations_and_moves_the_mark() -> None:
     old = txn(
-        "VISA 9120 UZS", -1000, "покупке OOO SHAVI CAFE SLIP No 1", date(2026, 10, 5)
+        "VISA 9090 UZS", -1000, "покупке OOO SHAVI CAFE SLIP No 1", date(2026, 10, 5)
     )
     new = txn(
-        "VISA 9120 UZS", -2000, "покупке OOO SHAVI CAFE SLIP No 2", date(2026, 10, 7)
+        "VISA 9090 UZS", -2000, "покупке OOO SHAVI CAFE SLIP No 2", date(2026, 10, 7)
     )
-    marks = {"VISA 9120 UZS": date(2026, 10, 5)}
+    marks = {"VISA 9090 UZS": date(2026, 10, 5)}
     plan = st.plan_import([statement(old, new)], CATALOG, fact_values(), marks)
     assert plan.covered == 1
     assert [r.row.amount for r in plan.rows] == [2000]
-    assert plan.marks == {"VISA 9120 UZS": date(2026, 11, 9)}
-    assert plan.balance_effect() == {"VISA 9120 UZS": -2000}
+    assert plan.marks == {"VISA 9090 UZS": date(2026, 11, 9)}
+    assert plan.balance_effect() == {"VISA 9090 UZS": -2000}
     assert plan.warnings == []
 
 
 def test_plan_warns_about_a_gap_after_the_mark() -> None:
-    marks = {"VISA 9120 UZS": date(2026, 9, 20)}
+    marks = {"VISA 9090 UZS": date(2026, 9, 20)}
     plan = st.plan_import([statement()], CATALOG, fact_values(), marks)
     [warning] = plan.warnings
     assert "загружено по 20.09.2026" in warning and "с 21.09.2026" in warning
 
 
 def test_old_statement_changes_nothing() -> None:
-    old = txn("VISA 9120 UZS", -1000, "покупке X SLIP No 1", date(2026, 10, 5))
-    marks = {"VISA 9120 UZS": date(2026, 12, 1)}
+    old = txn("VISA 9090 UZS", -1000, "покупке X SLIP No 1", date(2026, 10, 5))
+    marks = {"VISA 9090 UZS": date(2026, 12, 1)}
     plan = st.plan_import([statement(old)], CATALOG, fact_values(), marks)
     assert (plan.has_changes, plan.marks, plan.covered) == (False, {}, 1)
 
@@ -577,51 +577,51 @@ def test_temporary_row_is_removed_by_the_next_statement_only() -> None:
         serial(date(2026, 10, 6)),
         "🚧 РАЗНОЕ",
         "неучтенка",
-        1243960.8,
+        1234567.8,
         "",
         "AI: выравнивание. ВРЕМЕННАЯ: удалить при следующей заливке",
         "UZS",
-        "VISA 9120 UZS",
+        "VISA 9090 UZS",
     ]
     values = fact_values(temp)
 
     plan = st.plan_import(
-        [statement()], CATALOG, values, {"VISA 9120 UZS": date(2026, 10, 5)}
+        [statement()], CATALOG, values, {"VISA 9090 UZS": date(2026, 10, 5)}
     )
     assert [f.number for f in plan.removals] == [2]
-    assert plan.balance_effect() == {"VISA 9120 UZS": 1243960.8}
+    assert plan.balance_effect() == {"VISA 9090 UZS": 1234567.8}
 
     # та же старая выписка, что уже загружена, временную строку не трогает
     old = st.Statement(
-        "VISA 9120 UZS", [], (date(2026, 7, 1), date(2026, 10, 6)), date(2026, 10, 6)
+        "VISA 9090 UZS", [], (date(2026, 7, 1), date(2026, 10, 6)), date(2026, 10, 6)
     )
-    plan = st.plan_import([old], CATALOG, values, {"VISA 9120 UZS": date(2026, 10, 5)})
+    plan = st.plan_import([old], CATALOG, values, {"VISA 9090 UZS": date(2026, 10, 5)})
     assert plan.removals == [] and not plan.has_changes
 
 
 def test_transfer_pairs_with_an_already_loaded_half() -> None:
     out = txn(
-        "VISA 9120 UZS",
+        "VISA 9090 UZS",
         -500_000,
         "Перевод с VISA UZS KB на HUMO KB через МП",
         date(2026, 10, 5),
     )
     inc = txn(
-        "HUMO 6845 UZS",
+        "HUMO 7007 UZS",
         500_000,
         "Перевод с VISA UZS KB на HUMO KB через МП",
         date(2026, 10, 6),
     )
     visa = st.Statement(
-        "VISA 9120 UZS", [out], (date(2026, 10, 1), STATEMENT_DAY), STATEMENT_DAY
+        "VISA 9090 UZS", [out], (date(2026, 10, 1), STATEMENT_DAY), STATEMENT_DAY
     )
     humo = st.Statement(
-        "HUMO 6845 UZS", [inc], (date(2026, 10, 1), STATEMENT_DAY), STATEMENT_DAY
+        "HUMO 7007 UZS", [inc], (date(2026, 10, 1), STATEMENT_DAY), STATEMENT_DAY
     )
-    marks = {"VISA 9120 UZS": date(2026, 10, 5), "HUMO 6845 UZS": date(2026, 10, 5)}
+    marks = {"VISA 9090 UZS": date(2026, 10, 5), "HUMO 7007 UZS": date(2026, 10, 5)}
     plan = st.plan_import([visa, humo], CATALOG, fact_values(), marks)
     [item] = plan.rows
-    assert item.row.comment == "AI: перевод HUMO 6845 ← VISA 9120 (свой)"
+    assert item.row.comment == "AI: перевод HUMO 7007 ← VISA 9090 (свой)"
     assert item.review == ""
 
 
@@ -632,9 +632,9 @@ def test_first_word_match_is_optional() -> None:
 
 
 def test_purchase_is_never_income_even_if_history_says_so() -> None:
-    book = MerchantBook([("💰 ДОХОДЫ", "зарплата", "AI: Kapital Shop")])
+    book = MerchantBook([("💰 ДОХОДЫ", "зарплата", "AI: Primer Shop")])
     operation = txn(
-        "VISA 9120 UZS", -5000, "покупке KAPITAL SHOP SLIP No 1 за 01.08.2026"
+        "VISA 9090 UZS", -5000, "покупке PRIMER SHOP SLIP No 1 за 01.08.2026"
     )
     [item] = st.categorize([operation], {}, book, CATALOG)
     assert (item.row.category, item.row.amount, item.review) == (

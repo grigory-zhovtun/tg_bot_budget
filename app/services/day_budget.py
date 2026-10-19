@@ -305,26 +305,26 @@ def day_budget(
 
 
 def short(value: float) -> str:
-    """«8,52 млн» от миллиона, иначе «650 000»."""
+    """«1,25 млн» от миллиона, иначе «450 000»."""
     if abs(value) >= 1_000_000:
         return f"{value / 1_000_000:.2f} млн".replace(".", ",")
     return money(value)
 
 
 def _pair(fact: float, plan: float) -> str:
-    """«4,15 из 0,56 млн» или «690 910 из 500 000»."""
+    """«1,25 из 3,00 млн» или «720 000 из 500 000»."""
     if max(abs(fact), abs(plan)) >= 1_000_000:
         return f"{fact / 1_000_000:.2f} из {plan / 1_000_000:.2f} млн".replace(".", ",")
     return f"{money(fact)} из {money(plan)}"
 
 
 def _cents(value: float) -> str:
-    """«1 824,85»."""
+    """«1 234,56»."""
     return f"{value:,.2f}".replace(",", " ").replace(".", ",")
 
 
 def _item_amount(item: ForecastItem) -> str:
-    """«+2,72 млн», «−650 USD»."""
+    """«+2,00 млн», «−400 USD»."""
     sign = "+" if item.amount > 0 else "−"
     if item.currency == "UZS":
         return f"{sign}{short(abs(item.uzs))}"
@@ -338,7 +338,7 @@ def _ahead_text(item: ForecastItem, today: date) -> str:
 
 
 def runway_line(runway: Runway, today: date) -> str:
-    """«💳 Сумы 7,71 млн — хватит до 19.10 · до 30.10 обменять ≈ $1 160»."""
+    """«💳 Сумы 2,00 млн — хватит до 18.10 · до 30.10 обменять ≈ $460»."""
     head = f"💳 Сумы {short(runway.balance)}"
     if runway.short <= 0:
         return f"{head} — до конца месяца хватит"

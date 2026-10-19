@@ -260,7 +260,7 @@ def test_changes_made_after_opening_are_conflicts() -> None:
 
 def test_only_the_changed_cells_are_written() -> None:
     changes = PlanChanges(
-        articles=(ArticleChange("квартплата|USD", 500, 650.5),),
+        articles=(ArticleChange("квартплата|USD", 500, 600.5),),
         events=(
             EventChange(1, RENT, None),
             EventChange(2, EMPTY, EventValue("Премия", 25, 1_000_000, "UZS")),
@@ -268,7 +268,7 @@ def test_only_the_changed_cells_are_written() -> None:
         goal=GoalChange((1_000_000, "UZS"), (2_000_000, "UZS")),
     )
     assert cell_updates("Oct 26", read_plan(TAB), changes) == [
-        {"range": "'Oct 26'!D3", "values": [[-650.5]]},
+        {"range": "'Oct 26'!D3", "values": [[-600.5]]},
         {"range": "'Oct 26'!O13:R13", "values": [["", "", "", ""]]},
         {"range": "'Oct 26'!O14:R14", "values": [["Премия", 25, 1_000_000, "UZS"]]},
         {"range": "'Oct 26'!Q20:R20", "values": [[2_000_000, "UZS"]]},
@@ -308,7 +308,7 @@ def test_the_other_user_gets_what_changed() -> None:
     changes = PlanChanges(
         articles=(
             ArticleChange("кофе|UZS", 1_500_000, 1_800_000),
-            ArticleChange("квартплата|USD", 500, 650.5),
+            ArticleChange("квартплата|USD", 500, 600.5),
         ),
         events=(
             EventChange(1, RENT, None),
@@ -322,11 +322,11 @@ def test_the_other_user_gets_what_changed() -> None:
     assert text.splitlines() == [
         "✏️ Иван — правки в плане на октябрь:",
         "☕ кофе: 1 500 000 → 1 800 000",
-        "квартплата USD: 500 → 650,50",
+        "квартплата USD: 500 → 600,50",
         "📅 18 · Квартплата −500 USD → удалено",
         "📅 — → 25 · Премия +1 000 000",
         "🎯 Отложить: 1 000 000 → 2 000 000",
-        "Свободно: -5,50 млн → -7,61 млн",
+        "Свободно: -5,50 млн → -7,01 млн",
     ]
 
 

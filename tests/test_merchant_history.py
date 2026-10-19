@@ -9,7 +9,7 @@ from app.domain import MerchantBook, merchant_key
     ("comment", "expected"),
     [
         ("YANDEX.GO>YUNUSOBOD", "YANDEX.GO"),
-        ("GOOGLE *Google One>8; ≈ 19.99 USD по курсу таблицы", "GOOGLE *GOOGLE ONE"),
+        ("GOOGLE *Google One>8; ≈ 12.34 USD по курсу таблицы", "GOOGLE *GOOGLE ONE"),
         ("PAYME OPLATA", None),
         ("AI: Payme Oplata", None),
         ("VSMCUZSKB to QRonlin", None),

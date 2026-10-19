@@ -56,7 +56,7 @@ async def press(context: SimpleNamespace, data: str) -> SimpleNamespace:
 async def test_record_gets_fix_and_undo_buttons_above_the_categories() -> None:
     update, _, _ = await written()
     call = menu(update)
-    assert call.args[0] == "💳 VISA 9120 UZS — выберите категорию"
+    assert call.args[0] == "💳 VISA 9090 UZS — выберите категорию"
     rows = buttons(call.kwargs["reply_markup"])
     assert rows[0] == ACTIONS
     assert rows[1][0][1].startswith("cat_")
@@ -68,7 +68,7 @@ async def test_undo_asks_first_and_no_brings_the_menu_back() -> None:
     query = await press(context, "last:undo")
     call = query.edit_message_text.await_args
     assert call.args[0] == (
-        "↩️ Удалить строку 4169: 48 000 UZS • 🍔 ЕДА (☕ кофе) • VISA 9120 UZS?"
+        "↩️ Удалить строку 4169: 48 000 UZS • 🍔 ЕДА (☕ кофе) • VISA 9090 UZS?"
     )
     assert buttons(call.kwargs["reply_markup"]) == [
         [("🗑 Да, удалить", "last:undo:yes", "danger"), ("Нет", "last:undo:no", None)]
@@ -77,7 +77,7 @@ async def test_undo_asks_first_and_no_brings_the_menu_back() -> None:
 
     query = await press(context, "last:undo:no")
     call = query.edit_message_text.await_args
-    assert call.args[0] == "💳 VISA 9120 UZS — выберите категорию"
+    assert call.args[0] == "💳 VISA 9090 UZS — выберите категорию"
     assert buttons(call.kwargs["reply_markup"])[0] == ACTIONS
 
 
@@ -88,7 +88,7 @@ async def test_undo_yes_deletes_the_rows_and_drops_the_buttons() -> None:
     assert (first, last) == (4169, 4169)
     call = query.edit_message_text.await_args
     assert call.args[0] == (
-        "↩️ Удалил из таблицы: строка 4169.\n💳 VISA 9120 UZS — выберите категорию"
+        "↩️ Удалил из таблицы: строка 4169.\n💳 VISA 9090 UZS — выберите категорию"
     )
     rows = buttons(call.kwargs["reply_markup"])
     assert all(data.startswith("cat_") for row in rows for _, data, _ in row)

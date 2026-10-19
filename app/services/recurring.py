@@ -85,14 +85,14 @@ class Series:
 
 
 def recurring_key(comment: str) -> str:
-    """«GOOGLE *ChatGPT; ≈ 22.39 USD» и «Google - .4 Chatgpt» → «google chatgpt»."""
+    """«GOOGLE *ChatGPT; ≈ 22.22 USD» и «Google - .4 Chatgpt» → «google chatgpt»."""
     text = re.split(r"[;(,]", comment or "")[0].lower()
     words = [w for w in re.findall(r"[a-zа-яё]+", text) if len(w) >= 2]
     return " ".join(list(dict.fromkeys(words))[:2])
 
 
 def clean_name(comment: str) -> str:
-    """Название для списка: без хвоста «; ≈ 22.39 USD», «(сумма)», «, 3.49 USD»."""
+    """Название для списка: без хвоста «; ≈ 22.22 USD», «(сумма)», «, 3.33 USD»."""
     return re.split(r"[;(,]", comment or "")[0].strip()
 
 
@@ -173,7 +173,7 @@ def outside_list(
 
 
 def _amount(charge: Charge) -> str:
-    """«378 560» или «118,04 USD ≈ 1,42 млн»."""
+    """«360 000» или «111,11 USD ≈ 1,33 млн»."""
     if charge.currency == "UZS":
         return money(charge.uzs)
     value = (

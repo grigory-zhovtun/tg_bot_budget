@@ -54,7 +54,7 @@ def make_application(sheets: Any = None) -> SimpleNamespace:
             "subcategories": SUBCATEGORIES,
             "sources": SOURCES,
             "icons": {"кофе": "☕"},
-            "last_source": "UZCARD 5837 UZS",
+            "last_source": "UZCARD 5656 UZS",
         },
         user_data=defaultdict(dict),
         update_queue=asyncio.Queue(),
@@ -72,7 +72,7 @@ def auth(user_id: int = OWNER) -> dict[str, str]:
 def expense(**changes: Any) -> dict[str, Any]:
     body = {
         "entry_id": str(uuid4()),
-        "source": "VISA 9120 UZS",
+        "source": "VISA 9090 UZS",
         "category": "🍔 ЕДА",
         "subcategory": "кофе",
         "amount": "48000",
@@ -98,13 +98,13 @@ def test_strangers_get_403() -> None:
 
 def test_bootstrap_has_the_catalog_and_the_users_card() -> None:
     application = make_application()
-    application.user_data[OWNER]["source"] = "VISA 4058 USD"
+    application.user_data[OWNER]["source"] = "VISA 3434 USD"
     body = client_for(application).get("/api/bootstrap", headers=auth()).json()
     assert body["user"]["id"] == OWNER
     assert body["bot_username"] == "budget_test_bot"
     assert body["today"] == TODAY.isoformat()
-    assert body["default_source"] == "VISA 4058 USD"
-    assert {"name": "VISA 4058 USD", "currency": "USD"} in body["sources"]
+    assert body["default_source"] == "VISA 3434 USD"
+    assert {"name": "VISA 3434 USD", "currency": "USD"} in body["sources"]
     food = next(g for g in body["groups"] if g["name"] == "🍔 ЕДА")
     assert (food["emoji"], food["title"]) == ("🍔", "ЕДА")
     assert food["subcategories"][0] == {"name": "кофе", "icon": "☕"}
@@ -112,7 +112,7 @@ def test_bootstrap_has_the_catalog_and_the_users_card() -> None:
 
 def test_bootstrap_falls_back_to_the_card_of_the_last_row() -> None:
     body = client_for(make_application()).get("/api/bootstrap", headers=auth(WIFE))
-    assert body.json()["default_source"] == "UZCARD 5837 UZS"
+    assert body.json()["default_source"] == "UZCARD 5656 UZS"
 
 
 def test_bootstrap_does_not_touch_the_sheet() -> None:
@@ -131,11 +131,11 @@ def test_expense_is_written_like_a_manual_entry() -> None:
     body = response.json()
     assert (body["status"], body["rows"]) == ("written", {"first": 4169, "last": 4169})
     assert body["lines"][0].startswith(
-        "✅ 48 000 UZS • 🍔 ЕДА (☕ кофе) • VISA 9120 UZS"
+        "✅ 48 000 UZS • 🍔 ЕДА (☕ кофе) • VISA 9090 UZS"
     )
     [row] = sheets.rows
     assert row[1:4] == ["🍔 ЕДА", "кофе", 48000.0]
-    assert row[5:] == ["латте", "UZS", "VISA 9120 UZS"]
+    assert row[5:] == ["латте", "UZS", "VISA 9090 UZS"]
     sent = application.bot.send_message.await_args_list[0].kwargs
     assert (sent["chat_id"], sent["text"]) == (OWNER, "\n".join(body["lines"]))
     assert application.user_data[OWNER]["last_write"]["first"] == 4169
@@ -145,7 +145,7 @@ def test_cents_on_a_dollar_card() -> None:
     sheets = FakeSheets()
     client_for(make_application(sheets)).post(
         "/api/expenses",
-        json=expense(source="VISA 4058 USD", amount="12.50"),
+        json=expense(source="VISA 3434 USD", amount="12.50"),
         headers=auth(),
     )
     assert (sheets.rows[0][3], sheets.rows[0][6]) == (12.5, "USD")

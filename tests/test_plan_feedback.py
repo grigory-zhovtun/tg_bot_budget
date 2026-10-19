@@ -67,13 +67,13 @@ def test_today_line_left_over_and_no_limit() -> None:
 def test_service_reads_the_month_tab_after_the_write() -> None:
     fact = [FACT_HEADER, *OPENING, OVERSPENT]
     service = AnalyticsService(
-        Sheets({"fact": fact, "Oct 26": tab(inventory_fact=690_910)})
+        Sheets({"fact": fact, "Oct 26": tab(inventory_fact=720_000)})
     )
     lines = service.write_feedback(
         ["инвентарь", "кафе", "такси"], {"кафе": "🍽️"}, OCTOBER
     ).lines
     assert lines == [
-        "🔴 инвентарь: 690 910 из 500 000 — сверх плана на 190 910",
+        "🔴 инвентарь: 720 000 из 500 000 — сверх плана на 220 000",
         "🟢 🍽️ кафе: 0,00 из 2,60 млн (0%)",  # обе суммы в одних единицах
         "⚪ такси: нет в плане месяца",
         "💸 На сегодня осталось 90 000 из 90 000",

@@ -41,7 +41,7 @@ CATALOG = Catalog(
         "💳 СЧЕТА": ["переводы", "обмен валюты"],
         "💰 ДОХОДЫ": ["зарплата", "нач остаток"],
     },
-    sources=["VISA 9120 UZS", "UZCARD 5837 UZS", "VISA 4058 USD", "VISA 7450 RUB"],
+    sources=["VISA 9090 UZS", "UZCARD 5656 UZS", "VISA 3434 USD", "VISA 7878 RUB"],
 )
 RATES = Rates({"UZS": 1.0, "USD": 12000.0, "RUB": 150.0})
 
@@ -57,7 +57,7 @@ RATES = Rates({"UZS": 1.0, "USD": 12000.0, "RUB": 150.0})
         ("1,500", 1500.0),
         ("12,5", 12.5),
         ("$50", 50.0),
-        ("12.21 USD", 12.21),
+        ("11.11 USD", 11.11),
         ("abc", None),
         (None, None),
         (True, None),
@@ -70,19 +70,19 @@ def test_parse_number(raw: object, expected: float | None) -> None:
 def test_parsed_transaction_coerces_fields() -> None:
     parsed = ParsedTransaction.model_validate(
         {
-            "amount": "-41 845,10",
+            "amount": "-12 345,60",
             "currency": "sum",
             "direction": "Refund",
             "balance": "1,234,567.89",
-            "card_identifier": "*9120",
+            "card_identifier": "*9090",
             "unknown_field": 1,
         }
     )
-    assert parsed.amount == 41845.1
+    assert parsed.amount == 12345.6
     assert parsed.currency == "UZS"
     assert parsed.direction is Direction.REFUND
     assert parsed.balance == 1234567.89
-    assert parsed.card_identifier == "9120"
+    assert parsed.card_identifier == "9090"
 
 
 @pytest.mark.parametrize("amount", [0, "0", "", None, "abc"])
@@ -100,7 +100,7 @@ def test_unknown_direction_means_expense() -> None:
 @pytest.mark.parametrize(
     ("amount", "src", "dst", "expected"),
     [
-        (12.21, "USD", "UZS", 146520.0),
+        (11.11, "USD", "UZS", 133320.0),
         (150000, "UZS", "USD", 12.5),
         (100, "RUB", "USD", 1.25),
         (5, "UZS", "UZS", 5),
@@ -115,12 +115,12 @@ def test_rates_convert(amount: float, src: str, dst: str, expected: float) -> No
 @pytest.mark.parametrize(
     ("raw", "card", "default", "expected"),
     [
-        ("VISA 9120 UZS", None, None, "VISA 9120 UZS"),
-        ("*9120", None, None, "VISA 9120 UZS"),
-        (None, "4058", None, "VISA 4058 USD"),
-        ("Карта VISA 7450", None, None, "VISA 7450 RUB"),
-        ("uzcard", None, None, "UZCARD 5837 UZS"),
-        ("VISA", None, "UZCARD 5837 UZS", "UZCARD 5837 UZS"),
+        ("VISA 9090 UZS", None, None, "VISA 9090 UZS"),
+        ("*9090", None, None, "VISA 9090 UZS"),
+        (None, "3434", None, "VISA 3434 USD"),
+        ("Карта VISA 7878", None, None, "VISA 7878 RUB"),
+        ("uzcard", None, None, "UZCARD 5656 UZS"),
+        ("VISA", None, "UZCARD 5656 UZS", "UZCARD 5656 UZS"),
         ("Сбер", None, None, None),
     ],
 )
@@ -197,22 +197,22 @@ def build(**fields: object) -> SheetRow | Skipped:
 
 def test_usd_purchase_on_uzs_card_is_converted() -> None:
     row = build(
-        amount=12.21,
+        amount=11.11,
         currency="USD",
-        source="*9120",
+        source="*9090",
         category="🌛 ЕЖЕМЕСЯЧНО",
         subcategory="подписка",
         comment="JetBrains",
         date="05.01.2026",
     )
     assert isinstance(row, SheetRow)
-    assert (row.amount, row.currency, row.source) == (146520.0, "UZS", "VISA 9120 UZS")
-    assert row.comment == "JetBrains; ≈ 12.21 USD по курсу таблицы"
+    assert (row.amount, row.currency, row.source) == (133320.0, "UZS", "VISA 9090 UZS")
+    assert row.comment == "JetBrains; ≈ 11.11 USD по курсу таблицы"
     assert row.date_text == "05.01.2026"
 
 
 def test_unknown_currency_is_skipped_not_guessed() -> None:
-    result = build(amount=30, currency="SGD", source="VISA 4058 USD", comment="Airalo")
+    result = build(amount=30, currency="SGD", source="VISA 3434 USD", comment="Airalo")
     assert isinstance(result, Skipped)
     assert "SGD" in result.reason
 
@@ -221,29 +221,29 @@ def test_incoming_transfer_gets_minus() -> None:
     row = build(
         amount=1000000,
         source="HUMO",
-        card_identifier="5837",
+        card_identifier="5656",
         category="💳 СЧЕТА",
         subcategory="переводы",
         direction="transfer_in",
     )
     assert isinstance(row, SheetRow)
-    assert (row.source, row.amount) == ("UZCARD 5837 UZS", -1000000)
+    assert (row.source, row.amount) == ("UZCARD 5656 UZS", -1000000)
 
 
 def test_salary_stays_positive() -> None:
     row = build(
-        amount=33385000,
-        source="VISA 9120 UZS",
+        amount=25000000,
+        source="VISA 9090 UZS",
         category="ДОХОДЫ",
         subcategory="зарплата",
         direction="income",
     )
     assert isinstance(row, SheetRow)
-    assert (row.category, row.amount) == ("💰 ДОХОДЫ", 33385000)
+    assert (row.category, row.amount) == ("💰 ДОХОДЫ", 25000000)
 
 
 def test_unknown_category_goes_to_misc_with_note() -> None:
-    row = build(amount=28000, source="UZCARD 5837 UZS", category="Прочее")
+    row = build(amount=28000, source="UZCARD 5656 UZS", category="Прочее")
     assert isinstance(row, SheetRow)
     assert (row.category, row.subcategory) == (FALLBACK_CATEGORY, FALLBACK_SUBCATEGORY)
     assert row.comment == "AI; AI: Прочее"
@@ -282,7 +282,7 @@ def test_parse_manual_entry(text: str, expected: tuple | None) -> None:
     ],
 )
 def test_manual_row_sign(text: str, category: str, expected: float) -> None:
-    row = manual_row(text, "VISA 9120 UZS", category, "кофе", TODAY)
+    row = manual_row(text, "VISA 9090 UZS", category, "кофе", TODAY)
     assert row is not None
     assert (row.amount, row.currency, row.day) == (expected, "UZS", TODAY)
 
@@ -299,7 +299,7 @@ def test_entry_row_signs_like_a_manual_entry(
     category: str, incoming: bool, expected: float
 ) -> None:
     row = entry_row(
-        48000.0, incoming, "латте", "VISA 4058 USD", category, "кофе", TODAY
+        48000.0, incoming, "латте", "VISA 3434 USD", category, "кофе", TODAY
     )
-    assert (row.amount, row.currency, row.source) == (expected, "USD", "VISA 4058 USD")
+    assert (row.amount, row.currency, row.source) == (expected, "USD", "VISA 3434 USD")
     assert (row.day, row.comment, row.category) == (TODAY, "латте", category)

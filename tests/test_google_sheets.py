@@ -80,7 +80,7 @@ ROW = SheetRow(
     amount=48000.0,
     comment="латте",
     currency="UZS",
-    source="VISA 9120 UZS",
+    source="VISA 9090 UZS",
 )
 
 
@@ -153,35 +153,35 @@ def test_append_raises_when_retry_fails_too() -> None:
 
 def test_balance_cells_follow_the_block_on_the_sheet() -> None:
     ws = FakeWorksheet(
-        cells=[["VISA 9120 UZS"], ["UZCARD 5837 UZS"], [], ["VISA 7450 RUB"]]
+        cells=[["VISA 9090 UZS"], ["UZCARD 5656 UZS"], [], ["VISA 7878 RUB"]]
     )
     service = make_service(ws)
     assert service.balance_cells() == {
-        "VISA 9120 UZS": "N2",
-        "UZCARD 5837 UZS": "N3",
-        "VISA 7450 RUB": "N5",
+        "VISA 9090 UZS": "N2",
+        "UZCARD 5656 UZS": "N3",
+        "VISA 7878 RUB": "N5",
     }
 
 
 def test_update_balances_writes_known_sources_in_one_call(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    ws = FakeWorksheet(cells=[["VISA 9120 UZS"], ["VISA 7450 RUB"]])
+    ws = FakeWorksheet(cells=[["VISA 9090 UZS"], ["VISA 7878 RUB"]])
     service = make_service(ws)
-    updated = service.update_balances({"VISA 7450 RUB": 3595.38, "CASH UZS": 10.0})
-    assert updated == ["VISA 7450 RUB"]
+    updated = service.update_balances({"VISA 7878 RUB": 2345.67, "CASH UZS": 10.0})
+    assert updated == ["VISA 7878 RUB"]
     [body] = service.sheet.values_batch
-    assert body["data"] == [{"range": "fact!N3", "values": [[3595.38]]}]
+    assert body["data"] == [{"range": "fact!N3", "values": [[2345.67]]}]
     assert "CASH UZS" in caplog.text
 
 
 def test_reload_forgets_cached_balance_cells() -> None:
-    ws = FakeWorksheet(cells=[["VISA 9120 UZS"]])
+    ws = FakeWorksheet(cells=[["VISA 9090 UZS"]])
     service = make_service(ws)
-    assert service.balance_cells() == {"VISA 9120 UZS": "N2"}
-    ws.cells = [["HUMO 6845 UZS"], ["VISA 9120 UZS"]]
+    assert service.balance_cells() == {"VISA 9090 UZS": "N2"}
+    ws.cells = [["HUMO 7007 UZS"], ["VISA 9090 UZS"]]
     service.reload()
-    assert service.balance_cells() == {"HUMO 6845 UZS": "N2", "VISA 9120 UZS": "N3"}
+    assert service.balance_cells() == {"HUMO 7007 UZS": "N2", "VISA 9090 UZS": "N3"}
 
 
 def test_module_constants() -> None:
@@ -209,17 +209,17 @@ def test_statement_marks_are_read_as_serial_or_text_dates() -> None:
         {
             "F1:G60": [
                 ["", "выписка по"],
-                ["VISA 9120 UZS", 46300],  # 05.10.2026
-                ["UZCARD 5837 UZS", "04.10.2026"],
-                ["HUMO 6845 UZS"],
-                ["VISA 4058 USD", "позже"],
+                ["VISA 9090 UZS", 46300],  # 05.10.2026
+                ["UZCARD 5656 UZS", "04.10.2026"],
+                ["HUMO 7007 UZS"],
+                ["VISA 3434 USD", "позже"],
             ]
         }
     )
     service = make_service(ws)
     assert service.get_statement_marks() == {
-        "VISA 9120 UZS": date(2026, 10, 5),
-        "UZCARD 5837 UZS": date(2026, 10, 4),
+        "VISA 9090 UZS": date(2026, 10, 5),
+        "UZCARD 5656 UZS": date(2026, 10, 4),
     }
     [(_, options)] = ws.asked
     assert options["value_render_option"] == "UNFORMATTED_VALUE"
@@ -228,10 +228,10 @@ def test_statement_marks_are_read_as_serial_or_text_dates() -> None:
 def test_statement_marks_are_written_next_to_their_cards(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    ws = RangeWorksheet({"F1:F60": [[], ["VISA 9120 UZS"], ["HUMO 6845 UZS"]]})
+    ws = RangeWorksheet({"F1:F60": [[], ["VISA 9090 UZS"], ["HUMO 7007 UZS"]]})
     service = make_service(ws)
     service.set_statement_marks(
-        {"HUMO 6845 UZS": date(2026, 11, 9), "CASH UZS": date(2026, 11, 9)}
+        {"HUMO 7007 UZS": date(2026, 11, 9), "CASH UZS": date(2026, 11, 9)}
     )
     [body] = service.sheet.values_batch
     assert body["valueInputOption"] == "USER_ENTERED"
@@ -244,12 +244,12 @@ def test_statement_marks_are_written_next_to_their_cards(
 
 def test_fact_amounts_are_updated_with_raw_values() -> None:
     service = make_service(FakeWorksheet())
-    service.update_fact_amounts([(4100, 9.51, "AI: Cafe; сумма по выписке")])
+    service.update_fact_amounts([(4100, 7.77, "AI: Cafe; сумма по выписке")])
     [body] = service.sheet.values_batch
     assert body == {
         "valueInputOption": "RAW",
         "data": [
-            {"range": "fact!D4100", "values": [[9.51]]},
+            {"range": "fact!D4100", "values": [[7.77]]},
             {"range": "fact!F4100", "values": [["AI: Cafe; сумма по выписке"]]},
         ],
     }
@@ -285,21 +285,21 @@ def test_table_balances() -> None:
     ws = RangeWorksheet(
         {
             "I2:J30": [
-                ["VISA 9120 UZS", 14982569.45],
-                ["UZCARD 5837 UZS", ""],
+                ["VISA 9090 UZS", 9876543.21],
+                ["UZCARD 5656 UZS", ""],
                 [],
-                ["VISA 4058 USD", 1273.5],
+                ["VISA 3434 USD", 1200.5],
             ]
         }
     )
     assert make_service(ws).get_table_balances() == {
-        "VISA 9120 UZS": 14982569.45,
-        "VISA 4058 USD": 1273.5,
+        "VISA 9090 UZS": 9876543.21,
+        "VISA 3434 USD": 1200.5,
     }
 
 
 def test_undo_deletes_rows_only_if_they_are_unchanged() -> None:
-    written = [46301, "🍔 ЕДА", "кофе", 48000, 1, "латте", "UZS", "VISA 9120 UZS"]
+    written = [46301, "🍔 ЕДА", "кофе", 48000, 1, "латте", "UZS", "VISA 9090 UZS"]
     ws = RangeWorksheet({"A4169:H4170": [written, written]}, sheet_id=3)
     service = make_service(ws)
     assert service.delete_rows_if_match(4169, 4170, [ROW, ROW]) is True
@@ -320,7 +320,7 @@ def test_undo_deletes_rows_only_if_they_are_unchanged() -> None:
 
 
 def test_recategorize_writes_group_subgroup_and_amount_of_an_unchanged_row() -> None:
-    written = [46301, "🍔 ЕДА", "кофе", 48000, 1, "латте", "UZS", "VISA 9120 UZS"]
+    written = [46301, "🍔 ЕДА", "кофе", 48000, 1, "латте", "UZS", "VISA 9090 UZS"]
     ws = RangeWorksheet({"A4169:H4169": [written]})
     service = make_service(ws)
     assert service.recategorize_row(4169, ROW, "🎁 ПОДАРКИ", "сувениры", 48000.0)
@@ -368,24 +368,24 @@ def test_icons_come_from_column_d_of_the_system_sheet() -> None:
 
 def test_last_source_is_the_card_of_the_last_fact_row() -> None:
     ws = RangeWorksheet(
-        {"H2:H": [["VISA 9120 UZS"], ["HUMO 6845 UZS"], ["Источник"], []]}
+        {"H2:H": [["VISA 9090 UZS"], ["HUMO 7007 UZS"], ["Источник"], []]}
     )
     service = make_service(ws)
-    assert service.last_source(["VISA 9120 UZS", "HUMO 6845 UZS"]) == "HUMO 6845 UZS"
+    assert service.last_source(["VISA 9090 UZS", "HUMO 7007 UZS"]) == "HUMO 7007 UZS"
     assert service.last_source(["CASH UZS"]) is None
 
 
 def test_balances_get_a_check_stamp_next_to_the_card() -> None:
     from datetime import datetime
 
-    ws = FakeWorksheet(cells=[["VISA 9120 UZS"], ["UZCARD 5837 UZS"]])
+    ws = FakeWorksheet(cells=[["VISA 9090 UZS"], ["UZCARD 5656 UZS"]])
     service = make_service(ws)
     service.update_balances(
-        {"UZCARD 5837 UZS": 253324.14}, datetime(2026, 10, 9, 11, 41)
+        {"UZCARD 5656 UZS": 444444.14}, datetime(2026, 10, 9, 11, 41)
     )
     [body] = service.sheet.values_batch
     assert body["data"] == [
-        {"range": "fact!N3", "values": [[253324.14]]},
+        {"range": "fact!N3", "values": [[444444.14]]},
         {"range": "fact!Q1", "values": [["Сверено"]]},
         {"range": "fact!Q3", "values": [["09.10.2026 11:41"]]},
     ]
@@ -395,16 +395,16 @@ def test_balance_checks_are_read_as_datetimes() -> None:
     from datetime import datetime
 
     block = [
-        ["VISA 9120 UZS", 1, 1, 1, 1, 1, 0, 0, 46304.4868055556],  # 09.10.2026 11:41
-        ["UZCARD 5837 UZS", 1, 1, 1, 1, 1, 0, 0],
+        ["VISA 9090 UZS", 1, 1, 1, 1, 1, 0, 0, 46304.4868055556],  # 09.10.2026 11:41
+        ["UZCARD 5656 UZS", 1, 1, 1, 1, 1, 0, 0],
         [],
     ]
     service = make_service(RangeWorksheet({"I2:Q30": block}))
     checks = service.get_balance_checks()
-    assert checks["VISA 9120 UZS"].replace(second=0, microsecond=0) == datetime(
+    assert checks["VISA 9090 UZS"].replace(second=0, microsecond=0) == datetime(
         2026, 10, 9, 11, 41
     )
-    assert checks["UZCARD 5837 UZS"] is None
+    assert checks["UZCARD 5656 UZS"] is None
 
 
 def test_formulas_are_read_as_formulas_and_the_sheet_id_is_known() -> None:

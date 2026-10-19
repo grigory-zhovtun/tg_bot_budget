@@ -203,7 +203,7 @@ def month_bounds(day: date) -> tuple[date, date]:
 
 
 def currency_of(source: str) -> str:
-    """Валюта источника — последние три буквы названия («VISA 9120 UZS» → UZS)."""
+    """Валюта источника — последние три буквы названия («VISA 9090 UZS» → UZS)."""
     return source.strip()[-3:].upper()
 
 
@@ -257,7 +257,7 @@ LEGAL_WORDS = frozenset(
 
 
 def merchant_core(name: str) -> str:
-    """«Markthof MCHJ QK» → «MARKTHOF», «Transit 3075061…» → «TRANSIT»."""
+    """«Markthof MCHJ QK» → «MARKTHOF», «Transit 1234567…» → «TRANSIT»."""
     words = re.sub(r"[^0-9A-ZА-ЯЁ]+", " ", name.upper()).split()
     return " ".join(w for w in words if w not in LEGAL_WORDS and not w.isdigit())
 
@@ -340,7 +340,7 @@ def resolve_source(
 ) -> str | None:
     """Источник из ответа AI → точное название из system.
 
-    AI пишет «*9120», «VISA 9120» или «HUMO» — ищем по четырём цифрам карты,
+    AI пишет «*9090», «VISA 9090» или «HUMO» — ищем по четырём цифрам карты,
     затем по совпадению названия; иначе берём выбранный пользователем источник.
     """
     if raw_source in sources:
@@ -394,7 +394,7 @@ def signed_amount(amount: float, direction: Direction, category: str) -> float:
 
 
 def format_amount(row: SheetRow) -> str:
-    """«48 000 UZS», «+1 000 000 UZS», «12.21 USD»."""
+    """«48 000 UZS», «+1 000 000 UZS», «11.11 USD»."""
     incoming = row.category == INCOME_GROUP or row.amount < 0
     value = abs(row.amount)
     digits = f"{value:,.0f}" if row.currency == "UZS" else f"{value:,.2f}"

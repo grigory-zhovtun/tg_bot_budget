@@ -29,7 +29,7 @@ def row(
     day: date, comment: str, amount: float, sub: str = "подписка", cur: str = "UZS"
 ):
     group = "🌛 ЕЖЕМЕСЯЧНО" if sub == "подписка" else "🏚️ ДОМ"
-    source = "VISA 4058 USD" if cur == "USD" else "VISA 9120 UZS"
+    source = "VISA 3434 USD" if cur == "USD" else "VISA 9090 UZS"
     return [serial(day), group, sub, amount, "", f"AI: {comment}", cur, source]
 
 
@@ -42,10 +42,10 @@ def frame(*rows):
     [
         ("Anthropic* Claude SUB", "anthropic claude"),
         ("Anthropic Claude Sub", "anthropic claude"),
-        ("GOOGLE *ChatGPT; ≈ 22.39 USD по курсу", "google chatgpt"),
+        ("GOOGLE *ChatGPT; ≈ 22.22 USD по курсу", "google chatgpt"),
         ("Google - .4 Chatgpt", "google chatgpt"),
         ("Google *google One", "google one"),
-        ("Apple.com/Bill, 3.49 USD (сумма)", "apple com"),
+        ("Apple.com/Bill, 3.33 USD (сумма)", "apple com"),
         ("Yandex Plus 3ds no", "yandex plus"),
         ("", ""),
     ],
@@ -55,33 +55,33 @@ def test_merchant_names_are_normalised(comment: str, key: str) -> None:
 
 
 CLAUDE = [
-    row(date(2026, 7, 3), "Anthropic Claude Sub", 112, cur="USD"),
-    row(date(2026, 8, 2), "Anthropic* Claude SUB", 112, cur="USD"),
-    row(date(2026, 9, 2), "Anthropic* Claude SUB", 112, cur="USD"),
-    row(date(2026, 10, 2), "Anthropic* Claude SUB", 112, cur="USD"),
-    row(date(2026, 10, 4), "Anthropic* Claude SUB", 118.04, cur="USD"),
+    row(date(2026, 7, 3), "Anthropic Claude Sub", 100, cur="USD"),
+    row(date(2026, 8, 2), "Anthropic* Claude SUB", 100, cur="USD"),
+    row(date(2026, 9, 2), "Anthropic* Claude SUB", 100, cur="USD"),
+    row(date(2026, 10, 2), "Anthropic* Claude SUB", 100, cur="USD"),
+    row(date(2026, 10, 4), "Anthropic* Claude SUB", 111.11, cur="USD"),
 ]
 APPLE = [
-    row(date(2026, 8, 2), "Apple.com/bill", 41_932),
-    row(date(2026, 8, 31), "Apple.com/bill", 166_131),
-    row(date(2026, 9, 4), "Apple.com/bill", 41_287),
-    row(date(2026, 9, 30), "Apple.com/bill", 165_712),
-    row(date(2026, 10, 4), "Apple.com/bill", 41_165),
+    row(date(2026, 8, 2), "Apple.com/bill", 42_000),
+    row(date(2026, 8, 31), "Apple.com/bill", 160_000),
+    row(date(2026, 9, 4), "Apple.com/bill", 41_000),
+    row(date(2026, 9, 30), "Apple.com/bill", 150_000),
+    row(date(2026, 10, 4), "Apple.com/bill", 40_000),
 ]
 RENDER = [  # июнь выбился по дню — смотрим последние три списания
-    row(date(2026, 6, 8), "Render.Com", 313_430),
-    row(date(2026, 7, 3), "Render.com (хостинг)", 312_650),
-    row(date(2026, 8, 4), "Render.com", 313_170),
-    row(date(2026, 9, 1), "Render.com", 353_756),
-    row(date(2026, 10, 1), "Render.com", 378_560),
+    row(date(2026, 6, 8), "Render.Com", 310_000),
+    row(date(2026, 7, 3), "Render.com (хостинг)", 300_000),
+    row(date(2026, 8, 4), "Render.com", 320_000),
+    row(date(2026, 9, 1), "Render.com", 340_000),
+    row(date(2026, 10, 1), "Render.com", 360_000),
 ]
 GOOGLE_ONE = [
-    row(date(2026, 8, 14), "Google *google One", 239_980),
-    row(date(2026, 9, 14), "Google *google One", 235_882),
+    row(date(2026, 8, 14), "Google *google One", 250_000),
+    row(date(2026, 9, 14), "Google *google One", 240_000),
 ]
 OLD = [  # отменили: последнее списание больше 40 дней назад
-    row(date(2026, 6, 20), "Telegram Premium", 35_990),
-    row(date(2026, 7, 20), "Telegram Premium", 35_990),
+    row(date(2026, 6, 20), "Telegram Premium", 30_000),
+    row(date(2026, 7, 20), "Telegram Premium", 30_000),
 ]
 SHOP = [  # обычный магазин: часто и на разные суммы
     row(date(2026, 9, day), "Korzinka", 50_000 + day, "продукты")
@@ -105,7 +105,7 @@ RENT_PAID = row(date(2026, 10, 19), "снятие наличных: KASSA 7", 42
                 "USD")  # fmt: skip
 RENT_LIST = [("Аренда", 18, -420, "USD")]
 GENERIC = [  # общие комментарии — не магазин
-    row(date(2026, month, 4), comment, 60_600, "неучтенка")
+    row(date(2026, month, 4), comment, 70_000, "неучтенка")
     for month in (8, 9, 10)
     for comment in ("перевод на чужую карту UZCARD", "без мерчанта")
 ]
@@ -122,18 +122,18 @@ def test_monthly_charges_are_found_and_shops_are_not() -> None:
     )
     by_key = series_by_name(found)
     assert set(by_key) == {
-        ("anthropic claude", 1_416_480),
-        ("apple com", 41_165),
-        ("apple com", 165_712),
-        ("render com", 378_560),
-        ("google one", 235_882),
-        ("telegram premium", 35_990),
+        ("anthropic claude", 1_333_320),
+        ("apple com", 40_000),
+        ("apple com", 150_000),
+        ("render com", 360_000),
+        ("google one", 240_000),
+        ("telegram premium", 30_000),
     }
-    assert by_key[("apple com", 41_165)].day == 4
-    assert by_key[("apple com", 165_712)].day == 30
-    assert by_key[("render com", 378_560)].day == 1
-    assert by_key[("telegram premium", 35_990)].lapsed(TODAY)
-    claude = by_key[("anthropic claude", 1_416_480)]
+    assert by_key[("apple com", 40_000)].day == 4
+    assert by_key[("apple com", 150_000)].day == 30
+    assert by_key[("render com", 360_000)].day == 1
+    assert by_key[("telegram premium", 30_000)].lapsed(TODAY)
+    claude = by_key[("anthropic claude", 1_333_320)]
     assert [c.day for c in claude.charged_in(TODAY)] == [
         date(2026, 10, 2),
         date(2026, 10, 4),
@@ -142,26 +142,26 @@ def test_monthly_charges_are_found_and_shops_are_not() -> None:
 
 def test_subs_report_lists_by_day_with_totals_and_warnings() -> None:
     found = find_series(frame(*CLAUDE, *APPLE, *RENDER, *GOOGLE_ONE, *OLD), TODAY)
-    text = format_subs(found, TODAY, subscriptions_plan=1_100_000)
+    text = format_subs(found, TODAY, subscriptions_plan=1_200_000)
     lines = text.splitlines()
-    assert lines[0] == "🔁 Регулярные списания ≈ 2,24 млн в месяц"
-    assert lines[1] == "из них подписки ≈ 2,24 млн при плане 1,10 млн"
-    assert "• 01 — Render.com: 378 560" in lines
+    assert lines[0] == "🔁 Регулярные списания ≈ 2,12 млн в месяц"
+    assert lines[1] == "из них подписки ≈ 2,12 млн при плане 1,20 млн"
+    assert "• 01 — Render.com: 360 000" in lines
     assert (
-        "• 02 — Anthropic* Claude SUB: 118,04 USD ≈ 1,42 млн "
+        "• 02 — Anthropic* Claude SUB: 111,11 USD ≈ 1,33 млн "
         "⚠️ в октябре дважды: 02.10, 04.10"
     ) in lines
-    assert "• 14 — Google *google One: 235 882 (ждём 14.10)" in lines
+    assert "• 14 — Google *google One: 240 000 (ждём 14.10)" in lines
     assert lines[-1] == "Давно не было (отменили?): Telegram Premium — последнее 20.07"
 
 
 def test_morning_mentions_charges_due_today_and_a_double_charge_yesterday() -> None:
     found = find_series(frame(*CLAUDE, *GOOGLE_ONE), date(2026, 10, 13))
     assert morning_lines(found, date(2026, 10, 13)) == [
-        "🔁 Завтра спишется: Google *google One ≈ 235 882"
+        "🔁 Завтра спишется: Google *google One ≈ 240 000"
     ]
     assert morning_lines(found, date(2026, 10, 14)) == [
-        "🔁 Сегодня спишется: Google *google One ≈ 235 882"
+        "🔁 Сегодня спишется: Google *google One ≈ 240 000"
     ]
     assert morning_lines(
         find_series(frame(*CLAUDE), date(2026, 10, 5)), date(2026, 10, 5)
@@ -172,10 +172,10 @@ def test_service_and_command_show_the_report() -> None:
     fact = [FACT_HEADER, *OPENING, *GOOGLE_ONE]
     service = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab()}))
     assert service.subs_report(TODAY).text.startswith(
-        "🔁 Регулярные списания ≈ 235 882 в месяц"
+        "🔁 Регулярные списания ≈ 240 000 в месяц"
     )
     brief = service.morning_brief(date(2026, 10, 13)).text
-    assert brief.splitlines()[-1] == "🔁 Завтра спишется: Google *google One ≈ 235 882"
+    assert brief.splitlines()[-1] == "🔁 Завтра спишется: Google *google One ≈ 240 000"
     empty = AnalyticsService(Sheets({"fact": [FACT_HEADER, *OPENING], "Oct 26": tab()}))
     assert (
         empty.subs_report(TODAY).text
@@ -201,9 +201,9 @@ async def test_subs_command_replies() -> None:
 @pytest.mark.parametrize(("month", "word"), [(3, "в марте"), (8, "в августе")])
 def test_double_charge_names_the_month_properly(month: int, word: str) -> None:
     charges = [
-        row(date(2026, month - 1, 2), "Anthropic Claude Sub", 112, cur="USD"),
-        row(date(2026, month, 2), "Anthropic Claude Sub", 112, cur="USD"),
-        row(date(2026, month, 4), "Anthropic Claude Sub", 112, cur="USD"),
+        row(date(2026, month - 1, 2), "Anthropic Claude Sub", 100, cur="USD"),
+        row(date(2026, month, 2), "Anthropic Claude Sub", 100, cur="USD"),
+        row(date(2026, month, 4), "Anthropic Claude Sub", 100, cur="USD"),
     ]
     today = date(2026, month, 10)
     assert f"⚠️ {word} дважды: 02.{month:02d}, 04.{month:02d}" in format_subs(
@@ -213,11 +213,11 @@ def test_double_charge_names_the_month_properly(month: int, word: str) -> None:
 
 def test_missed_charge_this_month_is_noted() -> None:
     jetbrains = [
-        row(date(2026, 8, 4), "Jetbrains", 146_520),
-        row(date(2026, 9, 4), "Jetbrains - .55", 144_444),
+        row(date(2026, 8, 4), "Jetbrains", 133_320),
+        row(date(2026, 9, 4), "Jetbrains - .55", 122_222),
     ]
     text = format_subs(find_series(frame(*jetbrains), TODAY), TODAY)
-    assert "• 04 — Jetbrains - .55: 144 444 (в октябре не было)" in text
+    assert "• 04 — Jetbrains - .55: 122 222 (в октябре не было)" in text
 
 
 def test_a_payment_of_the_month_list_is_not_a_subscription() -> None:

@@ -22,7 +22,7 @@ from app.services.day_budget import (
 from tests.test_analytics_service import serial
 
 RATES = Rates({"UZS": 1.0, "USD": 12000.0})
-UZS_CARD, USD_CARD = "VISA 9120 UZS", "VISA 4058 USD"
+UZS_CARD, USD_CARD = "VISA 9090 UZS", "VISA 3434 USD"
 FACT_HEADER = ["Дата", "Категория", "Название", "Сумма", "Баланс", "Комментарий",
                "Валюта", "Источник"]  # fmt: skip
 
@@ -40,7 +40,7 @@ OPENING = [
 ITEMS = [
     ("Аванс", 15, 2_000_000, "UZS"),
     ("ЗП", 30, 10_000_000, "UZS"),
-    ("Квартплата", 18, -650, "USD"),
+    ("Квартплата", 18, -400, "USD"),
 ]
 
 
@@ -58,13 +58,13 @@ def tab(
 ) -> list[list[Any]]:
     """Вкладка «Oct 26»: план слева (A:I), блок прогноза справа (O:S).
 
-    План расходов 10,9 млн, из них квартплата 7,8 млн из жёлтого списка —
+    План расходов 7,9 млн, из них квартплата 4,8 млн из жёлтого списка —
     остальные 3,1 млн делятся на 31 день: 100 000 в день.
     """
     rows: list[list[Any]] = [["Статья", "Категория", "Подкатегория"]]
     rows.append(plan_row("🍔 ЕДА", "кафе", 2_600_000, 0))
     rows.append(plan_row("🏚️ ДОМ", "инвентарь", 500_000, inventory_fact))
-    rows.append(plan_row("🏚️ ДОМ", "квартплата", 7_800_000, 0))
+    rows.append(plan_row("🏚️ ДОМ", "квартплата", 4_800_000, 0))
     rows += [[] for _ in range(30 - len(rows))]
     rows = [row + [""] * (19 - len(row)) for row in rows]
     rows[1][14:16] = ["Сейчас на картах (факт)", 16_600_000]
@@ -89,7 +89,7 @@ def test_forecast_list_and_goal_are_read_from_the_block() -> None:
     assert forecast.items == (
         ForecastItem("Аванс", 15, 2_000_000, "UZS", 2_000_000, 12),
         ForecastItem("ЗП", 30, 10_000_000, "UZS", 10_000_000, 13),
-        ForecastItem("Квартплата", 18, -650, "USD", -7_800_000, 14),
+        ForecastItem("Квартплата", 18, -400, "USD", -4_800_000, 14),
     )
     assert forecast.savings_goal == 3_000_000  # таблица по дням ниже — не пункты
     assert read_forecast([["Статья"], ["Расходы", "🍔 ЕДА", "кафе"]]) is None
@@ -107,7 +107,7 @@ def test_overspending_lowers_the_limit_for_the_rest_of_the_month() -> None:
     second = budget(
         date(2026, 10, 2), fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000)
     )
-    # (16,6 млн + 4,2 млн по списку − 18,1 млн к концу месяца) / 30 дней
+    # (16,6 млн + 7,2 млн по списку − 21,1 млн к концу месяца) / 30 дней
     assert second.limit == pytest.approx(90_000)
     assert second.yesterday_spent == pytest.approx(400_000)
     assert second.yesterday_limit == pytest.approx(100_000)
@@ -126,7 +126,7 @@ def test_every_day_of_the_month_keeps_its_spending_and_limit() -> None:
         (date(2026, 10, 2), 50_000),
         (date(2026, 10, 3), 30_000),
     ]
-    # перерасход 1-го снизил лимит: 100 000 → 90 000 → (16,55 + 4,2 − 18,1) млн / 29
+    # перерасход 1-го снизил лимит: 100 000 → 90 000 → (16,55 + 7,2 − 21,1) млн / 29
     assert [day.limit for day in third.history] == pytest.approx(
         [100_000, 90_000, 2_650_000 / 29]
     )
@@ -154,7 +154,7 @@ def test_income_due_today_still_counts() -> None:
 
 
 def test_payment_from_the_list_is_not_an_expense_of_the_day() -> None:
-    rent = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 650, "USD")
+    rent = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 400, "USD")
     cafe = fact_row(date(2026, 10, 18), "🍔 ЕДА", "кафе", 50_000)
     assert budget(date(2026, 10, 19), rent, cafe).yesterday_spent == pytest.approx(
         50_000
@@ -164,7 +164,7 @@ def test_payment_from_the_list_is_not_an_expense_of_the_day() -> None:
 def test_last_day_gets_everything_left() -> None:
     month = [
         fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000),
-        fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 650, "USD"),
+        fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 400, "USD"),
         fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000),
     ]
     last = budget(date(2026, 10, 31), *month)
@@ -175,7 +175,7 @@ def test_last_day_gets_everything_left() -> None:
 @pytest.mark.parametrize(
     ("goal", "expected"),
     [
-        (3_000_000, 1_200_000 / 31),  # цель выше плановой экономии 1,1 млн
+        (6_000_000, 1_200_000 / 31),  # цель выше плановой экономии 4,1 млн
         (500_000, 100_000),  # план и так откладывает больше
         (None, 100_000),
     ],
@@ -185,13 +185,13 @@ def test_savings_goal_above_the_plan_lowers_the_limit(
 ) -> None:
     first = budget(date(2026, 10, 1), goal=goal)
     assert first.limit == pytest.approx(expected)
-    assert first.growth == pytest.approx(1_100_000)
+    assert first.growth == pytest.approx(4_100_000)
 
 
 def test_frozen_is_the_dollar_card_without_dollar_payments_ahead() -> None:
     calm = budget(date(2026, 10, 10))
-    assert (calm.frozen, calm.frozen_change) == (350, 0)  # 1000 − 650 на квартиру
-    assert calm.frozen_uzs == pytest.approx(4_200_000)
+    assert (calm.frozen, calm.frozen_change) == (600, 0)  # 1000 − 400 на квартиру
+    assert calm.frozen_uzs == pytest.approx(7_200_000)
 
     # 5 октября 100 USD перевели на сумовую карту: заморозка меньше, лимит тот же
     exchange = [
@@ -199,17 +199,17 @@ def test_frozen_is_the_dollar_card_without_dollar_payments_ahead() -> None:
         fact_row(date(2026, 10, 5), "💳 СЧЕТА", "обмен валюты", -1_200_000),
     ]
     took = budget(date(2026, 10, 10), *exchange)
-    assert (took.frozen, took.frozen_change) == (250, -100)
+    assert (took.frozen, took.frozen_change) == (500, -100)
     assert took.limit == pytest.approx(calm.limit)
-    assert "🧊 Заморожено: 250,00 USD ≈ 3,00 млн (с 1-го числа −100,00 USD)" in (
+    assert "🧊 Заморожено: 500,00 USD ≈ 6,00 млн (с 1-го числа −100,00 USD)" in (
         format_day_budget(took)
     )
 
     paid = budget(
         date(2026, 10, 19),
-        fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 650, "USD"),
+        fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 400, "USD"),
     )
-    assert paid.frozen == 350  # квартплату заплатили из отложенного на неё
+    assert paid.frozen == 600  # квартплату заплатили из отложенного на неё
 
     assert day_budget(frame(), tab(), date(2026, 10, 10), RATES, None).frozen is None
 
@@ -219,7 +219,7 @@ OVERSPENT = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000)
 
 def test_morning_message() -> None:
     text = format_day_budget(
-        budget(date(2026, 10, 2), OVERSPENT, inventory_fact=690_910)
+        budget(date(2026, 10, 2), OVERSPENT, inventory_fact=720_000)
     )
     assert text.splitlines() == [
         "☀️ Пятница, 2 октября",
@@ -227,10 +227,10 @@ def test_morning_message() -> None:
         "   по плану месяца — 100 000 в день",
         "Вчера: 400 000 при лимите 100 000 — больше на 300 000",
         "⚠️ Отстаём от плана на 300 000: на картах 16,60 млн, по плану 16,90 млн",
-        "🧊 Заморожено: 350,00 USD ≈ 4,20 млн",
+        "🧊 Заморожено: 600,00 USD ≈ 7,20 млн",
         "💳 Сумы 4,60 млн — до конца месяца хватит",
-        "🔴 Сверх плана: инвентарь 690 910 из 500 000",
-        "📅 Впереди: 15.10 Аванс +2,00 млн • 18.10 Квартплата −650 USD",
+        "🔴 Сверх плана: инвентарь 720 000 из 500 000",
+        "📅 Впереди: 15.10 Аванс +2,00 млн • 18.10 Квартплата −400 USD",
     ]
 
 
@@ -247,9 +247,9 @@ def test_no_limit_left_and_goal_lines() -> None:
         "💸 Лимита на сегодня нет: до плана на конец месяца не хватает 900 000" in text
     )
 
-    goal = format_day_budget(budget(date(2026, 10, 1), goal=3_000_000))
+    goal = format_day_budget(budget(date(2026, 10, 1), goal=6_000_000))
     assert (
-        "🎯 Цель отложить 3,00 млн больше плановой экономии 1,10 млн — "
+        "🎯 Цель отложить 6,00 млн больше плановой экономии 4,10 млн — "
         "лимит ниже на 61 290 в день" in goal
     )
     covered = format_day_budget(budget(date(2026, 10, 1), goal=500_000))
@@ -280,10 +280,10 @@ class Sheets:
 def test_service_builds_the_message_from_the_sheet() -> None:
     fact = [FACT_HEADER, *OPENING, OVERSPENT]
     service = AnalyticsService(
-        Sheets({"fact": fact, "Oct 26": tab(inventory_fact=690_910)})
+        Sheets({"fact": fact, "Oct 26": tab(inventory_fact=720_000)})
     )
     assert service.morning_brief(date(2026, 10, 2)).text == format_day_budget(
-        budget(date(2026, 10, 2), OVERSPENT, inventory_fact=690_910)
+        budget(date(2026, 10, 2), OVERSPENT, inventory_fact=720_000)
     )
     no_block = [row[:14] for row in tab()]
     service = AnalyticsService(Sheets({"fact": fact, "Oct 26": no_block}))
@@ -357,20 +357,20 @@ async def test_today_command_shows_the_day_so_far() -> None:
 
 
 ADVANCE_PAID = fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000)
-RENT_PAID = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 650, "USD")
+RENT_PAID = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 400, "USD")
 
 
 def test_an_early_salary_is_not_counted_twice() -> None:
     early = fact_row(date(2026, 10, 29), "💰 ДОХОДЫ", "зарплата", 10_000_000)
     day = budget(date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, early)
-    # (21,2 млн на картах − 18,1 млн к концу месяца) / 2 дня: зарплата уже на картах
+    # (24,2 млн на картах − 21,1 млн к концу месяца) / 2 дня: зарплата уже на картах
     assert day.limit == pytest.approx(1_550_000)
     assert day.upcoming == ()
 
 
 def test_a_late_salary_stays_ahead() -> None:
     day = budget(date(2026, 10, 31), ADVANCE_PAID, RENT_PAID)
-    # 11,2 млн на картах + 10 млн зарплаты впереди − 18,1 млн к концу месяца
+    # 14,2 млн на картах + 10 млн зарплаты впереди − 21,1 млн к концу месяца
     assert day.limit == pytest.approx(3_100_000)
     assert "📅 Впереди: ⏳ 30.10 ЗП +10,00 млн" in format_day_budget(day)
 
@@ -384,7 +384,7 @@ def test_a_salary_that_came_today_keeps_the_morning_limit() -> None:
 
 
 def test_a_payment_a_bit_off_its_sum_does_not_eat_the_day() -> None:
-    rent = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 640, "USD")
+    rent = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 390, "USD")
     cafe = fact_row(date(2026, 10, 18), "🍔 ЕДА", "кафе", 50_000)
     assert budget(date(2026, 10, 19), rent, cafe).yesterday_spent == pytest.approx(
         50_000
@@ -392,8 +392,8 @@ def test_a_payment_a_bit_off_its_sum_does_not_eat_the_day() -> None:
 
 
 def test_rent_paid_before_its_day_leaves_the_frozen_dollars() -> None:
-    early = fact_row(date(2026, 10, 16), "🏚️ ДОМ", "квартплата", 650, "USD")
-    assert budget(date(2026, 10, 17), early).frozen == 350
+    early = fact_row(date(2026, 10, 16), "🏚️ ДОМ", "квартплата", 400, "USD")
+    assert budget(date(2026, 10, 17), early).frozen == 600
 
 
 def test_sums_wait_for_a_late_salary_today() -> None:

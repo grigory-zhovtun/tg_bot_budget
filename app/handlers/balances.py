@@ -47,7 +47,7 @@ class BankBalance:
 class Matched:
     balances: list[BankBalance]
     unknown_cards: list[str]  # 4 цифры карт, которых нет в system
-    wrong_currency: list[str]  # «VISA 9120 UZS: на скрине USD»
+    wrong_currency: list[str]  # «VISA 9090 UZS: на скрине USD»
 
 
 def money(value: float, source: str) -> str:
