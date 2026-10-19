@@ -1,13 +1,8 @@
 import { useState } from "react";
 import type { Category, Untracked } from "../api";
-import { longDay, money, short } from "../format";
+import { longDay, money } from "../format";
+import { Card, Chip, Fact, Line, Table, Warn } from "./blocks";
 import { STATUS_COLOR, statusOf } from "./status";
-
-/** Доля от целого: «31 %»; ненулевая доля меньше процента — «<1 %». */
-function percent(part: number, whole: number): string {
-  const value = whole > 0 ? Math.round((part / whole) * 100) : 0;
-  return value === 0 && part > 0 ? "<1 %" : `${value} %`;
-}
 
 /** Место на шкале, до десятой процента: «58.3%». */
 function position(part: number, scale: number): string {
@@ -22,22 +17,33 @@ function period(today: string): string {
     : `за 1–${longDay(today)}`;
 }
 
-/** «3,30 млн из 3,00 млн» или «600 000 вне плана». */
-function amounts(plan: number, fact: number): string {
-  return plan > 0
-    ? `${short(fact)} из ${short(plan)}`
-    : `${short(fact)} вне плана`;
+/** «3 342 000 из 3 000 000» или «600 000 вне плана»; без плана и трат — ничего. */
+function amounts(plan: number, fact: number): string | null {
+  if (plan > 0) return `${money(fact)} из ${money(plan)}`;
+  return fact > 0 ? `${money(fact)} вне плана` : null;
 }
 
-/** Статьи без строки во вкладке месяца: их траты в план-факт таблицы не попали. */
-function untrackedText(items: Untracked[]): string {
-  const list = items
-    .map(
-      (item) =>
-        `${item.group} / ${item.subcategory} (${item.currency}) — ${money(item.amount)} сум`,
-    )
-    .join("; ");
-  return `⚠️ Во вкладке месяца не учтено: ${list}. Добавьте статью во вкладке «План».`;
+const TONE = { ok: "good", warn: "mid", over: "bad" } as const;
+const SIGN = { ok: "✓ ", warn: "", over: "⚠️ " } as const;
+
+/** Плашка «доля плана»: зелёная до 80 %, жёлтая до 100 %, красная сверх; без плана — нет. */
+function Share({
+  plan,
+  fact,
+  small = false,
+}: {
+  plan: number;
+  fact: number;
+  small?: boolean;
+}) {
+  const status = statusOf(plan, fact);
+  if (status === "off") return null;
+  const share = Math.round((fact / plan) * 100);
+  return (
+    <Chip tone={TONE[status]} small={small}>
+      {`${SIGN[status]}${share}\u00a0%`}
+    </Chip>
+  );
 }
 
 interface BarProps {
@@ -52,7 +58,7 @@ function Bar({ plan, fact, scale, thin = false }: BarProps) {
   const status = statusOf(plan, fact);
   return (
     <div
-      className={`relative rounded-full bg-section ${thin ? "h-1.5" : "h-2"}`}
+      className={`relative rounded-full bg-stripe ${thin ? "h-2" : "h-3"}`}
       data-status={status}
       aria-hidden="true"
     >
@@ -66,7 +72,7 @@ function Bar({ plan, fact, scale, thin = false }: BarProps) {
       {plan > 0 && (
         <div
           data-plan
-          className="absolute -inset-y-0.5 w-0.5 -translate-x-1/2 rounded-full bg-text"
+          className="absolute -inset-y-1 w-1 -translate-x-1/2 rounded-full bg-text"
           style={{ left: position(plan, scale) }}
         />
       )}
@@ -77,6 +83,24 @@ function Bar({ plan, fact, scale, thin = false }: BarProps) {
 /** Самое большое из трат и плана — шкала полос. */
 function longest(lines: { plan: number; fact: number }[]): number {
   return Math.max(0, ...lines.map((line) => Math.max(line.plan, line.fact)));
+}
+
+/** Статьи без строки во вкладке месяца: их траты в план-факт таблицы не попали. */
+function NotInPlan({ items }: { items: Untracked[] }) {
+  return (
+    <Card label="Нет в плане месяца">
+      <Warn>Нет в плане месяца</Warn>
+      <Table
+        head={["статья", "не учтено"]}
+        align="lr"
+        rows={items.map((item) => [
+          `${item.subcategory} (${item.currency})`,
+          money(item.amount),
+        ])}
+      />
+      <Line>добавьте во вкладке «План»</Line>
+    </Card>
+  );
 }
 
 interface Props {
@@ -93,63 +117,63 @@ export default function CategoryChart({ categories, untracked, today }: Props) {
   const scale = longest(categories);
   return (
     <section
-      className="flex flex-col gap-2"
+      className="flex flex-col gap-3"
       aria-label="План-факт по категориям"
     >
-      <h2 className="font-semibold">План-факт по категориям</h2>
-      <p className="text-sm">
-        <span className="font-semibold">{short(fact)}</span>
-        <span className="text-hint">
-          {` ${period(today)} · план на месяц ${short(plan)}`}
-        </span>
-      </p>
-      <ul className="flex flex-col gap-3">
-        {categories.map((group) => (
-          <li key={group.name} className="flex flex-col gap-1">
-            <button
-              type="button"
-              aria-expanded={open === group.name}
-              className="flex items-baseline justify-between gap-2 text-left"
-              onClick={() => setOpen(open === group.name ? null : group.name)}
-            >
-              <span className="font-medium">{group.name}</span>
-              <span className="text-sm whitespace-nowrap text-hint">
-                {amounts(group.plan, group.fact) +
-                  (group.fact > 0 ? ` · ${percent(group.fact, fact)}` : "")}
-              </span>
-            </button>
-            <Bar plan={group.plan} fact={group.fact} scale={scale} />
-            {open === group.name && (
-              <ul className="mt-1 flex flex-col gap-2 pl-3">
-                {group.items.map((item) => (
-                  <li key={item.name} className="flex flex-col gap-1 text-sm">
-                    <span className="flex justify-between gap-2">
-                      <span>
-                        {item.icon ? `${item.icon} ${item.name}` : item.name}
-                      </span>
-                      <span className="whitespace-nowrap text-hint">
-                        {amounts(item.plan, item.fact)}
-                      </span>
-                    </span>
-                    <Bar
-                      plan={item.plan}
-                      fact={item.fact}
-                      scale={longest(group.items)}
-                      thin
-                    />
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
-        ))}
+      <h2 className="text-fact font-extrabold">План-факт по категориям</h2>
+      <Card>
+        <Fact>{`Потрачено ${money(fact)}`}</Fact>
+        <Line>{period(today)}</Line>
+        <Line>{`план на месяц ${money(plan)}`}</Line>
+      </Card>
+      <ul className="flex flex-col gap-4">
+        {categories.map((group) => {
+          const line = amounts(group.plan, group.fact);
+          return (
+            <li key={group.name} className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                aria-expanded={open === group.name}
+                className="flex items-center justify-between gap-2 text-left"
+                onClick={() => setOpen(open === group.name ? null : group.name)}
+              >
+                <span className="text-fact font-extrabold">{group.name}</span>
+                <Share plan={group.plan} fact={group.fact} />
+              </button>
+              <Bar plan={group.plan} fact={group.fact} scale={scale} />
+              {line && <Line>{line}</Line>}
+              {open === group.name && (
+                <ul className="mt-1 flex flex-col gap-3 border-l-4 border-outline pl-3">
+                  {group.items.map((item) => {
+                    const itemLine = amounts(item.plan, item.fact);
+                    return (
+                      <li key={item.name} className="flex flex-col gap-1">
+                        <span className="flex items-center justify-between gap-2">
+                          <span className="text-line font-extrabold">
+                            {item.icon
+                              ? `${item.icon} ${item.name}`
+                              : item.name}
+                          </span>
+                          <Share plan={item.plan} fact={item.fact} small />
+                        </span>
+                        <Bar
+                          plan={item.plan}
+                          fact={item.fact}
+                          scale={longest(group.items)}
+                          thin
+                        />
+                        {itemLine && <Line>{itemLine}</Line>}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </li>
+          );
+        })}
       </ul>
-      <p className="text-xs text-hint">
-        Полоса — сколько потрачено, черта — план
-      </p>
-      {untracked.length > 0 && (
-        <p className="text-sm text-danger">{untrackedText(untracked)}</p>
-      )}
+      <Line>полоса — потрачено, черта — план</Line>
+      {untracked.length > 0 && <NotInPlan items={untracked} />}
     </section>
   );
 }

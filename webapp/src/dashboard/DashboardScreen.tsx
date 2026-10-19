@@ -171,8 +171,8 @@ function SectionCards({
             />
           )}
           {data.spending.length > 0 && (
-            <section className="flex flex-col gap-2">
-              <h2 className="font-semibold">Траты по дням</h2>
+            <section className="flex flex-col gap-3">
+              <h2 className="text-fact font-extrabold">Траты по дням</h2>
               <SpendingChart
                 spending={data.spending}
                 today={data.today}

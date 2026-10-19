@@ -49,8 +49,8 @@ describe("DashboardScreen", () => {
         name: "Траты по дням: 9 дней, сверх лимита — 2",
       }),
     ).toBeTruthy();
-    expect(screen.getByText(/за 9 дней при плане 4,05 млн/)).toBeTruthy();
-    expect(screen.getByText("запас 1,10 млн")).toBeTruthy();
+    expect(screen.getByText("потрачено 2 950 000 за 9 дней")).toBeTruthy();
+    expect(screen.getByText("✓ Запас 1 100 000")).toBeTruthy();
     expect(screen.getByText("можно 500 000 в день")).toBeTruthy();
     expect(screen.getByText("план 450 000 в день")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Можно сегодня" })).toBeNull();
@@ -142,7 +142,7 @@ describe("DashboardScreen", () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
     await show(user, "Траты");
-    expect(screen.getByText("сверх на 800 000")).toBeTruthy();
+    expect(screen.getByText("⚠️ Сверх на 800 000")).toBeTruthy();
     expect(
       screen.getByRole("img", {
         name: "Траты по дням: 2 дня, сверх лимита — 2",
@@ -162,7 +162,7 @@ describe("DashboardScreen", () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
     await show(user, "Траты");
-    expect(screen.getByText("ровно по плану")).toBeTruthy();
+    expect(screen.getByText("✓ Ровно по плану")).toBeTruthy();
   });
 
   it("opens a group to show its subcategories", async () => {
@@ -196,17 +196,13 @@ describe("DashboardScreen", () => {
     const spent = screen.getByRole("region", {
       name: "План-факт по категориям",
     });
+    expect(within(spent).getByText("за 1–10 октября")).toBeTruthy();
+    expect(within(spent).getByText("план на месяц 5 000 000")).toBeTruthy();
     expect(
-      within(spent).getByText("за 1–10 октября · план на месяц 5,00 млн"),
+      within(spent).getByRole("button", { name: /ЕДА.*⚠️ 111\s%/ }),
     ).toBeTruthy();
-    expect(
-      within(spent).getByRole("button", {
-        name: /ЕДА.*3,34 млн из 3,00 млн · 87 %/,
-      }),
-    ).toBeTruthy();
-    expect(
-      within(spent).getByText(/не учтено: 🍔 ЕДА \/ кафе \(USD\)/),
-    ).toBeTruthy();
+    expect(within(spent).getByText("3 342 000 из 3 000 000")).toBeTruthy();
+    expect(within(spent).getByText("кафе (USD)")).toBeTruthy();
   });
 
   it("keeps the cards and the chart without the forecast block", async () => {

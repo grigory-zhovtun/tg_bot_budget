@@ -48,14 +48,16 @@ const TONE = {
   bad: "bg-chip-bad",
 } as const;
 
-/** Плашка статуса: белый жирный текст на цветном фоне; знак — в тексте. */
+/** Плашка статуса: белый жирный текст на цветном фоне; знак — в тексте;
+ * small — для подкатегорий, на ступень мельче. */
 export function Chip({
   tone,
+  small = false,
   children,
-}: Children & { tone: keyof typeof TONE }) {
+}: Children & { tone: keyof typeof TONE; small?: boolean }) {
   return (
     <span
-      className={`inline-block shrink-0 rounded-lg px-2.5 py-0.5 text-fact font-black whitespace-nowrap text-white ${TONE[tone]}`}
+      className={`inline-block shrink-0 rounded-lg px-2.5 py-0.5 font-black whitespace-nowrap text-white ${small ? "text-line" : "text-fact"} ${TONE[tone]}`}
     >
       {children}
     </span>
