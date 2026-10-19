@@ -98,6 +98,8 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 
 **Plan**: `/plan` → `AnalyticsService.plan_report()` → `plan_lines` (month tab columns H/I in UZS, sign flipped, currencies joined) → `format_plan_report`; the Sunday job prepends the week's totals (`weekly_digest`)
 
+**Rich reports**: `morning_brief`/`morning_message`, `plan_report` and `weekly_digest` return `app.rich.Report(text, html)` — `text` from the plain formatters (`format_day_budget`, `morning_lines`, `format_plan_report`), `html` from the block builders next to them (`rich_day_budget`, `rich_morning_lines`, `rich_plan_report`, helpers in `app/rich.py`). `handlers.analytics.send_report` sends `sendRichMessage` through `bot.do_api_request` (PTB 22.8 has no method for it) with `skip_entity_detection`; on `BadRequest`/`EndPointNotFound` it falls back rich+effect → rich → text+effect → text, network errors propagate (no duplicates). `RICH_MESSAGES=off` — plain text only
+
 **Daily limit**: morning job / `/today` → `AnalyticsService.morning_brief()` → `day_budget` (fact frame + month tab: `read_forecast` reads the yellow list `O:S` after «Поступления…» up to «Дата», goal row «Отложить за месяц») → `format_day_budget`. The tab cell P5 «Лимит на сегодня» uses the same formula — change both together
 
 **Analytics**: `/analytics` → `AnalyticsService.generate_3day_report()` → text summary + pie/bar charts as PNG
@@ -127,6 +129,7 @@ Optional:
 - `IGNORED_CARDS` - last 4 digits of cards the screenshot check skips (e.g. a child's card)
 - `MORNING_TIME` - morning message with the daily limit to the owner, default `08:00`, `off` disables it; `FROZEN_CURRENCY` (default `USD`, `off` — none) - cards in this currency are savings; `CUSHION_MONTHS` (default `6`) - emergency fund target in months of spending; `SAVE_SHARE` (default `0.10`, `0` — off) - share of an income the write summary suggests setting aside
 - `WEEKLY_DIGEST_TIME` - Sunday digest to the owner (`ANALYTICS_CHAT_ID` or the first allowed id), default `20:00`, `off` disables it
+- `RICH_MESSAGES` - `off` sends the morning message, `/today`, the weekly digest and `/plan` as plain text instead of Telegram rich messages; default `on`
 - `WEBHOOK_URL` (or Render's `RENDER_EXTERNAL_URL`) — web service mode; `WEBHOOK_SECRET` (default: derived from the bot token), `PORT`, `LOCAL_RUN=True` (poll locally), `FORCE_POLLING=True` (poll even while a webhook is set — takes the bot over from the web service)
 
 ## Code Patterns
