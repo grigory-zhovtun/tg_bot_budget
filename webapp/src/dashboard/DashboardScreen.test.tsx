@@ -61,8 +61,8 @@ describe("DashboardScreen", () => {
     render(<DashboardScreen api={fakeApi()} />);
     await show(user, "Впереди");
     // платёж списка — оранжевым, как точки платежей в календаре
-    expect(screen.getByText("−380,00 USD").className).toContain("text-payment");
-    expect(screen.getByText(/ждём/)).toBeTruthy();
+    expect(screen.getByText("−380 $").className).toContain("text-payment");
+    expect(screen.getByText("⏳ ждём")).toBeTruthy();
   });
 
   it("shows when the sums run out and how many dollars to exchange", async () => {
@@ -380,7 +380,7 @@ describe("DashboardScreen", () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
     await show(user, "Впереди");
-    expect(screen.getByText("⏳ 05 — ЗП")).toBeTruthy();
+    expect(screen.getByText("⏳ ЗП")).toBeTruthy();
   });
 
   it("shows this launch's summary at once without asking again", () => {
