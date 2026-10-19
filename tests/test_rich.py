@@ -1,6 +1,18 @@
 """Помощники расширенных сообщений: числа не рвутся, текст из таблицы экранируется."""
 
-from app.rich import cents, heading, in_currency, para, percent, signed, table, whole
+from app.rich import (
+    Report,
+    cents,
+    heading,
+    in_currency,
+    money_text,
+    note_report,
+    para,
+    percent,
+    signed,
+    table,
+    whole,
+)
 
 N = " "
 
@@ -28,3 +40,21 @@ def test_blocks_escape_sheet_text() -> None:
         f'<tr><td><b>кафе &amp; бар</b></td><td align="right"><b>1{N}000</b></td>'
         "</tr></table>"
     )
+
+
+def test_note_report_splits_the_head() -> None:
+    text = "📅 Жена — новая запись: 21.10 Кружок 180 000 UZS"
+    assert note_report(text) == Report(
+        text, heading("📅 Жена — новая запись") + para("21.10 Кружок 180 000 UZS")
+    )
+    many = note_report("✏️ Правки в плане на октябрь:\nкафе: 1 → 2\nСвободно: 3 → 4")
+    assert many.html == heading("✏️ Правки в плане на октябрь") + para(
+        "кафе: 1 → 2", "Свободно: 3 → 4"
+    )
+    assert note_report("Нечего отменять").html == heading("Нечего отменять")
+
+
+def test_money_text_shows_cents_only_when_there_are_any() -> None:
+    assert money_text(48_000, "UZS") == f"48{N}000"
+    assert money_text(380, "USD") == f"380{N}$"
+    assert money_text(12.5, "USD") == f"12,50{N}$"

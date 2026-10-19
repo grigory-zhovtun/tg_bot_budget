@@ -43,6 +43,12 @@ def in_currency(amount: float, code: str, with_cents: bool = False) -> str:
     return f"{number}{NBSP}{SYMBOLS.get(code, code)}"
 
 
+def money_text(amount: float, code: str) -> str:
+    """Сумма записи или копилки: копейки — только у дробной суммы в валюте."""
+    fraction = code != "UZS" and not float(amount).is_integer()
+    return in_currency(amount, code, with_cents=fraction)
+
+
 def signed(amount: float, code: str) -> str:
     """Строка списка со знаком: «+75 000 ₽», «−380 $»."""
     sign = "−" if amount < 0 else "+"
@@ -79,3 +85,17 @@ def table(
         f"<tr>{''.join(cell(c, i) for i, c in enumerate(row))}</tr>" for row in rows
     ]
     return f"<table bordered striped>{''.join(lines)}</table>"
+
+
+def note_report(text: str) -> Report:
+    """Заметка «заголовок: подробности» → крупная строка и абзац под ней.
+
+    Первая строка до первого «: » (или без завершающего «:») — заголовок, её
+    остаток и остальные строки — абзацем; текст отчёта — заметка как есть.
+    """
+    first, *rest = text.splitlines() or [""]
+    head, sep, tail = first.partition(": ")
+    if not sep:
+        head, tail = first.removesuffix(":"), ""
+    lines = [line for line in (tail, *rest) if line.strip()]
+    return Report(text, heading(head) + (para(*lines) if lines else ""))

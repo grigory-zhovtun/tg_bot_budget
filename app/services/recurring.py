@@ -19,7 +19,7 @@ from typing import Protocol
 
 import pandas as pd
 
-from app.rich import NBSP, heading, in_currency, para, whole
+from app.rich import NBSP, heading, in_currency, money_text, para, whole
 from app.services.analytics_service import MONTHS_RU, expenses, money
 from app.services.day_budget import MONTHS_PREPOSITIONAL, short
 from app.services.receipts import PAYMENT_TOLERANCE
@@ -243,6 +243,59 @@ def _twice(series: list[Series], today: date) -> list[tuple[Series, list[Charge]
         if len(this_month) >= 2 and this_month[-1].day == yesterday:
             found.append((s, this_month))
     return found
+
+
+def _rich_amount(charge: Charge) -> str:
+    """«52 000» или «15,50 $ (186 000)»."""
+    if charge.currency == "UZS":
+        return whole(charge.uzs)
+    return f"{money_text(charge.amount, charge.currency)} ({whole(charge.uzs)})"
+
+
+def rich_subs(
+    series: list[Series], today: date, subscriptions_plan: float | None = None
+) -> list[str]:
+    """/subs блоками: итог крупно и группы — ждём, списано, дважды, не было, давно."""
+    active = [s for s in series if not s.lapsed(today)]
+    total = sum(s.last.uzs for s in active)
+    subscriptions = sum(
+        s.last.uzs for s in active if s.last.subcategory == SUBSCRIPTION
+    )
+    about = ["регулярные списания"]
+    if subscriptions:
+        plan = f" при плане {whole(subscriptions_plan)}" if subscriptions_plan else ""
+        about.append(f"из них подписки ≈ {whole(subscriptions)}{plan}")
+    waiting: list[str] = []
+    charged: list[str] = []
+    twice: list[str] = []
+    missed: list[str] = []
+    for s in active:
+        this_month = s.charged_in(today)
+        line = f"{s.day:02d} {s.name} — {_rich_amount(s.last)}"
+        if len(this_month) >= 2:
+            twice += [f"{s.name} — {_rich_amount(s.last)}", _dates(this_month)]
+        elif this_month:
+            charged.append(line)
+        elif s.expected_on(today) >= today:
+            waiting.append(line)
+        else:
+            missed.append(line)
+    gone = [
+        f"{s.name} — последнее {s.last.day:%d.%m}" for s in series if s.lapsed(today)
+    ]
+    month = MONTHS_PREPOSITIONAL[today.month - 1]
+    groups = (
+        (f"⏳ Ждём в {month}", waiting),
+        ("✅ Списано", charged),
+        (f"⚠️ Дважды за {MONTHS_RU[today.month - 1]}", twice),
+        (f"❓ Не было в {month}", missed),
+        ("Давно не было", gone),
+    )
+    blocks = [heading(f"🔁 ≈ {whole(total)} в месяц", 2), para(*about)]
+    for title, lines in groups:
+        if lines:
+            blocks += [heading(title), para(*lines)]
+    return blocks
 
 
 def morning_lines(series: list[Series], today: date) -> list[str]:

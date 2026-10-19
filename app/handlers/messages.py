@@ -30,6 +30,7 @@ from app.domain import (
 from app.errors import user_message
 from app.handlers import balances, fix, icons, live, statement_import
 from app.handlers import sms as sms_chat
+from app.handlers.analytics import send_report
 from app.handlers.common import (
     CHOOSE_SOURCE,
     LAST_WRITE,
@@ -44,7 +45,8 @@ from app.handlers.common import (
 )
 from app.handlers.piggy import income_prompt, spend_note
 from app.handlers.receipts import mark_dirty
-from app.services.analytics_service import TRANSFERS_GROUP
+from app.rich import Report, cents, heading, money_text, para, table, whole
+from app.services.analytics_service import TRANSFERS_GROUP, Feedback
 from app.services.google_sheets import GoogleSheetsService
 from app.services.savings import save_hint
 from app.statements import is_kapitalbank_statement, parse_statement, pdf_text
@@ -106,11 +108,21 @@ async def _report_duplicate(
     rows = f"строка {first}" if first == last else f"строки {first}–{last}"
     tz = ZoneInfo(config.ANALYTICS_TIMEZONE)
     when = datetime.fromtimestamp(entry["at"], tz).strftime("%d.%m %H:%M")
-    message = await update.effective_chat.send_message(
+    text = (
         f"⚠️ Это уже записано ({rows}, {when}), повтор не записываю.\n"
         "Если запись была ошибочной — /undo."
     )
-    track_message(context, message)
+    html = heading("⚠️ Это уже записано") + para(
+        f"{rows}, {when}",
+        "повтор не записываю",
+        "если запись была ошибочной — /undo",
+    )
+    chat = update.effective_chat
+    sent = await send_report(
+        context.bot, chat.id, Report(text, html), send=chat.send_message
+    )
+    for message in sent.messages:
+        track_message(context, message)
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -347,9 +359,105 @@ def _balance_check(source: str, bank: float, table: float) -> str:
     )
 
 
+def _incoming(row: SheetRow) -> bool:
+    """Поступление или возврат — со знаком «+», как в format_amount."""
+    return row.category == INCOME_GROUP or row.amount < 0
+
+
+def _signed_money(row: SheetRow) -> str:
+    return ("+" if _incoming(row) else "") + money_text(abs(row.amount), row.currency)
+
+
+def _card_money(value: float, source: str) -> str:
+    """Остаток карты: долларовой — с центами, остальных — целиком (как сверка)."""
+    return cents(value) if source.strip()[-3:].upper() == "USD" else whole(value)
+
+
+def _check_lines(source: str, bank: float, table_value: float) -> list[str]:
+    """Сверка остатка из SMS с таблицей — строками абзаца."""
+    tolerance = 0.01 if source.strip()[-3:].upper() == "USD" else 1
+    if abs(bank - table_value) < tolerance:
+        return ["✓ сходится с банком"]
+    return [  # короткими строками: одной не влезает в ширину телефона
+        f"⚠️ в банке {_card_money(bank, source)}",
+        f"в таблице {_card_money(table_value, source)}",
+        f"разница {_card_money(bank - table_value, source)}",
+    ]
+
+
+def _plural(count: int, one: str, few: str, many: str) -> str:
+    if count % 10 == 1 and count % 100 != 11:
+        return one
+    if 2 <= count % 10 <= 4 and not 12 <= count % 100 <= 14:
+        return few
+    return many
+
+
+def record_blocks(
+    rows: Sequence[SheetRow],
+    flags: Sequence[str | None],
+    balances: dict[str, float],
+    table_balances: dict[str, float],
+    updated: Sequence[str],
+    icons: dict[str, str] | None,
+) -> list[str]:
+    """Записанные строки крупно: одна — сумма заголовком, несколько — таблицей.
+
+    Под ними — карта с остатком, если бот его обновил, сверка с банком и строки
+    с пометкой проверки (🆕/❓).
+    """
+
+    def flag(index: int) -> str | None:
+        return flags[index] if index < len(flags) else None
+
+    def card_lines(source: str) -> list[str]:
+        if source not in updated:
+            return [source]
+        lines = [f"{source}: {_card_money(balances[source], source)}"]
+        if source in table_balances:
+            lines += _check_lines(source, balances[source], table_balances[source])
+        return lines
+
+    marks = [
+        f"{flag(index)} {row_name(row)}"
+        for index, row in enumerate(rows)
+        if flag(index)
+    ]
+    if len(rows) == 1:
+        row = rows[0]
+        return [
+            heading(f"✅ {_signed_money(row)}", 2),
+            para(
+                f"{with_icon(row.subcategory, icons)} · {row.category}",
+                *card_lines(row.source),
+                *marks,
+            ),
+        ]
+    count = len(rows)
+    spends = len({row.currency for row in rows}) == 1 and all(
+        not _incoming(row) and row.category != TRANSFERS_GROUP for row in rows
+    )
+    if spends:
+        total = money_text(sum(row.amount for row in rows), rows[0].currency)
+        head = f"✅ {count} {_plural(count, 'трата', 'траты', 'трат')} — {total}"
+    else:
+        head = f"✅ Записал {count} {_plural(count, 'строку', 'строки', 'строк')}"
+    cells = [
+        [
+            _signed_money(row),
+            with_icon(row.subcategory, icons)
+            + (f" {flag(index)}" if flag(index) else ""),
+        ]
+        for index, row in enumerate(rows)
+    ]
+    sources = list(dict.fromkeys(row.source for row in rows))
+    lines = [line for source in sources for line in card_lines(source)]
+    return [heading(head, 2), table(cells, "rl"), para(*lines, *marks)]
+
+
 async def _plan_feedback(
     context: ContextTypes.DEFAULT_TYPE, rows: Sequence[SheetRow]
-) -> list[str]:
+) -> Feedback:
     """Статус статей месяца и остаток на сегодня; ошибка не мешает записи."""
     analytics = context.bot_data.get("analytics_service")
     today = local_today(config.ANALYTICS_TIMEZONE)
@@ -360,7 +468,7 @@ async def _plan_feedback(
         and (row.day.year, row.day.month) == (today.year, today.month)
     ]
     if analytics is None or not spent:
-        return []
+        return Feedback([], [])
     try:
         return await asyncio.to_thread(
             analytics.write_feedback,
@@ -369,7 +477,7 @@ async def _plan_feedback(
         )
     except Exception:
         logger.exception("Plan feedback failed")
-        return []
+        return Feedback([], [])
 
 
 @dataclass(frozen=True)
@@ -402,6 +510,7 @@ async def save_rows(
     """
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
     lines: list[str] = []
+    failed: list[str] = []  # «❌ Не записал…» — в расширенном виде абзацем
     first: int | None = None
     last: int | None = None
     if rows:
@@ -412,6 +521,7 @@ async def save_rows(
             lines.append(
                 f"❌ Не записал в Google Таблицу ({len(rows)} шт.), попробуйте ещё раз"
             )
+            failed.append(lines[-1])
             rows = []
         else:
             context.user_data[LAST_WRITE] = {
@@ -453,24 +563,43 @@ async def save_rows(
         context.user_data["source"] = rows[-1].source
         context.bot_data["last_source"] = rows[-1].source  # переживёт сброс user_data
 
+    table_balances: dict[str, float] = {}
     if updated:
         try:
-            table = await asyncio.to_thread(gs_service.get_table_balances)
+            table_balances = await asyncio.to_thread(gs_service.get_table_balances)
         except Exception:
             logger.exception("Reading table balances failed")
-            table = {}
         lines += [
-            _balance_check(source, balances[source], table[source])
+            _balance_check(source, balances[source], table_balances[source])
             for source in updated
-            if source in table
+            if source in table_balances
         ]
 
-    lines += await _plan_feedback(context, rows)
-    lines += await asyncio.to_thread(save_hint, gs_service, rows)  # «отложите»
-    lines += [f"⚠️ Не записал: {s.comment} — {s.reason}" for s in skipped]
-    lines += notes
+    feedback = await _plan_feedback(context, rows)
+    lines += feedback.lines
+    after = await asyncio.to_thread(save_hint, gs_service, rows)  # «отложите»
+    after += [f"⚠️ Не записал: {s.comment} — {s.reason}" for s in skipped]
+    after += notes
+    lines += after
     if not lines:
         lines.append("Не удалось распознать транзакции.")
+        after.append(lines[0])
+    blocks = (
+        record_blocks(
+            rows,
+            flags,
+            balances,
+            table_balances,
+            updated,
+            context.bot_data.get("icons"),
+        )
+        if rows
+        else []
+    )
+    blocks += feedback.blocks
+    if failed or after:
+        blocks.append(para(*failed, *after))
+    report = Report("\n".join(lines), "".join(blocks))
 
     # Clear specific manual selection state
     context.user_data.pop("category", None)
@@ -484,7 +613,7 @@ async def save_rows(
     menu = await show_main_menu(
         chat,
         context,
-        "\n".join(lines),
+        report,
         actions=bool(rows),
         check=len(checks),
         menu=check_now,

@@ -2,6 +2,8 @@ import hashlib
 import logging
 import re
 import time
+from functools import partial
+from typing import Any
 
 from telegram import (
     Bot,
@@ -15,6 +17,8 @@ from telegram.ext import ContextTypes
 
 from app import config
 from app.custom_icons import EMPTY, CustomIcons
+from app.handlers.analytics import send_report
+from app.rich import Report, note_report
 from app.utils.keyboards import (
     categories_menu,
     category_prompt,
@@ -102,7 +106,7 @@ async def clear_tracked_messages(context: ContextTypes.DEFAULT_TYPE, chat_id: in
 async def show_main_menu(
     chat: Chat,
     context: ContextTypes.DEFAULT_TYPE,
-    success_message: str | None = None,
+    success_message: Report | str | None = None,
     actions: bool = False,
     check: int = 0,
     menu: tuple[str, InlineKeyboardMarkup] | None = None,
@@ -116,14 +120,22 @@ async def show_main_menu(
     """
     current_source = context.user_data.get("source")
 
-    # Пустой или «невидимый» текст Telegram отвергает (Message_empty)
-    text = success_message or (
-        f"💳 {current_source}" if current_source else CHOOSE_SOURCE
+    if isinstance(success_message, Report):
+        report = success_message
+    else:  # пустой или «невидимый» текст Telegram отвергает (Message_empty)
+        report = Report(
+            success_message
+            or (f"💳 {current_source}" if current_source else CHOOSE_SOURCE)
+        )
+    sent = await send_report(
+        context.bot,
+        chat.id,
+        report,
+        reply_markup=sources_keyboard(context, chat.id, current_source),
+        send=chat.send_message,
     )
-    msg1 = await chat.send_message(
-        text, reply_markup=sources_keyboard(context, chat.id, current_source)
-    )
-    track_message(context, msg1)
+    for message in sent.messages:
+        track_message(context, message)
 
     if not current_source:
         return None
@@ -188,10 +200,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         track_message(context, msg2)
 
 
+async def _note(bot: Bot, user_id: int, text: str, **options: Any) -> Message:
+    """Запасной текст заметки — bot.send_message(chat_id=…, text=…), как раньше."""
+    return await bot.send_message(chat_id=user_id, text=text, **options)
+
+
 async def notify_others(bot: Bot, author_id: int, text: str) -> None:
     """Сообщение всем пользователям, кроме автора; сбой отправки — только в лог."""
     for user_id in sorted(config.ALLOWED_USER_IDS - {author_id}):
         try:
-            await bot.send_message(chat_id=user_id, text=text)
+            await send_report(
+                bot, user_id, note_report(text), send=partial(_note, bot, user_id)
+            )
         except Exception:
             logger.warning("Could not tell user_id=%s about the change", user_id)

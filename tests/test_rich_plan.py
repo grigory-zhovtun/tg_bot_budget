@@ -4,6 +4,8 @@ from datetime import date
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
+
 from app.handlers import analytics
 from app.rich import NBSP, RULE, Report, heading, para, percent, table, whole
 from app.services.analytics_service import (
@@ -13,6 +15,9 @@ from app.services.analytics_service import (
 )
 from tests.test_analytics_service import FACT
 from tests.test_plan import HEADER, Sheets, tab_row
+
+pytestmark = pytest.mark.usefixtures("rich")
+
 
 HEAD = ["статья", "факт", "план"]
 # выдуманная вкладка месяца: план и факт уже в сумах, как во вкладке — со знаком «−»

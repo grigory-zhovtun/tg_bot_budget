@@ -33,6 +33,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class Feedback(NamedTuple):
+    """После записи: строки ответа (текст и приложение) и те же сведения блоками."""
+
+    lines: list[str]
+    blocks: list[str]
+
+
 class SavingsTab(NamedTuple):
     """«Накопления»: копилки, план и подушка, норма сбережений, курсы таблицы."""
 
@@ -634,18 +641,29 @@ class AnalyticsService:
         subcategories: list[str],
         icons: dict[str, str] | None = None,
         today: date | None = None,
-    ) -> list[str]:
+    ) -> Feedback:
         """После записи: статус каждой статьи месяца и сколько осталось на сегодня."""
-        from app.services.day_budget import day_budget, plan_status, today_line
+        from app.services.day_budget import (
+            day_budget,
+            plan_status,
+            rich_plan_status,
+            rich_today_line,
+            today_line,
+        )
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
         try:
             rows = self.gs_service.get_values(month_title(today))
         except WorksheetNotFound:
-            return []
+            return Feedback([], [])
         spend, _ = plan_lines(rows)
         by_name = {line.subcategory: line for line in spend}
         lines = [plan_status(by_name.get(s), s, icons, today) for s in subcategories]
+        blocks = [
+            block
+            for s in subcategories
+            for block in rich_plan_status(by_name.get(s), s, today)
+        ]
         rates = self.gs_service.get_rates()
         frame = transactions_frame(
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
@@ -655,9 +673,10 @@ class AnalyticsService:
         )
         if budget is not None:
             lines.append(today_line(budget))
-        return lines
+            blocks += rich_today_line(budget)
+        return Feedback(lines, blocks)
 
-    def subs_report(self, today: date | None = None) -> str:
+    def subs_report(self, today: date | None = None) -> Report:
         """/subs: регулярные списания по истории fact и план подписок месяца."""
         from app.services.day_budget import read_forecast
         from app.services.recurring import (
@@ -665,6 +684,7 @@ class AnalyticsService:
             find_series,
             format_subs,
             outside_list,
+            rich_subs,
         )
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
@@ -674,7 +694,7 @@ class AnalyticsService:
         )
         found = find_series(frame, today)
         if not found:
-            return (
+            return Report(
                 "Регулярных списаний пока не нашёл — нужно хотя бы два месяца истории."
             )
         plan, listed = None, None
@@ -686,7 +706,9 @@ class AnalyticsService:
         except WorksheetNotFound:
             logger.info("No plan sheet for the subscriptions plan")
         found = outside_list(found, listed.items if listed else ())
-        return format_subs(found, today, plan)
+        return Report(
+            format_subs(found, today, plan), "".join(rich_subs(found, today, plan))
+        )
 
     def dashboard(
         self, today: date | None = None, max_age: float = 0.0

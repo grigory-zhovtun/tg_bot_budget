@@ -7,8 +7,10 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 from app.errors import user_message
+from app.handlers.analytics import send_report
 from app.handlers.common import LAST_WRITE, SEEN_INPUTS
 from app.handlers.receipts import mark_dirty
+from app.rich import note_report
 from app.services.google_sheets import GoogleSheetsService
 
 logger = logging.getLogger(__name__)
@@ -52,4 +54,10 @@ async def undo_last(context: ContextTypes.DEFAULT_TYPE) -> str:
 
 
 async def undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(await undo_last(context))
+    text = await undo_last(context)
+    await send_report(
+        context.bot,
+        update.effective_chat.id,
+        note_report(text),
+        send=update.message.reply_text,
+    )

@@ -8,6 +8,7 @@ import pytest
 
 from app.domain import Rates
 from app.handlers import analytics
+from app.rich import Report
 from app.services.analytics_service import AnalyticsService, transactions_frame
 from app.services.receipts import Line
 from app.services.recurring import (
@@ -170,22 +171,28 @@ def test_morning_mentions_charges_due_today_and_a_double_charge_yesterday() -> N
 def test_service_and_command_show_the_report() -> None:
     fact = [FACT_HEADER, *OPENING, *GOOGLE_ONE]
     service = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab()}))
-    assert service.subs_report(TODAY).startswith(
+    assert service.subs_report(TODAY).text.startswith(
         "🔁 Регулярные списания ≈ 235 882 в месяц"
     )
     brief = service.morning_brief(date(2026, 10, 13)).text
     assert brief.splitlines()[-1] == "🔁 Завтра спишется: Google *google One ≈ 235 882"
     empty = AnalyticsService(Sheets({"fact": [FACT_HEADER, *OPENING], "Oct 26": tab()}))
     assert (
-        empty.subs_report(TODAY)
+        empty.subs_report(TODAY).text
         == "Регулярных списаний пока не нашёл — нужно хотя бы два месяца истории."
     )
 
 
 async def test_subs_command_replies() -> None:
-    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=1),
+        message=SimpleNamespace(reply_text=AsyncMock()),
+    )
     context = SimpleNamespace(
-        bot_data={"analytics_service": SimpleNamespace(subs_report=lambda: "🔁")}
+        bot=SimpleNamespace(),
+        bot_data={
+            "analytics_service": SimpleNamespace(subs_report=lambda: Report("🔁"))
+        },
     )
     await analytics.subs_command(update, context)
     update.message.reply_text.assert_awaited_once_with("🔁")
@@ -231,5 +238,5 @@ def test_a_payment_of_the_month_list_is_not_a_subscription() -> None:
 def test_month_list_payments_stay_out_of_subs_and_the_morning() -> None:
     fact = [FACT_HEADER, *OPENING, *RENDER, *RENT]
     service = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab(items=RENT_LIST)}))
-    assert "квартплата" not in service.subs_report(date(2026, 10, 19))
+    assert "квартплата" not in service.subs_report(date(2026, 10, 19)).text
     assert "🔁" not in service.morning_brief(date(2026, 10, 16)).text

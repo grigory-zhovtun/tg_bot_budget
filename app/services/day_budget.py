@@ -21,8 +21,9 @@ from typing import Any
 import pandas as pd
 
 from app.domain import INCOME_GROUP, Rates
-from app.rich import NBSP, heading, in_currency, para, signed, table, whole
+from app.rich import NBSP, heading, in_currency, para, percent, signed, table, whole
 from app.services.analytics_service import (
+    MONTHS_RU,
     SERIAL_ZERO,
     PlanLine,
     expenses,
@@ -567,6 +568,49 @@ def plan_status(
             f"осталось {short(line.plan - line.fact)}"
         )
     return f"🟢 {name}: {_pair(line.fact, line.plan)} ({share})"
+
+
+def rich_plan_status(line: PlanLine | None, subcategory: str, today: date) -> list[str]:
+    """Статья после записи блоками: «🟡 Кофе 1 287 000» и «из 1 500 000 — 86 %…»."""
+    name = subcategory[:1].upper() + subcategory[1:]
+    if line is None:
+        return [heading(f"⚪ {name}"), para("нет в плане месяца")]
+    if line.plan <= 0:
+        month = MONTHS_RU[today.month - 1]
+        return [
+            heading(f"⚪ {name} {whole(line.fact)}"),
+            para(f"вне плана — всё за {month}"),
+        ]
+    head = f"{name} {whole(line.fact)}"
+    of = f"из {whole(line.plan)}"
+    if line.fact > line.plan:
+        over = whole(line.fact - line.plan)
+        return [heading(f"🔴 {head}"), para(f"{of} — сверх на {over}")]
+    share = percent(line.fact / line.plan)
+    if line.fact >= NEAR_PLAN * line.plan:
+        left = whole(line.plan - line.fact)
+        return [heading(f"🟡 {head}"), para(f"{of} — {share}, осталось {left}")]
+    return [heading(f"🟢 {head}"), para(f"{of} — {share}")]
+
+
+def rich_today_line(budget: DayBudget) -> list[str]:
+    """Сколько ещё можно сегодня — после записи, блоками."""
+    if budget.limit <= 0:
+        short_by = whole(-budget.limit * budget.days_left)
+        return [
+            heading("💸 Лимита на сегодня нет"),
+            para(f"до плана на конец месяца не хватает {short_by}"),
+        ]
+    left = budget.limit - budget.spent_today
+    if left < 0:
+        return [
+            heading(f"⚠️ Сверх лимита на {whole(-left)}"),
+            para(f"лимит {whole(budget.limit)}"),
+        ]
+    return [
+        heading(f"💸 Осталось {whole(left)}"),
+        para(f"на сегодня, лимит {whole(budget.limit)}"),
+    ]
 
 
 def today_line(budget: DayBudget) -> str:
