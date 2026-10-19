@@ -1,9 +1,10 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ApiError, type Api, type Piggy } from "../api";
 import { bootstrapFixture, savingsFixture } from "../mocks/fixtures";
 import { fakeApi } from "../test/fakeApi";
+import { nb } from "../test/text";
 import PiggySheet from "./PiggySheet";
 
 type User = ReturnType<typeof userEvent.setup>;
@@ -104,9 +105,32 @@ describe("PiggySheet", () => {
 
   it("tells this month's part and the next ones", () => {
     open(fakeApi(), piggy(0));
+    const hint = screen.getByText(
+      "В этом месяце 6 000 000, в ноябре — 6 000 000",
+    );
+    expect(hint.className).toContain("text-line");
+  });
+
+  it("writes the field labels big, in the text colour", () => {
+    open(fakeApi(), piggy(0));
+    for (const text of ["Название", "Цель", "Срок", "Повтор", "Статья трат"]) {
+      const label = screen.getByText(text);
+      expect(label.className).toContain("text-line");
+      expect(label.className).toContain("font-bold");
+      expect(label.className).not.toContain("text-hint");
+    }
+    expect(screen.getByLabelText("Название").className).toContain("text-lg");
     expect(
-      screen.getByText("В этом месяце 6,00 млн, в ноябре — 6,00 млн"),
-    ).toBeTruthy();
+      screen.getByRole("radio", { name: "Один раз" }).className,
+    ).not.toContain("text-hint");
+    expect(screen.getByRole("button", { name: "🍔 ЕДА" }).className).toContain(
+      "text-line",
+    );
+    for (const name of ["Сохранить", "Отложил…", "Потратил…"]) {
+      expect(screen.getByRole("button", { name }).className).toContain(
+        "text-lg",
+      );
+    }
   });
 
   it("asks for the sum of a piggy with a deadline and no target", async () => {
@@ -213,8 +237,19 @@ describe("PiggySheet", () => {
         ],
       }),
     );
-    expect(screen.getByText("05.10 отложил 6,00 млн")).toBeTruthy();
-    expect(screen.getByText("08.10 ПРАЗДНИК / сезонный 400 000")).toBeTruthy();
+    const history = screen.getByRole("region", { name: "История" });
+    const title = within(history).getByRole("heading", { name: "История" });
+    expect(title.className).toContain("text-fact");
+    const lines = within(history)
+      .getAllByRole("listitem")
+      .map((item) =>
+        [...item.querySelectorAll("span")].map((part) => part.textContent),
+      );
+    expect(lines).toEqual([
+      ["05.10 отложил", nb("6 000 000")],
+      ["08.10 ПРАЗДНИК / сезонный", nb("400 000")],
+    ]);
+    expect(history.querySelector("ul")?.className).toContain("text-line");
     await user.click(screen.getByRole("button", { name: "Не из копилки" }));
     expect(api.excludeSpend).toHaveBeenCalledWith(
       "p3k9za",

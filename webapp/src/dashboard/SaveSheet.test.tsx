@@ -89,6 +89,13 @@ describe("SaveSheet", () => {
     expect(write.className).toContain("font-extrabold");
   });
 
+  it("writes the currencies in the text colour, not pale", () => {
+    show();
+    const dollars = screen.getByRole("radio", { name: "USD" });
+    expect(dollars.className).toContain("text-line");
+    expect(dollars.className).not.toContain("text-hint");
+  });
+
   it("records the sum in one request", async () => {
     const api = fakeApi();
     const onSaved = vi.fn();

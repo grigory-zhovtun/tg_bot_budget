@@ -7,12 +7,13 @@ import {
   type SavingsScreen,
 } from "../api";
 import { amountValue, apiAmount } from "../entry/amount";
-import { FieldError, cardCurrencies, segment } from "../fields";
+import { FieldError, cardCurrencies } from "../fields";
 import { money, moneyText } from "../format";
 import AmountPad from "../plan/AmountPad";
 import { amountText } from "../plan/draft";
 import Sheet from "../plan/Sheet";
 import { Line, Table } from "./blocks";
+import { bigSegment } from "./controls";
 
 interface Props {
   api: Api;
@@ -130,7 +131,7 @@ export default function SaveSheet({
               type="button"
               role="radio"
               aria-checked={currency === code}
-              className={segment(currency === code)}
+              className={bigSegment(currency === code)}
               onClick={() => {
                 setCurrency(code);
                 setText("");

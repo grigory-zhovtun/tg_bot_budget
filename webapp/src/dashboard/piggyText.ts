@@ -1,6 +1,6 @@
 /** Тексты «Накоплений»: суммы копилок, сроки, процент, «хватает ли». */
 import type { Piggy } from "../api";
-import { money, moneyText, short } from "../format";
+import { moneyText } from "../format";
 
 /** «В октябре отложить». */
 export const MONTHS_IN = [
@@ -23,13 +23,6 @@ export const MONTH_NAMES = [
 /** «2026-10» → 9 (номер месяца с нуля). */
 export function monthIndex(isoMonth: string): number {
   return Number(isoMonth.slice(5, 7)) - 1;
-}
-
-/** Сумма копилки: сумы — «6,00 млн» или «500 000», доллары — «400 $». */
-export function piggyMoney(value: number, currency: string): string {
-  if (currency === "UZS") return short(value);
-  const digits = Number.isInteger(value) ? money(value) : money(value, 2);
-  return currency === "USD" ? `${digits} $` : `${digits} ${currency}`;
 }
 
 /** «к 20.12, каждый год», «до 01.08.2027», «без срока». */

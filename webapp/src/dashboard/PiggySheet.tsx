@@ -9,22 +9,18 @@ import {
   type SavingsScreen,
 } from "../api";
 import { amountValue, apiAmount } from "../entry/amount";
-import { FIELD, FieldError, cardCurrencies, chip, segment } from "../fields";
-import { shiftDay } from "../format";
+import { FieldError, cardCurrencies } from "../fields";
+import { moneyText, shiftDay } from "../format";
 import { CLOSED_GROUPS, groupTitle } from "../forecast/records";
 import AmountPad from "../plan/AmountPad";
 import { amountText } from "../plan/draft";
 import Sheet from "../plan/Sheet";
-import {
-  MONTH_NAMES,
-  MONTHS_FROM,
-  MONTHS_IN,
-  monthIndex,
-  piggyMoney,
-} from "./piggyText";
+import { BIG_FIELD, BIG_LABEL, bigChip, bigSegment } from "./controls";
+import { MONTH_NAMES, MONTHS_FROM, MONTHS_IN, monthIndex } from "./piggyText";
 
 const NEW_DEADLINE_DAYS = 60; // срок новой копилки по умолчанию — через два месяца
 const LATEST_DAYS = 5 * 366; // как на сервере: срок не дальше 5 лет
+const BUTTON = "min-h-12 rounded-xl px-3 py-2 text-lg font-extrabold";
 // поля с ошибкой под собой; остальные ошибки — над кнопкой
 const FIELDS = ["name", "target", "currency", "deadline", "repeat", "group",
   "subcategory", "amount"]; // prettier-ignore
@@ -48,7 +44,7 @@ function dayMonth(isoDay: string): string {
 /** Подсказка плана: взнос месяца и следующие («в ноябре — …», «с декабря по май — по …
  * в месяц»), или «к сроку не успеть». */
 function planHint(piggy: Piggy, data: SavingsScreen): string | null {
-  const money = (value: number) => piggyMoney(value, piggy.currency);
+  const money = (value: number) => moneyText(value, piggy.currency);
   if (piggy.status === "late" && piggy.deadline) {
     return `К ${dayMonth(piggy.deadline)} не успеть: не хватает ${money(piggy.short)}`;
   }
@@ -195,7 +191,7 @@ export default function PiggySheet({
         title={move === "saved" ? "Отложил" : "Потратил"}
         onClose={onClose}
       >
-        <p className="text-sm">{piggy.name}</p>
+        <p className="text-line font-bold">{piggy.name}</p>
         <AmountPad
           text={moveText}
           currency={piggy.currency}
@@ -203,21 +199,21 @@ export default function PiggySheet({
         />
         <FieldError text={fields.amount} />
         {error && (
-          <p className="text-sm text-danger" role="alert">
+          <p className="text-line font-bold text-danger" role="alert">
             {error}
           </p>
         )}
         <button
           type="button"
           disabled={amountValue(moveText) <= 0 || busy}
-          className="h-12 rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
+          className={`${BUTTON} bg-button text-button-text disabled:opacity-50`}
           onClick={() => moveMoney(move, apiAmount(moveText))}
         >
           Записать
         </button>
         <button
           type="button"
-          className="text-link"
+          className="py-2 text-line font-bold text-link"
           onClick={() => setMove(null)}
         >
           Назад
@@ -233,10 +229,10 @@ export default function PiggySheet({
       : 0;
   return (
     <Sheet title={piggy ? piggy.name : "Новая копилка"} onClose={onClose}>
-      <label className="flex flex-col gap-1 text-sm text-hint">
+      <label className={`flex flex-col gap-1 ${BIG_LABEL}`}>
         Название
         <input
-          className={FIELD}
+          className={BIG_FIELD}
           value={name}
           maxLength={40}
           placeholder="Новый год"
@@ -245,7 +241,7 @@ export default function PiggySheet({
       </label>
       <FieldError text={fields.name} />
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm text-hint">Цель</span>
+        <span className={BIG_LABEL}>Цель</span>
         {currencies.length > 1 && (
           <div
             role="radiogroup"
@@ -258,7 +254,7 @@ export default function PiggySheet({
                 type="button"
                 role="radio"
                 aria-checked={currency === code}
-                className={segment(currency === code)}
+                className={bigSegment(currency === code)}
                 onClick={() => {
                   setCurrency(code);
                   setText("");
@@ -275,7 +271,7 @@ export default function PiggySheet({
         <button
           type="button"
           aria-pressed={noTarget}
-          className={`self-start ${chip(noTarget)}`}
+          className={`self-start ${bigChip(noTarget)}`}
           onClick={() => setNoTarget(!noTarget)}
         >
           Без цели
@@ -285,27 +281,24 @@ export default function PiggySheet({
         <AmountPad text={text} currency={currency} onChange={setText} />
       )}
       <FieldError text={fields.target} />
-      <span className="text-sm text-hint">Срок</span>
+      <span className={BIG_LABEL}>Срок</span>
       {deadline !== null && (
-        <label className="flex flex-col gap-1 text-sm text-hint">
-          <span className="sr-only">Срок</span>
-          <input
-            className={FIELD}
-            type="date"
-            aria-label="Срок"
-            min={today}
-            max={latest}
-            value={deadline}
-            onChange={(change) => {
-              if (change.target.value) setDeadline(change.target.value);
-            }}
-          />
-        </label>
+        <input
+          className={BIG_FIELD}
+          type="date"
+          aria-label="Срок"
+          min={today}
+          max={latest}
+          value={deadline}
+          onChange={(change) => {
+            if (change.target.value) setDeadline(change.target.value);
+          }}
+        />
       )}
       <button
         type="button"
         aria-pressed={deadline === null}
-        className={`self-start ${chip(deadline === null)}`}
+        className={`self-start ${bigChip(deadline === null)}`}
         onClick={() => {
           if (deadline === null) {
             setDeadline(fallback);
@@ -318,6 +311,7 @@ export default function PiggySheet({
         Без срока
       </button>
       <FieldError text={fields.deadline} />
+      {deadline !== null && <span className={BIG_LABEL}>Повтор</span>}
       {deadline !== null && (
         <div
           role="radiogroup"
@@ -330,7 +324,7 @@ export default function PiggySheet({
               type="button"
               role="radio"
               aria-checked={repeat === item}
-              className={segment(repeat === item)}
+              className={bigSegment(repeat === item)}
               onClick={() => setRepeat(item)}
             >
               {item === "once" ? "Один раз" : "Каждый год"}
@@ -339,7 +333,7 @@ export default function PiggySheet({
         </div>
       )}
       <FieldError text={fields.repeat} />
-      <span className="text-sm text-hint">Статья трат</span>
+      <span className={BIG_LABEL}>Статья трат</span>
       <div
         className="flex flex-wrap gap-1.5"
         role="group"
@@ -348,7 +342,7 @@ export default function PiggySheet({
         <button
           type="button"
           aria-pressed={group === ""}
-          className={chip(group === "")}
+          className={bigChip(group === "")}
           onClick={() => {
             setGroup("");
             setSubcategory("");
@@ -361,7 +355,7 @@ export default function PiggySheet({
             key={item.name}
             type="button"
             aria-pressed={group === item.name}
-            className={chip(group === item.name)}
+            className={bigChip(group === item.name)}
             onClick={() => {
               setGroup(item.name);
               setSubcategory("");
@@ -383,7 +377,7 @@ export default function PiggySheet({
               key={item.name}
               type="button"
               aria-pressed={subcategory === item.name}
-              className={chip(subcategory === item.name)}
+              className={bigChip(subcategory === item.name)}
               onClick={() => setSubcategory(item.name)}
             >
               {item.name}
@@ -392,16 +386,16 @@ export default function PiggySheet({
         </div>
       )}
       <FieldError text={fields.subcategory} />
-      {hint && <p className="text-sm font-semibold">{hint}</p>}
+      {hint && <p className="text-line font-bold">{hint}</p>}
       {error && (
-        <p className="text-sm text-danger" role="alert">
+        <p className="text-line font-bold text-danger" role="alert">
           {error}
         </p>
       )}
       <button
         type="button"
         disabled={!valid || busy}
-        className="h-12 rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
+        className={`${BUTTON} bg-button text-button-text disabled:opacity-50`}
         onClick={save}
       >
         {piggy ? "Сохранить" : "Создать"}
@@ -411,7 +405,7 @@ export default function PiggySheet({
           <div className="grid grid-cols-2 gap-2">
             <button
               type="button"
-              className="h-11 rounded-xl bg-section font-semibold"
+              className={`${BUTTON} bg-section`}
               onClick={() => {
                 setMove("saved");
                 setMoveText(
@@ -423,7 +417,7 @@ export default function PiggySheet({
             </button>
             <button
               type="button"
-              className="h-11 rounded-xl bg-section font-semibold"
+              className={`${BUTTON} bg-section`}
               onClick={() => {
                 setMove("spent");
                 setMoveText("");
@@ -436,7 +430,7 @@ export default function PiggySheet({
             <button
               type="button"
               disabled={busy}
-              className="h-11 rounded-xl bg-section font-semibold disabled:opacity-50"
+              className={`${BUTTON} bg-section disabled:opacity-50`}
               onClick={() =>
                 moveMoney(
                   "write_off",
@@ -450,11 +444,9 @@ export default function PiggySheet({
           <button
             type="button"
             disabled={busy}
-            className={
-              confirming
-                ? "h-11 rounded-xl bg-minus font-semibold text-white disabled:opacity-50"
-                : "h-11 rounded-xl font-semibold text-danger disabled:opacity-50"
-            }
+            className={`${BUTTON} disabled:opacity-50 ${
+              confirming ? "bg-minus text-white" : "text-danger"
+            }`}
             onClick={close}
           >
             {confirming
@@ -463,25 +455,33 @@ export default function PiggySheet({
           </button>
           {(piggy.history.length > 0 || piggy.spends.length > 0) && (
             <section aria-label="История" className="flex flex-col gap-1">
-              <h4 className="font-semibold">История</h4>
-              <ul className="flex flex-col gap-1 text-sm">
+              <h4 className="text-fact font-extrabold">История</h4>
+              <ul className="flex flex-col gap-2 text-line">
                 {piggy.history.map((item, index) => (
-                  <li key={`move-${index}`}>
-                    {`${dayMonth(item.day)} ${item.kind} ${piggyMoney(Math.abs(item.amount), piggy.currency)}`}
+                  <li
+                    key={`move-${index}`}
+                    className="flex items-baseline justify-between gap-3"
+                  >
+                    <span>{`${dayMonth(item.day)} ${item.kind}`}</span>
+                    <span className="font-extrabold whitespace-nowrap tabular-nums">
+                      {moneyText(Math.abs(item.amount), piggy.currency)}
+                    </span>
                   </li>
                 ))}
                 {piggy.spends.map((item) => (
-                  <li
-                    key={item.key}
-                    className="flex items-center justify-between gap-2"
-                  >
-                    <span>
-                      {`${dayMonth(item.day)} ${groupTitle(item.group)} / ${item.subcategory} ${piggyMoney(item.amount, piggy.currency)}`}
-                    </span>
+                  <li key={item.key} className="flex flex-col">
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span>
+                        {`${dayMonth(item.day)} ${groupTitle(item.group)} / ${item.subcategory}`}
+                      </span>
+                      <span className="font-extrabold whitespace-nowrap tabular-nums">
+                        {moneyText(item.amount, piggy.currency)}
+                      </span>
+                    </div>
                     <button
                       type="button"
                       disabled={busy}
-                      className="shrink-0 text-link disabled:opacity-50"
+                      className="self-start py-1 font-bold text-link disabled:opacity-50"
                       onClick={() =>
                         send(() => api.excludeSpend(piggy.id, item.key))
                       }
