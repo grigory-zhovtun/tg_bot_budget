@@ -7,9 +7,6 @@ import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
 import DashboardScreen from "./DashboardScreen";
 
-const NO_FORECAST =
-  "Во вкладке месяца нет блока прогноза — лимит на день не посчитать.";
-
 async function show(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(await screen.findByRole("radio", { name }));
 }
@@ -21,9 +18,17 @@ afterEach(() => {
 describe("DashboardScreen", () => {
   it("opens on «Сегодня» with what is left today", async () => {
     render(<DashboardScreen api={fakeApi()} />);
-    expect(await screen.findByText("Можно сегодня")).toBeTruthy();
-    expect(screen.getByText("380 000")).toBeTruthy();
-    expect(screen.getByText(/лимит 500 000 · потрачено 120 000/)).toBeTruthy();
+    const today = await screen.findByRole("region", { name: "Можно сегодня" });
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+      "Сводка · октябрь",
+    );
+    expect(within(today).getByText("380 000 сум").className).toContain(
+      "text-big",
+    );
+    expect(within(today).getByText("можно потратить сегодня")).toBeTruthy();
+    expect(
+      within(today).getByText("лимит 500 000, потрачено 120 000"),
+    ).toBeTruthy();
     expect(
       screen
         .getByRole("radio", { name: "Сегодня" })
@@ -48,7 +53,7 @@ describe("DashboardScreen", () => {
     expect(screen.getByText("запас 1,10 млн")).toBeTruthy();
     expect(screen.getByText("можно 500 000 в день")).toBeTruthy();
     expect(screen.getByText("план 450 000 в день")).toBeTruthy();
-    expect(screen.queryByText("Можно сегодня")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Можно сегодня" })).toBeNull();
   });
 
   it("«Впереди» shows the list and the subscriptions", async () => {
@@ -62,9 +67,50 @@ describe("DashboardScreen", () => {
 
   it("shows when the sums run out and how many dollars to exchange", async () => {
     render(<DashboardScreen api={fakeApi()} />);
-    expect(await screen.findByText("Хватит до 18 октября")).toBeTruthy();
-    expect(screen.getByText("До 30 октября обменять ≈ $460")).toBeTruthy();
-    expect(screen.getByText("не хватит 5,50 млн")).toBeTruthy();
+    const sums = await screen.findByRole("region", { name: "Сумы" });
+    expect(within(sums).getByText("💳 Сумы 2 000 000").className).toContain(
+      "text-fact",
+    );
+    expect(within(sums).getByText("⚠️ хватит до 18 октября")).toBeTruthy();
+    expect(
+      within(sums).getByText("до 30 октября обменять ≈ 460 $"),
+    ).toBeTruthy();
+    expect(within(sums).getByText("не хватит 5 500 000")).toBeTruthy();
+    expect(within(sums).getByText("в день ≈ 500 000")).toBeTruthy();
+    expect(within(sums).getByText("в среднем за 14 дней")).toBeTruthy();
+  });
+
+  it("shows how far today went over the limit", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      left_today: -20_000,
+      spent_today: 520_000,
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    const today = await screen.findByRole("region", { name: "Можно сегодня" });
+    expect(within(today).getByText("−20 000 сум")).toBeTruthy();
+    expect(within(today).getByText("⚠️ сверх лимита дня")).toBeTruthy();
+    expect(
+      within(today).getByText("лимит 500 000, потрачено 520 000"),
+    ).toBeTruthy();
+  });
+
+  it("shows the frozen dollars in a card of their own", async () => {
+    render(<DashboardScreen api={fakeApi()} />);
+    const frozen = await screen.findByRole("region", { name: "Заморожено" });
+    expect(within(frozen).getByText("🧊 Заморожено 1 000 $")).toBeTruthy();
+    expect(within(frozen).getByText("с 1-го числа −50 $")).toBeTruthy();
+  });
+
+  it("says when the cards are above the plan and the frozen sum stood still", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      balance: 43_000_000,
+      frozen: { amount: 1000, currency: "USD", uzs: 12_000_000, change: 0 },
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    expect(await screen.findByText("✓ больше плана на 1 500 000")).toBeTruthy();
+    expect(screen.getByText("с 1-го числа без изменений")).toBeTruthy();
   });
 
   it("says when the sums last until the end of the month", async () => {
@@ -80,7 +126,7 @@ describe("DashboardScreen", () => {
       },
     });
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
-    expect(await screen.findByText("До конца месяца хватит")).toBeTruthy();
+    expect(await screen.findByText("✓ до конца месяца хватит")).toBeTruthy();
   });
 
   it("says how far the finished days went over the plan", async () => {
@@ -133,13 +179,19 @@ describe("DashboardScreen", () => {
   it("shows the cards now and where the money went this month", async () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi()} />);
-    // плашка — остаток на вечер вчера для сравнения с планом, список — сейчас
-    expect(await screen.findByText("На картах утром")).toBeTruthy();
-    const cards = screen.getByRole("region", { name: "Остатки на картах" });
-    expect(within(cards).getByText("5 250 000 сум")).toBeTruthy();
+    // карточка — остаток на вечер вчера для сравнения с планом, таблица — сейчас
+    expect(await screen.findByText("На картах 39 000 000")).toBeTruthy();
+    expect(screen.getByText("утром, по плану 41 500 000")).toBeTruthy();
     expect(
-      within(cards).getByText("в банке 2 450,00 RUB · сверено 01.10"),
+      screen.getByText("⚠️ меньше плана на 2 500 000").className,
+    ).toContain("text-danger");
+    const cards = screen.getByRole("region", { name: "Остатки на картах" });
+    expect(within(cards).getByText("5 250 000")).toBeTruthy();
+    expect(
+      within(cards).getByText("⚠️ VISA 6666 в банке 2 450 ₽"),
     ).toBeTruthy();
+    expect(within(cards).getByText("сверено 01.10")).toBeTruthy();
+    expect(within(cards).getByText("Всего ≈ 23 613 075 сум")).toBeTruthy();
     await show(user, "Траты");
     const spent = screen.getByRole("region", {
       name: "План-факт по категориям",
@@ -174,14 +226,15 @@ describe("DashboardScreen", () => {
     expect(
       await screen.findByRole("region", { name: "Остатки на картах" }),
     ).toBeTruthy();
-    expect(screen.getByText(NO_FORECAST)).toBeTruthy();
+    expect(screen.getByText("⚠️ Нет блока прогноза")).toBeTruthy();
+    expect(screen.getByText("лимит на день не посчитать")).toBeTruthy();
     await show(user, "Траты");
     expect(
       screen.getByRole("region", { name: "План-факт по категориям" }),
     ).toBeTruthy();
     // список без блока прогноза не прочитать — не «платежей нет»
     await show(user, "Впереди");
-    expect(screen.getByText(NO_FORECAST)).toBeTruthy();
+    expect(screen.getByText("⚠️ Нет блока прогноза")).toBeTruthy();
     expect(
       screen.queryByText("До конца месяца платежей и подписок нет"),
     ).toBeNull();
@@ -190,7 +243,7 @@ describe("DashboardScreen", () => {
   it("each section has its own cards", async () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi()} />);
-    await screen.findByText("Можно сегодня");
+    await screen.findByRole("region", { name: "Можно сегодня" });
     const headings = () =>
       screen
         .getAllByRole("heading", { level: 2 })
@@ -219,7 +272,7 @@ describe("DashboardScreen", () => {
     expect(
       await screen.findByRole("heading", { name: "🛟 Подушка безопасности" }),
     ).toBeTruthy();
-    expect(screen.queryByText("Можно сегодня")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Можно сегодня" })).toBeNull();
     expect(localStorage.getItem("dashboard-section")).toBe("savings");
     first.unmount();
     render(<DashboardScreen api={fakeApi()} />);
@@ -276,7 +329,9 @@ describe("DashboardScreen", () => {
       await screen.findByText("Таблица не ответила — попробуйте ещё раз"),
     ).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Повторить" }));
-    expect(await screen.findByText("Можно сегодня")).toBeTruthy();
+    expect(
+      await screen.findByRole("region", { name: "Можно сегодня" }),
+    ).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
@@ -305,10 +360,10 @@ describe("DashboardScreen", () => {
     });
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
-    expect(await screen.findByText("Лимита на сегодня нет")).toBeTruthy();
-    expect(
-      screen.getByText(/до плана на конец месяца не хватает 1,10 млн/),
-    ).toBeTruthy();
+    expect(await screen.findByText("⚠️ Лимита нет")).toBeTruthy();
+    expect(screen.getByText("не хватает 1 100 000")).toBeTruthy();
+    expect(screen.getByText("до плана на конец месяца")).toBeTruthy();
+    expect(screen.getByText("потрачено сегодня 120 000")).toBeTruthy();
     await show(user, "Траты");
     expect(screen.getByText("лимита нет")).toBeTruthy(); // в графике вместо «можно»
   });
@@ -341,7 +396,7 @@ describe("DashboardScreen", () => {
         <DashboardScreen api={api} />
       </StoreProvider>,
     );
-    expect(screen.getByText("Можно сегодня")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Можно сегодня" })).toBeTruthy();
     expect(api.dashboard).not.toHaveBeenCalled();
   });
 
@@ -360,6 +415,6 @@ describe("DashboardScreen", () => {
     await user.click(screen.getByRole("button", { name: "Обновить" }));
     expect(dashboard).toHaveBeenCalledWith(true);
     expect(screen.getByRole("button", { name: "Обновляю…" })).toBeTruthy();
-    expect(screen.getByText("Можно сегодня")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Можно сегодня" })).toBeTruthy();
   });
 });

@@ -1,5 +1,6 @@
 import type { Dashboard, SubscriptionState } from "../api";
 import { itemAmount, money, withCurrency } from "../format";
+import { Line, Warn } from "./blocks";
 
 const STATE_TEXT: Record<SubscriptionState, string> = {
   charged: "списано",
@@ -11,9 +12,11 @@ const STATE_TEXT: Record<SubscriptionState, string> = {
 /** Без блока прогноза во вкладке месяца нет ни лимита, ни списка впереди. */
 export function NoForecastNote() {
   return (
-    <p className="text-sm text-hint">
-      Во вкладке месяца нет блока прогноза — лимит на день не посчитать.
-    </p>
+    <div className="flex flex-col">
+      <Warn>Нет блока прогноза</Warn>
+      <Line>во вкладке месяца</Line>
+      <Line>лимит на день не посчитать</Line>
+    </div>
   );
 }
 

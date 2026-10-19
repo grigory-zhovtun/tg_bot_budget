@@ -14,13 +14,17 @@ describe("SectionSwitch", () => {
       "Накопления",
       "Впереди",
     ]);
+    // два ряда по два: «Накопления» и «Впереди» не слипаются
+    expect(group.className).toContain("grid-cols-2");
     const today = screen.getByRole("radio", { name: "Сегодня" });
     expect(today.getAttribute("aria-checked")).toBe("true");
-    // выбор виден не только цветом
-    expect(today.className).toContain("font-semibold");
-    expect(
-      screen.getByRole("radio", { name: "Траты" }).getAttribute("aria-checked"),
-    ).toBe("false");
+    // выбор виден не только цветом: фон и жирность
+    expect(today.className).toContain("font-extrabold");
+    expect(today.className).toContain("bg-bg");
+    const spending = screen.getByRole("radio", { name: "Траты" });
+    expect(spending.getAttribute("aria-checked")).toBe("false");
+    expect(spending.className).toContain("text-base");
+    expect(spending.className).not.toContain("text-hint");
   });
 
   it("tells which section was pressed", async () => {
