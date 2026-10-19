@@ -27,6 +27,9 @@ from tests.test_day_budget import (
 from tests.test_recurring import frame as history
 from tests.test_recurring import row
 
+pytestmark = pytest.mark.usefixtures("rich")
+
+
 # как ITEMS старых тестов, но аренда выдуманная
 LIST = [
     ("Аванс", 15, 2_000_000, "UZS"),

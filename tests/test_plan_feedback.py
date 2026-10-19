@@ -8,6 +8,7 @@ import pytest
 
 from app.handlers import messages
 from app.services.analytics_service import AnalyticsService, PlanLine
+from app.services.analytics_service import Feedback as Found
 from app.services.day_budget import plan_status, today_line
 from tests.test_day_budget import FACT_HEADER, OPENING, OVERSPENT, Sheets, budget, tab
 from tests.test_messages import make_chat, manual_state, summary
@@ -70,17 +71,16 @@ def test_service_reads_the_month_tab_after_the_write() -> None:
     )
     lines = service.write_feedback(
         ["инвентарь", "кафе", "такси"], {"кафе": "🍽️"}, OCTOBER
-    )
+    ).lines
     assert lines == [
         "🔴 инвентарь: 690 910 из 500 000 — сверх плана на 190 910",
         "🟢 🍽️ кафе: 0,00 из 2,60 млн (0%)",  # обе суммы в одних единицах
         "⚪ такси: нет в плане месяца",
         "💸 На сегодня осталось 90 000 из 90 000",
     ]
-    assert (
-        AnalyticsService(Sheets({})).write_feedback(["кафе"], {}, date(2026, 11, 1))
-        == []
-    )
+    assert AnalyticsService(Sheets({})).write_feedback(
+        ["кафе"], {}, date(2026, 11, 1)
+    ) == Found([], [])
 
 
 class Feedback:
@@ -88,11 +88,12 @@ class Feedback:
         self.asked: list[list[str]] = []
         self.fail = fail
 
-    def write_feedback(self, subcategories: list[str], icons: Any) -> list[str]:
+    def write_feedback(self, subcategories: list[str], icons: Any) -> Found:
         self.asked.append(subcategories)
         if self.fail:
             raise ConnectionError("Google is down")
-        return ["🟢 ☕ кофе: 48 000 из 400 000 (12%)", "💸 На сегодня осталось 1 из 2"]
+        lines = ["🟢 ☕ кофе: 48 000 из 400 000 (12%)", "💸 На сегодня осталось 1 из 2"]
+        return Found(lines, [])
 
 
 async def test_summary_gets_the_plan_lines_under_the_record() -> None:

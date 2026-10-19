@@ -4,7 +4,7 @@ import time
 from collections.abc import Awaitable, Callable
 from functools import partial
 from io import BytesIO
-from typing import Any
+from typing import Any, NamedTuple
 
 from telegram import Bot, Message, Update
 from telegram.error import BadRequest, EndPointNotFound, TelegramError
@@ -55,14 +55,32 @@ async def send_markdown(send: Send, text: str) -> None:
             await send(chunk, parse_mode=None)
 
 
+class Sent(NamedTuple):
+    """Каким видом ушло сообщение («rich» или «text») и все отправленные куски."""
+
+    kind: str
+    messages: tuple[Message, ...]
+
+
+def _rich_message(html: str | None) -> dict[str, Any]:
+    return {"html": html, "skip_entity_detection": True}
+
+
 async def send_report(
-    bot: Bot, chat_id: int, report: Report, effect: str | None = None
-) -> str:
+    bot: Bot,
+    chat_id: int,
+    report: Report,
+    effect: str | None = None,
+    reply_markup: Any = None,
+    send: Send | None = None,
+) -> Sent:
     """Сводка расширенным сообщением; Telegram отказал — тем же обычным текстом.
 
     Попытки по очереди, следующая — только после отказа: расширенное с эффектом,
     без эффекта, обычный текст с эффектом, без эффекта. Сеть и таймауты — не отказ:
-    сообщение могло дойти, и повтор дал бы дубль. Возвращает, каким видом ушло.
+    сообщение могло дойти, и повтор дал бы дубль. Клавиатура — у последнего куска
+    текста, эффект — у первого. send — чем слать текст (chat.send_message,
+    reply_text…); по умолчанию bot.send_message(chat_id, …).
     """
     effects = [effect, None] if effect else [None]
     attempts = (
@@ -72,23 +90,25 @@ async def send_report(
     )
     attempts += [("text", current) for current in effects]
     chunks = split_text(report.text) or [report.text]
+    markup = {"reply_markup": reply_markup} if reply_markup is not None else {}
+    send_text = send or partial(bot.send_message, chat_id)
     for number, (kind, current) in enumerate(attempts, 1):
         options = {"message_effect_id": current} if current else {}
         try:
             if kind == "rich":
-                await bot.do_api_request(
+                message = await bot.do_api_request(
                     "sendRichMessage",
                     api_kwargs={
                         "chat_id": chat_id,
-                        "rich_message": {
-                            "html": report.html,
-                            "skip_entity_detection": True,
-                        },
+                        "rich_message": _rich_message(report.html),
                         **options,
+                        **markup,
                     },
+                    return_type=Message,
                 )
-                return kind
-            await bot.send_message(chat_id, chunks[0], **options)
+                return Sent(kind, (message,))
+            last = len(chunks) == 1
+            sent = [await send_text(chunks[0], **options, **(markup if last else {}))]
         except REFUSED as error:
             if number == len(attempts):
                 raise
@@ -99,10 +119,49 @@ async def send_report(
                 error,
             )
             continue
-        for chunk in chunks[1:]:
-            await bot.send_message(chat_id, chunk)
-        return kind
+        for index, chunk in enumerate(chunks[1:], 2):
+            last = index == len(chunks)
+            sent.append(await send_text(chunk, **(markup if last else {})))
+        return Sent(kind, tuple(sent))
     raise RuntimeError("no way to send the report")  # попытка с текстом есть всегда
+
+
+async def edit_report(
+    bot: Bot,
+    chat_id: int,
+    message_id: int,
+    report: Report,
+    reply_markup: Any = None,
+    edit: Send | None = None,
+) -> str:
+    """Правка сообщения: расширенным, при отказе — текстом; «rich» или «text».
+
+    Без reply_markup Telegram снимает кнопки — так и задумано у подтверждений.
+    edit — чем править текст (query.edit_message_text); по умолчанию
+    bot.edit_message_text по chat_id и message_id.
+    """
+    markup = {"reply_markup": reply_markup} if reply_markup is not None else {}
+    if report.html is not None and config.RICH_MESSAGES:
+        try:
+            await bot.do_api_request(
+                "editMessageText",
+                api_kwargs={
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "rich_message": _rich_message(report.html),
+                    **markup,
+                },
+            )
+            return "rich"
+        except REFUSED as error:
+            logger.warning("Telegram refused the rich edit: %s", error)
+    if edit is not None:
+        await edit(report.text, reply_markup=reply_markup)
+    else:
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id, text=report.text, **markup
+        )
+    return "text"
 
 
 async def _send_charts(send_photo: Send, charts: list[tuple[str, BytesIO]]) -> None:
@@ -226,8 +285,10 @@ async def send_morning_brief(bot: Bot, chat_id: int, analytics_service: Any) -> 
     try:
         report, party = await asyncio.to_thread(analytics_service.morning_message)
         effect = config.CELEBRATE_EFFECT_ID if party else None
-        kind = await send_report(bot, chat_id, report, effect)
-        logger.info("Morning brief sent as %s%s", kind, " (party)" if effect else "")
+        sent = await send_report(bot, chat_id, report, effect)
+        logger.info(
+            "Morning brief sent as %s%s", sent.kind, " (party)" if effect else ""
+        )
     except Exception:
         logger.exception("Failed to send the morning brief")
 
@@ -250,19 +311,21 @@ async def subs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """/subs: подписки и другие платежи раз в месяц."""
     analytics_service = context.bot_data.get("analytics_service")
     try:
-        text = await asyncio.to_thread(analytics_service.subs_report)
+        report = await asyncio.to_thread(analytics_service.subs_report)
     except Exception as e:
         logger.exception("Subscriptions report failed")
         await update.message.reply_text(f"Не удалось собрать список: {user_message(e)}")
         return
-    await update.message.reply_text(text)
+    await send_report(
+        context.bot, update.effective_chat.id, report, send=update.message.reply_text
+    )
 
 
 async def send_weekly_digest(bot: Bot, chat_id: int, analytics_service: Any) -> None:
     """Воскресная сводка (JobQueue). Ошибки только в лог."""
     try:
         report = await asyncio.to_thread(analytics_service.weekly_digest)
-        kind = await send_report(bot, chat_id, report)
-        logger.info("Weekly digest sent as %s", kind)
+        sent = await send_report(bot, chat_id, report)
+        logger.info("Weekly digest sent as %s", sent.kind)
     except Exception:
         logger.exception("Failed to send the weekly digest")

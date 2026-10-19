@@ -58,6 +58,7 @@ def press(data: str) -> tuple[Any, Any]:
         data=data,
         answer=AsyncMock(),
         edit_message_text=AsyncMock(),
+        message=SimpleNamespace(chat_id=OWNER, message_id=5, reply_markup=None),
     )
     update = SimpleNamespace(
         callback_query=query,

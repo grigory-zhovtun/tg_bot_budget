@@ -12,6 +12,7 @@ import math
 import time
 from collections.abc import Sequence
 from datetime import date
+from functools import partial
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
@@ -20,8 +21,19 @@ from telegram.ext import ContextTypes
 from app import config
 from app.custom_icons import leading_emoji
 from app.domain import INCOME_GROUP, SheetRow, local_today
+from app.handlers.analytics import edit_report, send_report
 from app.handlers.common import app_url, notify_others
 from app.handlers.receipts import mark_dirty
+from app.rich import (
+    NBSP,
+    Report,
+    heading,
+    money_text,
+    note_report,
+    para,
+    table,
+    whole,
+)
 from app.services.analytics_service import SavingsTab, money
 from app.services.piggy import (
     NOT_FROM,
@@ -176,6 +188,25 @@ def _part_button(user_id: int) -> InlineKeyboardButton | None:
     )
 
 
+async def _send_text(bot: Any, chat_id: int, text: str, **options: Any) -> Any:
+    """Запасной текст «🐷» — bot.send_message(chat_id=…, text=…), как раньше."""
+    return await bot.send_message(chat_id=chat_id, text=text, **options)
+
+
+async def _edit(
+    context: ContextTypes.DEFAULT_TYPE, query: Any, text: str, reply_markup: Any = None
+) -> None:
+    """Правка «🐷» после кнопки: крупно, при отказе — тем же текстом."""
+    await edit_report(
+        context.bot,
+        query.message.chat_id,
+        query.message.message_id,
+        note_report(text),
+        reply_markup=reply_markup,
+        edit=query.edit_message_text,
+    )
+
+
 async def income_prompt(
     context: ContextTypes.DEFAULT_TYPE,
     chat_id: int,
@@ -209,33 +240,52 @@ async def income_prompt(
                 f"🐷 С поступления {amount_text(total)} {code} — {percent} %: "
                 f"{amount_text(share)} {code}"
             )
+            big = f"🐷 Отложить {money_text(share, code)}"
+            about = [f"{percent}{NBSP}% с поступления {money_text(total, code)}"]
             if code != "UZS":
-                head += (
-                    f" (≈ {amount_text(_up_money(amount * screen.percent, 'UZS'))} UZS)"
-                )
+                in_sums = _up_money(amount * screen.percent, "UZS")
+                head += f" (≈ {amount_text(in_sums)} UZS)"
+                about.append(f"≈ {whole(in_sums)} сум")
         else:
             head = (
                 f"🐷 С поступлений {amount_text(_up_money(amount, 'UZS'))} UZS — "
                 f"{percent} %: {amount_text(_up_money(amount * screen.percent, 'UZS'))} UZS"
             )
+            big = f"🐷 Отложить {whole(_up_money(amount * screen.percent, 'UZS'))}"
+            about = [
+                f"{percent}{NBSP}% с поступлений {whole(_up_money(amount, 'UZS'))}"
+            ]
+        send = partial(_send_text, context.bot, chat_id)
         items = _left(screen)
         if not items:
-            await context.bot.send_message(
-                chat_id=chat_id, text=f"{head} — всё в подушку"
+            report = Report(
+                f"{head} — всё в подушку",
+                heading(big, 2) + para(*about, "всё в подушку"),
             )
+            await send_report(context.bot, chat_id, report, send=send)
             return
         today = local_today(config.ANALYTICS_TIMEZONE)
         text = f"{head}. За {MONTHS_NAMED[today.month - 1]} отложить: " + _sums(
             items, quoted=True
         )
         cushion = round(income_cushion(screen, amount), -3)
+        rows = [
+            [state.piggy.name, money_text(state.now, state.piggy.currency)]
+            for state in items
+        ]
         if cushion > 0:
             text += f" · в подушку с этого поступления {amount_text(cushion)} UZS"
+            rows.append(["в подушку", whole(cushion)])
         buttons = [action("Отложил всё", f"{ALL}{today:%Y-%m}")]
         if part := _part_button(user_id):
             buttons.append(part)
-        await context.bot.send_message(
-            chat_id=chat_id, text=text, reply_markup=InlineKeyboardMarkup([buttons])
+        html = heading(big, 2) + para(*about) + table(rows, "lr", ["копилка", "сумма"])
+        await send_report(
+            context.bot,
+            chat_id,
+            Report(text, html),
+            reply_markup=InlineKeyboardMarkup([buttons]),
+            send=send,
         )
     except Exception:
         logger.exception("Piggy prompt failed for chat_id=%s", chat_id)
@@ -269,7 +319,7 @@ def _written_keys(screen: Screen, rows: Sequence[SheetRow]) -> set[str]:
 
 def _spend_lines(
     found: SavingsTab, rows: Sequence[SheetRow], button: bool = True
-) -> tuple[list[str], InlineKeyboardButton | None]:
+) -> tuple[list[str], list[str], InlineKeyboardButton | None]:
     """«🐷 Из копилки «Новый год»: −2 400 000 UZS, осталось 3 600 000» по копилке;
     одна строка записи — с кнопкой «Не из копилки»."""
     chosen = _written_keys(found.screen, rows)
@@ -283,7 +333,7 @@ def _spend_lines(
             taken.append((state, sum(spend.amount for spend in mine)))
             keys += [spend.key for spend in mine if spend.key not in keys]
     if not taken:
-        return [], None
+        return [], [], None
     over = False
     if len(rows) == 1:  # всё, что было: остаток траты ушёл в обычные
         row = rows[0]
@@ -292,24 +342,35 @@ def _spend_lines(
             for state, amount in taken
         )
         over = covered < row.amount - 0.5
-    lines = []
+    lines: list[str] = []
+    blocks: list[str] = []
     for index, (state, amount) in enumerate(taken):
         code = state.piggy.currency
         name, sum_text = state.piggy.name, amount_text(rounded(amount, code))
+        big = money_text(rounded(amount, code), code)
         if over and index == len(taken) - 1:
             lines.append(
                 f"🐷 Из копилки «{name}»: {sum_text} {code} — всё, что было, "
                 "остальное — обычные траты"
             )
+            blocks += [
+                heading(f"🐷 Из копилки {big}"),
+                para(f"«{name}» — всё, что было, остальное — обычные траты"),
+            ]
         else:
-            left = amount_text(rounded(max(state.balance.left, 0.0), code))
+            rest = rounded(max(state.balance.left, 0.0), code)
+            left = amount_text(rest)
             lines.append(f"🐷 Из копилки «{name}»: −{sum_text} {code}, осталось {left}")
+            blocks += [
+                heading(f"🐷 Из копилки −{big}"),
+                para(f"«{name}» — осталось {money_text(rest, code)}"),
+            ]
     found_button = None
     if button and len(rows) == 1 and keys:
         found_button = action(
             "Не из копилки", f"{NO}{taken[0][0].piggy.id}:{fingerprint(keys[0])}"
         )
-    return lines, found_button
+    return lines, blocks, found_button
 
 
 async def spend_note(
@@ -334,15 +395,24 @@ async def spend_note(
         found = await _savings(context.bot_data)
         if found is None:
             return []
-        lines, found_button = _spend_lines(found, touched, button)
+        lines, blocks, found_button = _spend_lines(found, touched, button)
         if not lines:
             return []
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="\n".join(lines),
-            reply_markup=(
-                InlineKeyboardMarkup([[found_button]]) if found_button else None
-            ),
+        markup = InlineKeyboardMarkup([[found_button]]) if found_button else None
+
+        async def send(
+            text: str, **options: Any
+        ) -> Any:  # как раньше: всегда с кнопками
+            return await context.bot.send_message(
+                chat_id=chat_id, text=text, reply_markup=options.get("reply_markup")
+            )
+
+        await send_report(
+            context.bot,
+            chat_id,
+            Report("\n".join(lines), "".join(blocks)),
+            reply_markup=markup,
+            send=send,
         )
         return lines
     except Exception:
@@ -400,7 +470,9 @@ async def _not_from(
     except Exception:
         logger.exception("Not from the piggy failed for user_id=%s", user.id)
         message = getattr(query, "message", None)
-        await query.edit_message_text(
+        await _edit(
+            context,
+            query,
             "Не записал — таблица не ответила. Нажмите ещё раз.",
             reply_markup=getattr(message, "reply_markup", None),
         )
@@ -409,10 +481,10 @@ async def _not_from(
         text = (
             "Уже учтено" if marked else "Запись изменилась — отметьте в «Накоплениях»"
         )
-        await query.edit_message_text(text, reply_markup=None)
+        await _edit(context, query, text, reply_markup=None)
         return
     mark_dirty(context.bot_data)
-    await query.edit_message_text("🐷 Не из копилки — учтено", reply_markup=None)
+    await _edit(context, query, "🐷 Не из копилки — учтено", reply_markup=None)
     _, group = leading_emoji(spend.group)
     text = (
         f"{spend.day:%d.%m} {group} / {spend.subcategory} {amount_text(spend.amount)}"
@@ -432,7 +504,9 @@ async def _set_all_aside(
         except (ValueError, IndexError):
             named = "прошлый месяц"
         part = _part_button(user.id)
-        await query.edit_message_text(
+        await _edit(
+            context,
+            query,
             f"Подсказка за {named} устарела: в {MONTHS_IN[today.month - 1]} свой план",
             reply_markup=InlineKeyboardMarkup([[part]]) if part else None,
         )
@@ -450,17 +524,19 @@ async def _set_all_aside(
     except Exception:
         logger.exception("Piggy set-aside failed for user_id=%s", user.id)
         message = getattr(query, "message", None)
-        await query.edit_message_text(
+        await _edit(
+            context,
+            query,
             "Не записал — таблица не ответила. Нажмите ещё раз.",
             reply_markup=getattr(message, "reply_markup", None),
         )
         return
     if not items:
-        await query.edit_message_text("Уже записано", reply_markup=None)
+        await _edit(context, query, "Уже записано", reply_markup=None)
         return
     mark_dirty(context.bot_data)
-    await query.edit_message_text(
-        f"🐷 Записал: {_sums(items, quoted=True)}", reply_markup=None
+    await _edit(
+        context, query, f"🐷 Записал: {_sums(items, quoted=True)}", reply_markup=None
     )
     note = piggy_note(SAVED, author, _sums(items, quoted=False))
     await notify_others(context.bot, user.id, note)
