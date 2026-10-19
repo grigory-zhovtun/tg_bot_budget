@@ -182,9 +182,8 @@ describe("SavingsTab", () => {
       nb("накоплено 400 $ из 2 500 $"),
     );
     expect(within(trip).getByText("⚠️ Не хватит 500 $")).toBeTruthy();
-    expect(
-      within(trip).getByText("к 01.06 будет 2 000 $ из 2 500 $"),
-    ).toBeTruthy();
+    expect(within(trip).getByText("к 01.06 будет 2 000 $")).toBeTruthy();
+    expect(within(trip).getByText("нужно 2 500 $")).toBeTruthy();
     expect(within(repair).getByText("⚠️ Не указана сумма").className).toContain(
       "text-danger",
     );

@@ -23,7 +23,10 @@ function fixture(): Cushion {
 describe("CushionCard", () => {
   it("shows how many months of spending the cushion lasts", () => {
     render(<CushionCard cushion={fixture()} />);
-    expect(screen.getByRole("heading").textContent).toBe("🛟 Подушка");
+    const heading = screen.getByRole("heading");
+    expect(heading.textContent).toBe("🛟 Подушка");
+    // при крупном шрифте плашка уходит на следующую строку, а не за экран
+    expect(heading.parentElement?.className).toContain("flex-wrap");
     // меньше трёх месяцев — красной плашкой со знаком
     expect(screen.getByText("⚠️ 0,3 мес.").className).toContain("bg-chip-bad");
     const bar = screen.getByRole("progressbar", {

@@ -64,8 +64,8 @@ describe("PiggyCard", () => {
     expect(screen.getByText("⚠️ Не хватит 9 000 000").className).toContain(
       "text-danger",
     );
-    expect(
-      screen.getByText("к 20.12 будет 3 000 000 из 12 000 000"),
-    ).toBeTruthy();
+    // восьмизначные суммы в одну фразу не влезают: прогноз и цель — разными строками
+    expect(screen.getByText("к 20.12 будет 3 000 000")).toBeTruthy();
+    expect(screen.getByText("нужно 12 000 000")).toBeTruthy();
   });
 });

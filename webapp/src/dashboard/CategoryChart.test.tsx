@@ -82,6 +82,12 @@ describe("CategoryChart", () => {
     expect(screen.getByText("✓ 41 %").className).toContain("bg-chip-good");
   });
 
+  it("lets a badge move under a long name instead of off the screen", () => {
+    show();
+    const row = screen.getByRole("button", { name: /ДОМ/ });
+    expect(row.className).toContain("flex-wrap");
+  });
+
   it("writes nothing under a group without plan and spending", () => {
     render(
       <CategoryChart

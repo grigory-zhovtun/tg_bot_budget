@@ -134,7 +134,7 @@ export default function CategoryChart({ categories, untracked, today }: Props) {
               <button
                 type="button"
                 aria-expanded={open === group.name}
-                className="flex items-center justify-between gap-2 text-left"
+                className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-left"
                 onClick={() => setOpen(open === group.name ? null : group.name)}
               >
                 <span className="text-fact font-extrabold">{group.name}</span>
@@ -148,7 +148,7 @@ export default function CategoryChart({ categories, untracked, today }: Props) {
                     const itemLine = amounts(item.plan, item.fact);
                     return (
                       <li key={item.name} className="flex flex-col gap-1">
-                        <span className="flex items-center justify-between gap-2">
+                        <span className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
                           <span className="text-line font-extrabold">
                             {item.icon
                               ? `${item.icon} ${item.name}`

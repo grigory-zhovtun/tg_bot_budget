@@ -34,7 +34,7 @@ export default function CushionCard({ cushion }: { cushion: Cushion }) {
   const level = months === null ? null : tone(cushion, months);
   return (
     <Card label="Подушка безопасности">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
         <h2 className="text-fact font-extrabold">🛟 Подушка</h2>
         {months !== null && level && (
           <Chip tone={level}>{`${SIGN[level]}${monthsText(months)} мес.`}</Chip>

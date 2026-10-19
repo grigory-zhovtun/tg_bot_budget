@@ -36,8 +36,9 @@ function Status({ piggy }: { piggy: Piggy }) {
         <>
           <Warn>{`Не хватит ${money(piggy.short)}`}</Warn>
           <Line>
-            {`к ${dayMonth(piggy.deadline ?? "")} будет ${money(piggy.forecast ?? 0)} из ${money(piggy.target ?? 0)}`}
+            {`к ${dayMonth(piggy.deadline ?? "")} будет ${money(piggy.forecast ?? 0)}`}
           </Line>
+          <Line>{`нужно ${money(piggy.target ?? 0)}`}</Line>
         </>
       );
     case "no_target":

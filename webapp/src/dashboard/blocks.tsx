@@ -85,7 +85,7 @@ export function Table({ rows, align, head, label }: TableProps) {
             {head.map((cell, index) => (
               <th
                 key={index}
-                className={`border border-outline bg-stripe px-2 py-1.5 text-base font-extrabold ${side(index)}`}
+                className={`border border-outline bg-stripe px-1.5 py-1.5 text-base font-extrabold ${side(index)}`}
               >
                 {cell}
               </th>
@@ -99,7 +99,7 @@ export function Table({ rows, align, head, label }: TableProps) {
             {row.map((cell, index) => (
               <td
                 key={index}
-                className={`border border-outline px-2 py-1.5 font-bold ${side(index)}`}
+                className={`border border-outline px-1.5 py-1.5 font-bold ${side(index)}`}
               >
                 {cell}
               </td>
