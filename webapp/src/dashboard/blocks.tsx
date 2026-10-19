@@ -17,9 +17,19 @@ export function Card({ label, children }: Children & { label?: string }) {
   );
 }
 
-/** Главная цифра — 40 px. */
+const BIG_FITS = 13; // «9 500 000 сум» — ещё 40 px; длиннее — 34 px
+
+/** Главная цифра — 40 px; длинная (восьмизначная сумма с «сум») — 34 px, чтобы
+ * осталась в одной строке. */
 export function Big({ children }: Children) {
-  return <p className="text-big font-black tabular-nums">{children}</p>;
+  const long = typeof children === "string" && children.length > BIG_FITS;
+  return (
+    <p
+      className={`${long ? "text-big-long" : "text-big"} font-black tabular-nums`}
+    >
+      {children}
+    </p>
+  );
 }
 
 /** Крупная строка — 21 px: с неё начинается карточка или пункт. */

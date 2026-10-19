@@ -46,6 +46,9 @@
   /* не шире экрана и при крупном шрифте телефона: 11vw — 40 px на 360 px */
   --text-big: min(2.5rem, 11vw);
   --text-big--line-height: 1.05;
+  /* длинная главная цифра (восьмизначная сумма с «сум») — 34 px, чтобы влезла */
+  --text-big-long: min(2.125rem, 9.4vw);
+  --text-big-long--line-height: 1.05;
   --text-fact: 1.3125rem;
   --text-fact--line-height: 1.25;
   --text-line: 1.0625rem;

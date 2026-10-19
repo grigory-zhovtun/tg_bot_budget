@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { PlanArticle, PlanEvent } from "../api";
 import { planFixture } from "../mocks/fixtures";
+import { nb } from "../test/text";
 import AddArticleSheet from "./AddArticleSheet";
 import ArticleSheet from "./ArticleSheet";
 import EventSheet from "./EventSheet";
@@ -33,18 +34,59 @@ describe("ArticleSheet", () => {
         onClose={vi.fn()}
       />,
     );
-    expect(screen.getByText("Среднее за июль–сентябрь")).toBeTruthy();
-    expect(screen.getByText("Октябрь пока (10 дней)")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "= среднему" }));
+    // у статьи в сумах валюта в заголовке не пишется — длинное название влезает
+    expect(screen.getByRole("dialog", { name: "☕ кофе" })).toBeTruthy();
+    expect(screen.getByRole("heading").className).toContain("text-fact");
+    // валюта у суммы — цветом текста, не бледная
+    expect(screen.getByText("UZS").className).not.toContain("text-hint");
+    expect(
+      [...screen.getByRole("table").querySelectorAll("tr")].map(
+        (line) => line.textContent,
+      ),
+    ).toEqual(
+      [
+        "было в плане1 500 000",
+        "в среднем1 800 000",
+        "в сентябре2 000 000",
+        "в октябре пока700 000",
+      ].map(nb),
+    );
+    expect(screen.getByText("в среднем — за июль–сентябрь")).toBeTruthy();
+    expect(screen.getByText("в октябре — за 10 дней")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /^↺ как было 1\s500\s000$/ }),
+    ).toBeTruthy();
+    await user.click(
+      screen.getByRole("button", { name: /^= в среднем 1\s800\s000$/ }),
+    );
     expect(
       screen
         .getByRole("status", { name: "Сумма" })
         .textContent?.replace(/\s+/g, " "),
     ).toBe("1 800 000 UZS");
-    await user.click(screen.getByRole("button", { name: "= сентябрю" }));
+    await user.click(
+      screen.getByRole("button", { name: /^= как в сентябре 2\s000\s000$/ }),
+    );
     await user.click(screen.getByRole("button", { name: "Стереть" }));
     await user.click(screen.getByRole("button", { name: "Готово" }));
     expect(onDone).toHaveBeenCalledWith("200000");
+  });
+});
+
+describe("ArticleSheet in a currency", () => {
+  it("names the currency in the title", () => {
+    render(
+      <ArticleSheet
+        article={row("квартплата|USD")}
+        text=""
+        history={planFixture.history}
+        onDone={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("dialog", { name: "🔑 квартплата · USD" }),
+    ).toBeTruthy();
   });
 });
 
@@ -90,6 +132,10 @@ describe("EventSheet", () => {
       />,
     );
     expect(screen.getByLabelText("Название")).toHaveProperty("value", "Аванс");
+    // подписи полей — крупно и цветом текста
+    const label = screen.getByText("Название");
+    expect(label.className).toContain("text-line");
+    expect(label.className).not.toContain("text-hint");
     await user.click(screen.getByRole("button", { name: "Удалить строку" }));
     expect(onDone).toHaveBeenCalledWith(null);
   });
@@ -107,6 +153,7 @@ describe("GoalSheet", () => {
         onClose={vi.fn()}
       />,
     );
+    expect(screen.getByText("Валюта").className).toContain("text-line");
     await user.click(screen.getByRole("button", { name: "000" }));
     await user.click(screen.getByRole("button", { name: "Готово" }));
     expect(onDone).toHaveBeenCalledWith("1000000000", "UZS");
@@ -138,7 +185,8 @@ describe("AddArticleSheet", () => {
         .getByRole("radio", { name: "🍷 ресторан" })
         .getAttribute("aria-checked"),
     ).toBe("true");
-    await user.click(screen.getByRole("button", { name: "= сентябрю" }));
+    expect(screen.queryByRole("button", { name: /как было/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /^= как в сентябре/ }));
     await user.click(screen.getByRole("button", { name: "Добавить" }));
     expect(onDone).toHaveBeenCalledWith(food[0], "900000");
 

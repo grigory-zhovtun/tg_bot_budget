@@ -10,11 +10,12 @@ import {
   type PlanGoalHint,
 } from "../api";
 import { groupColor, tint } from "../entry/palette";
-import { itemAmount, money, short, withCurrency } from "../format";
+import { longDay, money, moneyText } from "../format";
 import { useResource, useStore } from "../store";
 import { haptic, telegram } from "../telegram";
 import { amountValue } from "../entry/amount";
 import { percentText } from "../dashboard/piggyText";
+import { Big, Card, Fact, Line, Table, Warn } from "../dashboard/blocks";
 import AddArticleSheet from "./AddArticleSheet";
 import AdvicePanel, { type AdviceState } from "./AdvicePanel";
 import ArticleSheet from "./ArticleSheet";
@@ -40,9 +41,11 @@ import {
   type Draft,
 } from "./draft";
 import EventSheet from "./EventSheet";
+import { noticeParts } from "./notice";
+import PlanEvents from "./PlanEvents";
 import GoalSheet from "./GoalSheet";
 import PiggyHints from "./PiggyHints";
-import { monthIn, monthName, monthShort, plural } from "./months";
+import { monthDative, monthIn, monthName, monthShort, plural } from "./months";
 import { receiptHint } from "./receipt";
 
 type Editing =
@@ -85,21 +88,27 @@ function GoalHint({
 }) {
   if (Math.abs(shown - hint.suggested) < GOAL_STEP) return null;
   return (
-    <section
-      aria-label="По копилкам"
-      className="flex flex-col gap-2 rounded-2xl bg-section p-3"
-    >
-      <p className="text-sm">
-        {`Откладываем ${percentText(hint.percent)} % — ${short(hint.suggested)}: копилки ${short(hint.piggies)} + подушка ${short(hint.share)} − из копилок ${short(hint.spent)}`}
-      </p>
+    <Card label="По копилкам">
+      <Fact>{`По копилкам ${money(hint.suggested)}`}</Fact>
+      <Line>
+        {`откладываем ${percentText(hint.percent)}\u00a0% с поступлений`}
+      </Line>
+      <Table
+        align="lr"
+        rows={[
+          ["копилки", money(hint.piggies)],
+          ["подушка", money(hint.share)],
+          ["из копилок", minus(hint.spent)],
+        ]}
+      />
       <button
         type="button"
-        className="self-start font-semibold text-link"
+        className="mt-2 h-12 rounded-xl bg-button text-lg font-extrabold text-button-text"
         onClick={() => onApply(hint.suggested)}
       >
-        Применить
+        {`Применить ${money(hint.suggested)}`}
       </button>
-    </section>
+    </Card>
   );
 }
 
@@ -126,11 +135,21 @@ function groupsOf(
   return [...groups.entries()];
 }
 
-function Line({ label, value }: { label: string; value: string }) {
+/** «−10 500 000» — расход в итоге; ноль — без знака. */
+function minus(value: number): string {
+  return Math.round(value) > 0 ? `−${money(value)}` : "0";
+}
+
+/** Сообщение «заголовок: подробности» — крупной строкой и строкой под ней. */
+function Notice({ text }: { text: string }) {
+  const { head, rest } = noticeParts(text);
   return (
-    <div className="flex justify-between">
-      <span className="text-hint">{label}</span>
-      <span className="font-medium">{value}</span>
+    <div
+      className="flex flex-col gap-1 rounded-2xl bg-section p-4"
+      role="status"
+    >
+      {head && <Fact>{head}</Fact>}
+      <p className={`text-line ${head ? "" : "font-bold"}`}>{rest}</p>
     </div>
   );
 }
@@ -144,6 +163,29 @@ interface ArticleLineProps {
   onPick: () => void;
 }
 
+/** Название статьи и её план в одной строке; длинное название — план строкой ниже,
+ * справа (без переноса текста). */
+function NameAndSum({
+  name,
+  sum,
+  tone = "",
+}: {
+  name: string;
+  sum: string;
+  tone?: string;
+}) {
+  return (
+    <span className="flex w-full flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+      <span className="text-line font-extrabold">{name}</span>
+      <span
+        className={`ml-auto text-fact font-black whitespace-nowrap tabular-nums ${tone}`}
+      >
+        {sum}
+      </span>
+    </span>
+  );
+}
+
 function ArticleLine({
   article,
   value,
@@ -153,7 +195,6 @@ function ArticleLine({
   onPick,
 }: ArticleLineProps) {
   const foreign = article.currency !== "UZS";
-  const fraction = foreign ? 2 : 0;
   return (
     <button
       type="button"
@@ -164,30 +205,29 @@ function ArticleLine({
       }
       data-conflict={conflict || undefined}
       disabled={!article.editable}
-      className={`flex w-full items-center justify-between gap-3 border-t border-black/5 py-2 text-left disabled:opacity-60 ${conflict ? RING : ""}`}
+      className={`flex w-full flex-col gap-0.5 border-t border-black/10 py-2 text-left ${conflict ? RING : ""}`}
       onClick={onPick}
     >
-      <span className="flex flex-col">
-        <span className="font-medium">
-          {article.icon} {article.subcategory}
-          {foreign ? ` · ${article.currency}` : ""}
+      <NameAndSum
+        name={`${article.icon} ${article.subcategory}${foreign ? ` · ${article.currency}` : ""}`}
+        sum={moneyText(value, article.currency)}
+        tone={edited ? "text-link" : ""}
+      />
+      {edited && (
+        <span className="self-end text-line line-through">
+          {moneyText(article.plan, article.currency)}
         </span>
-        <span className="text-xs text-hint">
-          {article.editable
-            ? hint
-            : "Статья встречается дважды — поправьте вкладку"}
-        </span>
-      </span>
-      <span className="text-right">
-        <span className={`block font-semibold ${edited ? "text-link" : ""}`}>
-          {money(value, fraction)}
-        </span>
-        {edited && (
-          <span className="block text-xs text-hint line-through">
-            {money(article.plan, fraction)}
+      )}
+      {article.editable ? (
+        hint && <span className="text-line">{hint}</span>
+      ) : (
+        <>
+          <span className="text-line font-extrabold text-danger">
+            ⚠️ статья встречается дважды
           </span>
-        )}
-      </span>
+          <span className="text-line">поправьте вкладку</span>
+        </>
+      )}
     </button>
   );
 }
@@ -198,21 +238,25 @@ function AddedLine({ row, onPick }: { row: AddedRow; onPick: () => void }) {
     <button
       type="button"
       aria-label={`${row.subcategory}${foreign ? ` ${row.currency}` : ""}, новая`}
-      className="flex w-full items-center justify-between gap-3 border-t border-black/5 py-2 text-left"
+      className="flex w-full flex-col gap-0.5 border-t border-black/10 py-2 text-left"
       onClick={onPick}
     >
-      <span className="flex flex-col">
-        <span className="font-medium">
-          {row.icon} {row.subcategory}
-          {foreign ? ` · ${row.currency}` : ""}
-        </span>
-        <span className="text-xs text-link">новая статья</span>
-      </span>
-      <span className="font-semibold text-link">
-        {money(amountValue(row.text), foreign ? 2 : 0)}
-      </span>
+      <NameAndSum
+        name={`${row.icon} ${row.subcategory}${foreign ? ` · ${row.currency}` : ""}`}
+        sum={moneyText(amountValue(row.text), row.currency)}
+        tone="text-link"
+      />
+      <span className="text-line font-extrabold text-link">новая статья</span>
     </button>
   );
+}
+
+/** «2026-11» → «2026-10». */
+function monthBefore(month: string): string {
+  const [year = 0, number = 1] = month.split("-").map(Number);
+  return number === 1
+    ? `${year - 1}-12`
+    : `${year}-${String(number - 1).padStart(2, "0")}`;
 }
 
 export default function PlanScreen({
@@ -412,13 +456,13 @@ export default function PlanScreen({
   }, [tg, editing]);
 
   if (!plan) {
-    if (!error) return <p className="text-hint">Загрузка плана…</p>;
+    if (!error) return <p className="text-line">Загрузка плана…</p>;
     return (
       <div className="flex flex-col items-start gap-2" role="alert">
-        <p>{error}</p>
+        <p className="text-line font-bold">{error}</p>
         <button
           type="button"
-          className="text-link"
+          className="text-line font-extrabold text-link"
           onClick={() => {
             reload();
           }}
@@ -429,29 +473,34 @@ export default function PlanScreen({
     );
   }
   if (plan.status === "not_created") {
+    const now = monthBefore(month);
+    const [, nowGenitive = ""] = longDay(`${now}-01`).split(" ");
     return (
       <section
-        className="flex flex-col items-center gap-3 rounded-2xl bg-section p-6 text-center"
+        className="flex flex-col items-center gap-1 rounded-2xl bg-section p-6 text-center"
         aria-label="Следующий месяц"
       >
         <p className="text-4xl" aria-hidden="true">
           📅
         </p>
-        <h3 className="text-lg font-semibold">
+        <h3 className="text-fact font-extrabold">
           {`Плана на ${monthName(month)} ещё нет`}
         </h3>
-        <p className="text-sm text-hint">
-          {`Создам вкладку «${plan.title}» копией текущего месяца: статьи, суммы, поступления по дням и цель. Потом поправите то, что ${monthIn(month)} будет по-другому. До 1-го числа вкладка спрятана в таблице, а бот и лимит считают по текущему месяцу.`}
-        </p>
+        <Line>{`создам вкладку «${plan.title}»`}</Line>
+        <Line>{`копией ${nowGenitive}: статьи, суммы,`}</Line>
+        <Line>поступления и цель</Line>
+        <Line>потом поправите, что изменится</Line>
+        <Line>{`до ${longDay(`${month}-01`)} вкладка спрятана`}</Line>
+        <Line>{`бот и лимит считают по ${monthDative(now)}`}</Line>
         {notice && (
-          <p className="text-sm text-danger" role="alert">
+          <p className="text-line font-extrabold text-danger" role="alert">
             {notice}
           </p>
         )}
         <button
           type="button"
           disabled={creating}
-          className="h-12 w-full rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
+          className="mt-2 h-12 w-full rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
           onClick={create}
         >
           {`Создать план на ${monthName(month)}`}
@@ -461,9 +510,10 @@ export default function PlanScreen({
   }
   if (plan.status !== "ok") {
     return (
-      <p className="rounded-2xl bg-section p-4 text-sm">
-        Вкладки месяца ещё нет — бот создаёт её сам 1-го числа.
-      </p>
+      <div className="flex flex-col rounded-2xl bg-section p-4">
+        <Warn>Вкладки месяца ещё нет</Warn>
+        <Line>бот создаёт её сам 1-го числа</Line>
+      </div>
     );
   }
 
@@ -473,7 +523,7 @@ export default function PlanScreen({
   const history = plan.history;
   const hint = (row: PlanArticle) =>
     history
-      ? `ср. ${short(row.average)} · ${monthShort(history.last)} ${short(row.last)}`
+      ? `ср. ${moneyText(row.average, row.currency)}, ${monthShort(history.last)} ${moneyText(row.last, row.currency)}`
       : "";
   const extra = [
     ...new Set(
@@ -550,7 +600,7 @@ export default function PlanScreen({
   const addButton = (group: string) => (
     <button
       type="button"
-      className="py-2 text-left text-link"
+      className="py-2 text-left text-line font-extrabold text-link"
       onClick={() => setEditing({ kind: "add", group, key: null })}
     >
       ＋ статья
@@ -573,13 +623,14 @@ export default function PlanScreen({
     <div className="flex flex-col gap-4">
       {error && (
         <div
-          className="flex items-center justify-between gap-2 rounded-2xl bg-section p-3 text-sm"
+          className="flex flex-col gap-1 rounded-2xl bg-section p-4"
           role="alert"
         >
-          <p>{`План не обновился: ${error}`}</p>
+          <Warn>План не обновился</Warn>
+          <Line>{error}</Line>
           <button
             type="button"
-            className="shrink-0 text-link"
+            className="self-start text-line font-extrabold text-link"
             onClick={() => {
               reload();
             }}
@@ -590,21 +641,22 @@ export default function PlanScreen({
       )}
       {restored && count > 0 && (
         <div
-          className="flex flex-col gap-2 rounded-2xl bg-section p-3 text-sm"
+          className="flex flex-col gap-1 rounded-2xl bg-section p-4"
           role="status"
         >
-          <p>Есть несохранённые правки с прошлого раза</p>
-          <div className="flex gap-4">
+          <Fact>Несохранённые правки</Fact>
+          <Line>остались с прошлого раза</Line>
+          <div className="mt-1 flex justify-between gap-4">
             <button
               type="button"
-              className="text-link"
+              className="text-line font-extrabold text-link"
               onClick={onRestoredSeen}
             >
               Продолжить
             </button>
             <button
               type="button"
-              className="text-danger"
+              className="text-line font-extrabold text-danger"
               onClick={() => {
                 onDraft(emptyDraft(month));
                 setConflicts([]);
@@ -616,72 +668,60 @@ export default function PlanScreen({
           </div>
         </div>
       )}
-      {notice && (
-        <p className="rounded-2xl bg-section p-3 text-sm" role="status">
-          {notice}
-        </p>
-      )}
-      <section
-        className="flex flex-col gap-1 rounded-2xl bg-section p-4 text-sm"
-        aria-label="Итог месяца"
-      >
-        <Line label="Поступления" value={short(totals.incomes)} />
-        <Line label="Расходы по плану" value={short(totals.spend)} />
-        <Line label="🎯 Отложить" value={short(totals.goal)} />
-        <div className="mt-2 flex items-baseline justify-between border-t border-black/10 pt-2">
-          <span className="font-semibold">
-            {totals.free >= 0 ? "Свободно" : "Не хватает"}
-          </span>
-          <span
-            className={`text-2xl font-semibold ${totals.free >= 0 ? "text-ok" : "text-danger"}`}
-          >
-            {short(Math.abs(totals.free))}
-          </span>
-        </div>
-      </section>
+      {notice && <Notice text={notice} />}
+      <Card label="Итог месяца">
+        <Big>{`${money(totals.free)} сум`}</Big>
+        {totals.free >= 0 ? (
+          <Line>{`свободно ${monthIn(month)}`}</Line>
+        ) : (
+          <Warn>{`не хватает ${monthIn(month)}`}</Warn>
+        )}
+        <Table
+          align="lr"
+          rows={[
+            ["поступления", money(totals.incomes)],
+            ["расходы", minus(totals.spend)],
+            totals.goal >= 0
+              ? ["🎯 отложить", minus(totals.goal)]
+              : ["💰 из накоплений", `+${money(-totals.goal)}`],
+          ]}
+        />
+      </Card>
       {plan.events === null ? (
-        <p className="text-sm text-hint">
-          Списка поступлений во вкладке нет — его правят в таблице.
-        </p>
+        <div className="flex flex-col">
+          <Line>списка поступлений во вкладке нет</Line>
+          <Line>его правят в таблице</Line>
+        </div>
       ) : (
-        <section className="flex flex-col" aria-label="Поступления и платежи">
-          <h3 className="mb-1 text-xs font-semibold text-hint uppercase">
-            Поступления и платежи
-          </h3>
-          {filled.map((item) => {
-            const conflict = conflicts.includes(`event:${item.slot}`);
-            const edited = draft.events[String(item.slot)] !== undefined;
-            const amount = item.amount ?? 0;
-            const original = plan.events?.find((e) => e.slot === item.slot);
-            const hint =
-              !edited && original ? receiptHint(original, plan.month) : null;
-            return (
-              <button
-                key={item.slot}
-                type="button"
-                data-conflict={conflict || undefined}
-                className={`flex items-center gap-3 border-t border-black/5 py-2 text-left ${conflict ? RING : ""}`}
-                onClick={() => setEditing({ kind: "event", slot: item.slot })}
-              >
-                <span className="w-8 rounded-lg bg-section py-0.5 text-center text-xs font-bold">
-                  {item.day}
-                </span>
-                <span
-                  className={`flex flex-1 flex-col ${edited ? "text-link" : ""}`}
-                >
-                  {item.name}
-                  {hint && <span className="text-xs text-hint">{hint}</span>}
-                </span>
-                <span className={amount > 0 ? "text-ok" : "text-danger"}>
-                  {itemAmount(amount, item.currency ?? "UZS", amount)}
-                </span>
-              </button>
-            );
-          })}
+        <section
+          className="flex flex-col gap-2"
+          aria-label="Поступления и платежи"
+        >
+          <h3 className="text-fact font-extrabold">Поступления и платежи</h3>
+          <PlanEvents
+            rows={filled.map((item) => {
+              const edited = draft.events[String(item.slot)] !== undefined;
+              const original = plan.events?.find((e) => e.slot === item.slot);
+              return {
+                slot: item.slot,
+                name: item.name ?? "",
+                day: item.day,
+                amount: item.amount ?? 0,
+                currency: item.currency ?? "UZS",
+                edited,
+                conflict: conflicts.includes(`event:${item.slot}`),
+                note:
+                  !edited && original
+                    ? receiptHint(original, plan.month)
+                    : null,
+              };
+            })}
+            onPick={(slot) => setEditing({ kind: "event", slot })}
+          />
           {empty && (
             <button
               type="button"
-              className="py-2 text-left text-link"
+              className="self-start py-1 text-left text-line font-extrabold text-link"
               onClick={() => setEditing({ kind: "event", slot: empty.slot })}
             >
               ＋ Добавить поступление или платёж
@@ -692,7 +732,7 @@ export default function PlanScreen({
       <button
         type="button"
         disabled={advice?.kind === "loading"}
-        className="h-11 rounded-xl bg-section font-medium text-link disabled:opacity-50"
+        className="h-12 rounded-xl bg-section text-lg font-extrabold text-link disabled:opacity-50"
         onClick={ask}
       >
         🧠 Совет по плану
@@ -718,15 +758,17 @@ export default function PlanScreen({
           <section
             key={group}
             aria-label={group}
-            className="rounded-3xl border px-3 pt-2 pb-1"
+            className="rounded-3xl border px-3 pt-3 pb-1"
             style={{
               background: tint(color, 0.12),
               borderColor: tint(color, 0.28),
             }}
           >
-            <div className="flex items-center justify-between pb-1">
-              <h3 className="font-semibold">{group}</h3>
-              <span className="text-sm text-hint">{short(sum)}</span>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-3 pb-1">
+              <h3 className="text-fact font-extrabold">{group}</h3>
+              <span className="ml-auto text-fact font-extrabold whitespace-nowrap tabular-nums">
+                {money(sum)}
+              </span>
             </div>
             {rows.map(line)}
             {addedIn(group).map(addedLine)}
@@ -738,17 +780,19 @@ export default function PlanScreen({
         incomeAdded.length > 0 ||
         incomeOffers.length > 0) && (
         <section
-          className="flex flex-col rounded-3xl bg-section px-3 pt-2 pb-1"
+          className="flex flex-col rounded-3xl bg-section px-3 pt-3 pb-1"
           aria-label="Доходы по статьям"
         >
-          <h3 className="pb-1 font-semibold">Доходы по статьям</h3>
+          <h3 className="pb-1 text-fact font-extrabold">Доходы по статьям</h3>
           {income.map(line)}
           {incomeAdded.map(addedLine)}
           {incomeOffers.length > 0 && addButton(incomeOffers[0]?.group ?? "")}
           {differs && (
-            <p className="py-2 text-xs text-hint">
-              {`По статьям ${short(totals.incomeRows)}, в поступлениях ${short(totals.incomes)}`}
-            </p>
+            <div className="flex flex-col py-2">
+              <Warn>Доходы не сходятся</Warn>
+              <Line>{`по статьям ${money(totals.incomeRows)}`}</Line>
+              <Line>{`в поступлениях ${money(totals.incomes)}`}</Line>
+            </div>
           )}
         </section>
       )}
@@ -756,14 +800,16 @@ export default function PlanScreen({
         <button
           type="button"
           data-conflict={conflicts.includes("goal") || undefined}
-          className={`flex items-center justify-between rounded-2xl bg-section p-3 text-left ${conflicts.includes("goal") ? "ring-2 ring-warn" : ""}`}
+          className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 rounded-2xl bg-section p-4 text-left ${conflicts.includes("goal") ? "ring-2 ring-warn" : ""}`}
           onClick={() => setEditing({ kind: "goal" })}
         >
-          <span>
+          <span className="text-fact font-extrabold">
             {goal.amount < 0 ? "💰 Из накоплений" : "🎯 Отложить за месяц"}
           </span>
-          <span className={`font-semibold ${draft.goal ? "text-link" : ""}`}>
-            {withCurrency(Math.abs(goal.amount), goal.currency)}
+          <span
+            className={`ml-auto text-fact font-black whitespace-nowrap tabular-nums ${draft.goal ? "text-link" : ""}`}
+          >
+            {moneyText(Math.abs(goal.amount), goal.currency)}
           </span>
         </button>
       )}
@@ -780,7 +826,7 @@ export default function PlanScreen({
       {!tg && count > 0 && (
         <button
           type="button"
-          className="h-12 rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
+          className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
           disabled={saving}
           onClick={save}
         >

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PlanEvent } from "../api";
+import { nb } from "../test/text";
 import { receiptHint } from "./receipt";
 
 function event(over: Partial<PlanEvent>): PlanEvent {
@@ -24,7 +25,7 @@ describe("receiptHint", () => {
         }),
         "2026-10",
       ),
-    ).toBe("✓ пришло 3,15 млн · 15.10");
+    ).toBe(nb("✓ пришло 3 150 000, 15.10"));
   });
 
   it("says a payment is paid", () => {
@@ -36,7 +37,7 @@ describe("receiptHint", () => {
       received: -380,
       received_on: "2026-10-17",
     });
-    expect(receiptHint(rent, "2026-10")).toBe("✓ оплачено 380,00 USD · 17.10");
+    expect(receiptHint(rent, "2026-10")).toBe(nb("✓ оплачено 380 $, 17.10"));
   });
 
   it("shows a part that came in", () => {
@@ -47,7 +48,7 @@ describe("receiptHint", () => {
       received: 47_500,
     });
     expect(receiptHint(part, "2026-10")).toBe(
-      "пришло 47 500,00 RUB из 95 000,00 RUB",
+      nb("пришло 47 500 ₽ из 95 000 ₽"),
     );
   });
 

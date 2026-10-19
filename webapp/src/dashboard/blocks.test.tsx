@@ -1,11 +1,24 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Chip, Good, Items, Table, Warn } from "./blocks";
+import { Big, Chip, Good, Items, Table, Warn } from "./blocks";
 
 describe("blocks", () => {
   it("starts a warning with a sign and paints it orange", () => {
     render(<Warn>Нет блока</Warn>);
     expect(screen.getByText("⚠️ Нет блока").className).toContain("text-danger");
+  });
+
+  it("shrinks a long main figure so it stays on one line", () => {
+    render(
+      <>
+        <Big>9 500 000 сум</Big>
+        <Big>12 345 678 сум</Big>
+      </>,
+    );
+    expect(screen.getByText("9 500 000 сум").className).toContain("text-big ");
+    expect(screen.getByText("12 345 678 сум").className).toContain(
+      "text-big-long",
+    );
   });
 
   it("starts good news with a check mark", () => {

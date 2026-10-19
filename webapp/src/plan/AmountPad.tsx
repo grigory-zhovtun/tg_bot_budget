@@ -18,7 +18,7 @@ export default function AmountPad({ text, currency, onChange }: Props) {
         aria-live="polite"
       >
         {displayAmount(text)}{" "}
-        <span className="text-xl text-hint">{currency}</span>
+        <span className="text-xl font-bold text-text">{currency}</span>
       </output>
       <Keypad
         decimals={decimals}
