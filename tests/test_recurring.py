@@ -9,10 +9,12 @@ import pytest
 from app.domain import Rates
 from app.handlers import analytics
 from app.services.analytics_service import AnalyticsService, transactions_frame
+from app.services.receipts import Line
 from app.services.recurring import (
     find_series,
     format_subs,
     morning_lines,
+    outside_list,
     recurring_key,
 )
 from tests.test_analytics_service import serial
@@ -92,6 +94,15 @@ CAFE = [  # кафе раз в месяц на похожую сумму, но �
     row(date(2026, 9, day), "Ooo Shavi Cafe", amount, "кафе")
     for day, amount in ((3, 48_000), (11, 95_000), (17, 61_000))
 ]
+RENT = [  # аренда раз в месяц наличными в кассе банка — строка жёлтого списка
+    row(date(2026, month, 17), "наличные в кассе KASSA 420 USD → квартплата", 420,
+        "квартплата", "USD")
+    for month in (8, 9)
+]  # fmt: skip
+# та же аренда из SMS: другой комментарий, по нему серию не узнать
+RENT_PAID = row(date(2026, 10, 19), "снятие наличных: KASSA 7", 420, "квартплата",
+                "USD")  # fmt: skip
+RENT_LIST = [("Аренда", 18, -420, "USD")]
 GENERIC = [  # общие комментарии — не магазин
     row(date(2026, month, 4), comment, 60_600, "неучтенка")
     for month in (8, 9, 10)
@@ -200,3 +211,25 @@ def test_missed_charge_this_month_is_noted() -> None:
     ]
     text = format_subs(find_series(frame(*jetbrains), TODAY), TODAY)
     assert "• 04 — Jetbrains - .55: 144 444 (в октябре не было)" in text
+
+
+def test_a_payment_of_the_month_list_is_not_a_subscription() -> None:
+    found = find_series(frame(*RENDER, *RENT), date(2026, 10, 19))
+    assert [s.key for s in outside_list(found, [Line(14, 18, -420.0, "USD")])] == [
+        "render com"
+    ]
+    # другая валюта, сумма дальше 10 % или день дальше 4 дней — другой платёж
+    for other in (
+        Line(14, 18, -420.0, "UZS"),
+        Line(14, 18, -500.0, "USD"),
+        Line(14, 25, -420.0, "USD"),
+        Line(14, 18, 420.0, "USD"),  # поступление, а не платёж
+    ):
+        assert len(outside_list(found, [other])) == 2
+
+
+def test_month_list_payments_stay_out_of_subs_and_the_morning() -> None:
+    fact = [FACT_HEADER, *OPENING, *RENDER, *RENT]
+    service = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab(items=RENT_LIST)}))
+    assert "квартплата" not in service.subs_report(date(2026, 10, 19))
+    assert "🔁" not in service.morning_brief(date(2026, 10, 16))

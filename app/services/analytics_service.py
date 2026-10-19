@@ -482,8 +482,8 @@ class AnalyticsService:
 
     def _brief(self, today: date | None, now: bool) -> tuple[str, Any]:
         # day_budget и recurring сами берут отсюда plan_lines и expenses
-        from app.services.day_budget import day_budget, format_day_budget
-        from app.services.recurring import find_series, morning_lines
+        from app.services.day_budget import day_budget, format_day_budget, read_forecast
+        from app.services.recurring import find_series, morning_lines, outside_list
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
         sheet = month_title(today)
@@ -507,7 +507,9 @@ class AnalyticsService:
                 + format_plan_report(rows, today)
             ), None
         lines = [format_day_budget(budget, now=now)]
-        lines += morning_lines(find_series(frame, today), today)
+        listed = read_forecast(rows)
+        series = outside_list(find_series(frame, today), listed.items if listed else ())
+        lines += morning_lines(series, today)
         return "\n".join(lines), budget
 
     def write_feedback(
@@ -540,7 +542,13 @@ class AnalyticsService:
 
     def subs_report(self, today: date | None = None) -> str:
         """/subs: регулярные списания по истории fact и план подписок месяца."""
-        from app.services.recurring import SUBSCRIPTION, find_series, format_subs
+        from app.services.day_budget import read_forecast
+        from app.services.recurring import (
+            SUBSCRIPTION,
+            find_series,
+            format_subs,
+            outside_list,
+        )
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
         rates = self.gs_service.get_rates()
@@ -552,12 +560,15 @@ class AnalyticsService:
             return (
                 "Регулярных списаний пока не нашёл — нужно хотя бы два месяца истории."
             )
-        plan = None
+        plan, listed = None, None
         try:
-            spend, _ = plan_lines(self.gs_service.get_values(month_title(today)))
+            rows = self.gs_service.get_values(month_title(today))
+            spend, _ = plan_lines(rows)
             plan = next((x.plan for x in spend if x.subcategory == SUBSCRIPTION), None)
+            listed = read_forecast(rows)
         except WorksheetNotFound:
             logger.info("No plan sheet for the subscriptions plan")
+        found = outside_list(found, listed.items if listed else ())
         return format_subs(found, today, plan)
 
     def dashboard(
