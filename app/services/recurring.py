@@ -5,6 +5,9 @@
 списания должны приходиться на один день месяца (±4 дня), а в недавние месяцы
 их не больше двух — иначе это обычный магазин, а не подписка. Серия без
 списаний больше 40 дней — «давно не было», в итог месяца не входит.
+
+Платёж жёлтого списка вкладки месяца (квартплата) — не подписка: его ведёт список,
+а комментарий у него меняется (выписка, SMS), и серия по нему теряет списания.
 """
 
 import re
@@ -12,11 +15,13 @@ import statistics
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import Protocol
 
 import pandas as pd
 
 from app.services.analytics_service import MONTHS_RU, expenses, money
 from app.services.day_budget import MONTHS_PREPOSITIONAL, short
+from app.services.receipts import PAYMENT_TOLERANCE
 
 WINDOW_MONTHS = 4  # сколько месяцев истории смотреть
 AMOUNT_SPREAD = 0.25  # сумма одной серии отличается не больше чем на 25 %
@@ -27,6 +32,14 @@ LAPSED_DAYS = 40  # дольше без списаний — «отменили?
 SUBSCRIPTION = "подписка"
 # Общие комментарии банка вместо магазина: разные люди и сервисы под одним словом
 GENERIC_WORDS = frozenset({"перевод", "без", "зачисление", "пополнение", "снятие"})
+
+
+class ListPayment(Protocol):
+    """Строка жёлтого списка: день месяца, сумма со знаком, валюта."""
+
+    day: int
+    amount: float
+    currency: str
 
 
 @dataclass(frozen=True)
@@ -138,6 +151,24 @@ def find_series(frame: pd.DataFrame, today: date) -> list[Series]:
                 continue
             found.append(Series(key, int(middle), tuple(group)))
     return sorted(found, key=lambda s: (s.day, s.key))
+
+
+def _pays(series: Series, line: ListPayment) -> bool:
+    """Серия — этот платёж списка: та же валюта, сумма ±10 %, день ±4."""
+    due = -line.amount
+    return (
+        series.last.currency == line.currency
+        and abs(series.last.amount - due) <= PAYMENT_TOLERANCE * due
+        and abs(series.day - line.day) <= DAY_SPREAD
+    )
+
+
+def outside_list(
+    series: Iterable[Series], lines: Iterable[ListPayment]
+) -> list[Series]:
+    """Серии без платежей жёлтого списка: их показывает и закрывает сам список."""
+    payments = [line for line in lines if line.amount < 0]
+    return [s for s in series if not any(_pays(s, line) for line in payments)]
 
 
 def _amount(charge: Charge) -> str:

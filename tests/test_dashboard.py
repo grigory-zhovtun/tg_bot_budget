@@ -19,7 +19,17 @@ from tests.test_day_budget import (
     plan_row,
     tab,
 )
-from tests.test_recurring import APPLE, CLAUDE, GOOGLE_ONE, OLD, RENDER, row
+from tests.test_recurring import (
+    APPLE,
+    CLAUDE,
+    GOOGLE_ONE,
+    OLD,
+    RENDER,
+    RENT,
+    RENT_LIST,
+    RENT_PAID,
+    row,
+)
 from tests.test_recurring import frame as history
 
 TODAY = date(2026, 10, 2)
@@ -91,6 +101,15 @@ def test_subscription_states_follow_this_month() -> None:
         ("Google *google One", 235_882): "expected",
         ("Fitness Club", 300_000): "missed",
     }  # отменённая подписка (последнее списание > 40 дней) не показывается
+
+
+def test_a_paid_list_payment_leaves_ahead_and_is_not_a_subscription() -> None:
+    today = date(2026, 10, 19)
+    found = build_dashboard(
+        history(*RENDER, *RENT, RENT_PAID), tab(items=RENT_LIST), today, RATES, "USD"
+    )
+    assert found.upcoming == ()
+    assert [s.name for s in found.subscriptions] == ["Render.com"]
 
 
 def test_service_reads_the_month_tab_and_the_fact() -> None:

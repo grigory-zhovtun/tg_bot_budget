@@ -29,7 +29,7 @@ from app.services.day_budget import (
     read_forecast,
 )
 from app.services.plan import read_plan
-from app.services.recurring import Series, find_series
+from app.services.recurring import ListPayment, Series, find_series, outside_list
 
 HALF_SUM = 0.5  # меньше полсума — ноль: остаток возвратов и пересчёта по курсу
 
@@ -213,7 +213,10 @@ def subscription_state(series: Series, today: date) -> str:
     return "expected" if series.expected_on(today) >= today else "missed"
 
 
-def subscriptions(frame: pd.DataFrame, today: date) -> tuple[Subscription, ...]:
+def subscriptions(
+    frame: pd.DataFrame, today: date, lines: Sequence[ListPayment] = ()
+) -> tuple[Subscription, ...]:
+    """Регулярные списания без платежей жёлтого списка lines — те уже «Впереди»."""
     return tuple(
         Subscription(
             series.name,
@@ -223,7 +226,7 @@ def subscriptions(frame: pd.DataFrame, today: date) -> tuple[Subscription, ...]:
             series.last.uzs,
             subscription_state(series, today),
         )
-        for series in find_series(frame, today)
+        for series in outside_list(find_series(frame, today), lines)
         if not series.lapsed(today)
     )
 
@@ -265,7 +268,7 @@ def build_dashboard(
         groups,
         tuple(read_daily(rows)),
         upcoming,
-        subscriptions(frame, today),
+        subscriptions(frame, today, forecast.items),
         spent=spent,
         untracked=missing,
         cards=tuple(cards),
