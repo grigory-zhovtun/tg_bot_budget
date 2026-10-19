@@ -305,14 +305,14 @@ def test_the_total_goes_below_zero_only_when_all_money_does() -> None:
 
 
 def test_a_payment_planned_in_another_currency_is_not_counted_twice() -> None:
-    # квартплата запланирована в сумах (7,8 млн), а платится из списка долларами
-    articles = [article("кафе", 3_400_000), article("квартплата", 7_800_000)]
-    rent = item("Квартплата", 18, -650, row=12, currency="USD")
+    # квартплата запланирована в сумах (4,8 млн), а платится из списка долларами
+    articles = [article("кафе", 3_400_000), article("квартплата", 4_800_000)]
+    rent = item("Квартплата", 18, -400, row=12, currency="USD")
     found = month_forecast(facts(), articles, [rent], TODAY, RATES, ["UZS", "USD"])
     sums, dollars = found.currencies
-    assert dollars.events == (Event(18, "Квартплата", -650, False),)
+    assert dollars.events == (Event(18, "Квартплата", -400, False),)
     assert dollars.per_day_plan == 0
-    # 650 USD × 12 000 = 7,8 млн уйдут долларами — по дням в сумах только кафе
+    # 400 USD × 12 000 = 4,8 млн уйдут долларами — по дням в сумах только кафе
     assert sums.per_day_plan == pytest.approx(3_400_000 / 17)
 
 
@@ -322,12 +322,12 @@ def test_a_payment_only_partly_planned_in_its_currency_takes_the_rest_from_sums(
     articles = [
         article("кафе", 3_400_000),
         article("квартплата", 300, currency="USD"),
-        article("квартплата", 4_200_000),
+        article("квартплата", 1_200_000),
     ]
-    rent = item("Квартплата", 18, -650, row=12, currency="USD")
+    rent = item("Квартплата", 18, -400, row=12, currency="USD")
     found = month_forecast(facts(), articles, [rent], TODAY, RATES, ["UZS", "USD"])
     sums, dollars = found.currencies
-    # $300 плана в долларах покрывают часть, $350 × 12 000 = 4,2 млн — из сумов
+    # $300 плана в долларах покрывают часть, $100 × 12 000 = 1,2 млн — из сумов
     assert dollars.per_day_plan == 0
     assert sums.per_day_plan == pytest.approx(3_400_000 / 17)
 

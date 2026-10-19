@@ -225,9 +225,9 @@ def test_a_new_article_already_in_the_tab_is_a_conflict() -> None:
 
 def test_cents_of_a_currency_row_reach_the_sheet() -> None:
     sheets = sheets_with()
-    rows = [{"key": "квартплата|USD", "base": 500, "plan": "650.5"}]
+    rows = [{"key": "квартплата|USD", "base": 500, "plan": "600.5"}]
     assert post_plan(plan_app(sheets), change(rows=rows)).status_code == 200
-    assert sheets.writes[0][0]["values"] == [[-650.5]]
+    assert sheets.writes[0][0]["values"] == [[-600.5]]
 
 
 def test_events_and_goal_are_saved() -> None:
@@ -256,7 +256,7 @@ def test_events_and_goal_are_saved() -> None:
                 "value": {
                     "name": "Квартплата",
                     "day": 18,
-                    "amount": "-650.5",
+                    "amount": "-600.5",
                     "currency": "USD",
                 },
             },
@@ -279,7 +279,7 @@ def test_events_and_goal_are_saved() -> None:
         "received_on": None,
         "status": ANY,
     }
-    assert fresh["events"][1]["amount"] == -650.5
+    assert fresh["events"][1]["amount"] == -600.5
     assert fresh["goal"] == {"amount": 2_000_000, "currency": "UZS"}
     assert fresh["saved"] == 3
 

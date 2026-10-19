@@ -17,10 +17,10 @@ SOURCES = ["VISA 9090 UZS", "UZCARD 5656 UZS", "HUMO 7007 UZS", "VISA 3434 USD"]
 
 # Как вернёт Gemini для главного экрана банка (выдуманные остатки)
 SCREEN = [
-    {"card": "3434", "balance": 2474.85, "currency": "USD", "name": "VISA USD"},
-    {"card": "•• 5656", "balance": 253324.14, "currency": "UZS", "name": "Uzcard"},
-    {"card": "7007", "balance": 256724.71, "currency": "UZS", "name": "Humo"},
-    {"card": "9090", "balance": 11251471, "currency": "UZS", "name": "VISA UZS"},
+    {"card": "3434", "balance": 3333.33, "currency": "USD", "name": "VISA USD"},
+    {"card": "•• 5656", "balance": 444444.14, "currency": "UZS", "name": "Uzcard"},
+    {"card": "7007", "balance": 555555.71, "currency": "UZS", "name": "Humo"},
+    {"card": "9090", "balance": 7700000, "currency": "UZS", "name": "VISA UZS"},
     {"card": "1357", "balance": None, "currency": "UZS", "name": "скрыт"},
     {"card": "7777", "balance": 1000, "currency": "UZS", "name": "новая"},
 ]
@@ -30,10 +30,10 @@ def test_cards_are_matched_by_last_digits() -> None:
     items = [*SCREEN, {"card": "9090", "balance": 5, "currency": "USD"}]
     matched = balances.match_cards(items, SOURCES, frozenset({"7777"}))
     assert [(b.source, b.balance) for b in matched.balances] == [
-        ("VISA 3434 USD", 2474.85),
-        ("UZCARD 5656 UZS", 253324.14),
-        ("HUMO 7007 UZS", 256724.71),
-        ("VISA 9090 UZS", 11251471.0),
+        ("VISA 3434 USD", 3333.33),
+        ("UZCARD 5656 UZS", 444444.14),
+        ("HUMO 7007 UZS", 555555.71),
+        ("VISA 9090 UZS", 7700000.0),
     ]
     assert matched.unknown_cards == []  # 7777 в списке исключений, 1357 скрыта
     assert matched.wrong_currency == []  # повтор карты 9090 не учитывается
@@ -94,10 +94,10 @@ def chat(
 
 
 TABLE = {
-    "VISA 9090 UZS": 11783733.72,  # в таблице больше: не записаны траты
-    "UZCARD 5656 UZS": 253000.14,  # в таблице меньше
-    "HUMO 7007 UZS": 256724.71,
-    "VISA 3434 USD": 2474.86,  # цент разницы — сходится
+    "VISA 9090 UZS": 8255555.72,  # в таблице больше: не записаны траты
+    "UZCARD 5656 UZS": 444000.14,  # в таблице меньше
+    "HUMO 7007 UZS": 555555.71,
+    "VISA 3434 USD": 3333.34,  # цент разницы — сходится
 }
 
 
@@ -112,30 +112,30 @@ async def test_screen_balances_are_written_and_compared() -> None:
     await balances.report_screen_balances(update, context, SCREEN)
 
     assert sheets.written == {
-        "VISA 3434 USD": 2474.85,
-        "UZCARD 5656 UZS": 253324.14,
-        "HUMO 7007 UZS": 256724.71,
-        "VISA 9090 UZS": 11251471.0,
+        "VISA 3434 USD": 3333.33,
+        "UZCARD 5656 UZS": 444444.14,
+        "HUMO 7007 UZS": 555555.71,
+        "VISA 9090 UZS": 7700000.0,
     }
     assert isinstance(sheets.checked_at, datetime)  # «Сверено»: время отправки
     [report] = update.sent
     lines = report.text.splitlines()
     assert lines[0].startswith("💳 Остатки банка на ")
-    assert "✅ VISA 3434 USD: 2 474.85 — сходится" in lines
-    assert "✅ HUMO 7007 UZS: 256 725 — сходится" in lines
+    assert "✅ VISA 3434 USD: 3 333.33 — сходится" in lines
+    assert "✅ HUMO 7007 UZS: 555 556 — сходится" in lines
     assert (
-        "⚠️ VISA 9090 UZS: банк 11 251 471, в таблице 11 783 734 — в таблице больше на 532 263"
+        "⚠️ VISA 9090 UZS: банк 7 700 000, в таблице 8 255 556 — в таблице больше на 555 556"
         in lines
     )
     assert (
-        "⚠️ UZCARD 5656 UZS: банк 253 324, в таблице 253 000 — в таблице меньше на 324"
+        "⚠️ UZCARD 5656 UZS: банк 444 444, в таблице 444 000 — в таблице меньше на 444"
         in lines
     )
     assert "ℹ️ Карты 7777 нет в таблице (лист system, колонка F)" in lines
     buttons = [row[0] for row in report.reply_markup.inline_keyboard]
     assert [(b.text, b.callback_data) for b in buttons] == [
-        ("Выровнять UZCARD 5656 UZS: +324", "align:UZCARD 5656 UZS"),
-        ("Выровнять VISA 9090 UZS: −532 263", "align:VISA 9090 UZS"),
+        ("Выровнять UZCARD 5656 UZS: +444", "align:UZCARD 5656 UZS"),
+        ("Выровнять VISA 9090 UZS: −555 556", "align:VISA 9090 UZS"),
     ]
     assert {b.style for b in buttons} == {"primary"}
     assert set(context.user_data[balances.PENDING]) == {
@@ -168,7 +168,7 @@ async def test_align_uses_the_difference_at_press_time() -> None:
     update, context, sheets = chat(TABLE)
     await balances.report_screen_balances(update, context, SCREEN)
     keyboard = update.sent[0].reply_markup
-    sheets.table["VISA 9090 UZS"] = 11300000  # после скрина записали SMS на 483 734
+    sheets.table["VISA 9090 UZS"] = 7750000  # после скрина записали SMS на 505 556
 
     pressed = press(context, "align:VISA 9090 UZS", keyboard)
     await balances.align_button(pressed, context)
@@ -177,14 +177,14 @@ async def test_align_uses_the_difference_at_press_time() -> None:
     assert row[1:4] == [
         "🚧 РАЗНОЕ",
         "неучтенка",
-        48529.0,
+        50000.0,
     ]  # расход: банк меньше таблицы
-    assert row[5].startswith("AI: выравнивание к остатку банка 11 251 471 (")
+    assert row[5].startswith("AI: выравнивание к остатку банка 7 700 000 (")
     assert row[6:] == ["UZS", "VISA 9090 UZS"]
     assert context.user_data[LAST_WRITE]["first"] == 4190  # /undo сработает
     reply = pressed.callback_query.message.reply_text.await_args.args[0]
     assert reply.startswith(
-        "✅ VISA 9090 UZS: добавил выравнивание 48 529 (строка 4190)"
+        "✅ VISA 9090 UZS: добавил выравнивание 50 000 (строка 4190)"
     )
     [rest] = pressed.callback_query.edit_message_reply_markup.await_args.args
     assert [r[0].callback_data for r in rest.inline_keyboard] == [
@@ -194,13 +194,13 @@ async def test_align_uses_the_difference_at_press_time() -> None:
     # таблица меньше банка → выравнивание приходом (минус в колонке D)
     pressed = press(context, "align:UZCARD 5656 UZS", rest)
     await balances.align_button(pressed, context)
-    assert sheets.appended[-1][3] == -324.0
+    assert sheets.appended[-1][3] == -444.0
 
 
 async def test_align_when_already_equal_or_stale() -> None:
     update, context, sheets = chat(TABLE)
     await balances.report_screen_balances(update, context, SCREEN)
-    sheets.table["VISA 9090 UZS"] = 11251471  # SMS всё дописали
+    sheets.table["VISA 9090 UZS"] = 7700000  # SMS всё дописали
     pressed = press(context, "align:VISA 9090 UZS", update.sent[0].reply_markup)
     await balances.align_button(pressed, context)
     assert sheets.appended == []

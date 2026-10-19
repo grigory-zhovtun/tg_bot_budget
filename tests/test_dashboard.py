@@ -58,7 +58,7 @@ def test_groups_sum_their_lines_in_sheet_order() -> None:
     found = build_dashboard(frame(), tab(inventory_fact=600_000), TODAY, RATES, "USD")
     assert [(g.name, g.plan, g.fact) for g in found.groups] == [
         ("🍔 ЕДА", 2_600_000, 0),
-        ("🏚️ ДОМ", 8_300_000, 600_000),
+        ("🏚️ ДОМ", 5_300_000, 600_000),
     ]
     assert [line.subcategory for line in found.groups[1].items] == [
         "инвентарь",
@@ -94,11 +94,11 @@ def test_subscription_states_follow_this_month() -> None:
         history(*CLAUDE, *APPLE, *RENDER, *GOOGLE_ONE, *OLD, *gym), date(2026, 10, 10)
     )
     assert {(s.name, round(s.uzs)): s.state for s in found} == {
-        ("Render.com", 378_560): "charged",
-        ("Anthropic* Claude SUB", 1_416_480): "twice",
-        ("Apple.com/bill", 41_165): "charged",
-        ("Apple.com/bill", 165_712): "expected",
-        ("Google *google One", 235_882): "expected",
+        ("Render.com", 360_000): "charged",
+        ("Anthropic* Claude SUB", 1_333_320): "twice",
+        ("Apple.com/bill", 40_000): "charged",
+        ("Apple.com/bill", 150_000): "expected",
+        ("Google *google One", 240_000): "expected",
         ("Fitness Club", 300_000): "missed",
     }  # отменённая подписка (последнее списание > 40 дней) не показывается
 
@@ -242,13 +242,13 @@ def test_categories_join_the_tab_plan_with_this_months_fact_rows() -> None:
     )
     # от больших трат к меньшим; внутри группы — так же, без трат — по плану
     assert [(c.name, c.plan, c.fact) for c in found.categories] == [
-        ("🏚️ ДОМ", 8_300_000, 600_000),
+        ("🏚️ ДОМ", 5_300_000, 600_000),
         ("🍔 ЕДА", 2_600_000, 400_000),
         ("🚌 ТРАНСПОРТ", 0, 50_000),
     ]
     assert [(i.subcategory, i.plan, i.fact) for i in found.categories[0].items] == [
         ("инвентарь", 500_000, 600_000),
-        ("квартплата", 7_800_000, 0),
+        ("квартплата", 4_800_000, 0),
     ]
 
 
@@ -256,7 +256,7 @@ def test_a_planned_group_without_spending_stays_at_the_end() -> None:
     found = build_dashboard(frame(CAFE), tab(), TODAY, RATES, "USD")
     assert [(c.name, c.plan, c.fact) for c in found.categories] == [
         ("🍔 ЕДА", 2_600_000, 400_000),
-        ("🏚️ ДОМ", 8_300_000, 0),
+        ("🏚️ ДОМ", 5_300_000, 0),
     ]
 
 

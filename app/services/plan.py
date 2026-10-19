@@ -526,7 +526,7 @@ NOTE_LINES = 10  # дальше — «… и ещё N»
 
 
 def _plain(value: float) -> str:
-    """«1 500 000», «650,50»: копейки, только если они есть."""
+    """«1 500 000», «600,50»: копейки, только если они есть."""
     if float(value).is_integer():
         return money(value)
     return f"{value:,.2f}".replace(",", " ").replace(".", ",")

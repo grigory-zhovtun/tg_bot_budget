@@ -57,7 +57,7 @@ RATES = Rates({"UZS": 1.0, "USD": 12000.0, "RUB": 150.0})
         ("1,500", 1500.0),
         ("12,5", 12.5),
         ("$50", 50.0),
-        ("12.21 USD", 12.21),
+        ("11.11 USD", 11.11),
         ("abc", None),
         (None, None),
         (True, None),
@@ -70,7 +70,7 @@ def test_parse_number(raw: object, expected: float | None) -> None:
 def test_parsed_transaction_coerces_fields() -> None:
     parsed = ParsedTransaction.model_validate(
         {
-            "amount": "-41 845,10",
+            "amount": "-12 345,60",
             "currency": "sum",
             "direction": "Refund",
             "balance": "1,234,567.89",
@@ -78,7 +78,7 @@ def test_parsed_transaction_coerces_fields() -> None:
             "unknown_field": 1,
         }
     )
-    assert parsed.amount == 41845.1
+    assert parsed.amount == 12345.6
     assert parsed.currency == "UZS"
     assert parsed.direction is Direction.REFUND
     assert parsed.balance == 1234567.89
@@ -100,7 +100,7 @@ def test_unknown_direction_means_expense() -> None:
 @pytest.mark.parametrize(
     ("amount", "src", "dst", "expected"),
     [
-        (12.21, "USD", "UZS", 146520.0),
+        (11.11, "USD", "UZS", 133320.0),
         (150000, "UZS", "USD", 12.5),
         (100, "RUB", "USD", 1.25),
         (5, "UZS", "UZS", 5),
@@ -197,7 +197,7 @@ def build(**fields: object) -> SheetRow | Skipped:
 
 def test_usd_purchase_on_uzs_card_is_converted() -> None:
     row = build(
-        amount=12.21,
+        amount=11.11,
         currency="USD",
         source="*9090",
         category="🌛 ЕЖЕМЕСЯЧНО",
@@ -206,8 +206,8 @@ def test_usd_purchase_on_uzs_card_is_converted() -> None:
         date="05.01.2026",
     )
     assert isinstance(row, SheetRow)
-    assert (row.amount, row.currency, row.source) == (146520.0, "UZS", "VISA 9090 UZS")
-    assert row.comment == "JetBrains; ≈ 12.21 USD по курсу таблицы"
+    assert (row.amount, row.currency, row.source) == (133320.0, "UZS", "VISA 9090 UZS")
+    assert row.comment == "JetBrains; ≈ 11.11 USD по курсу таблицы"
     assert row.date_text == "05.01.2026"
 
 
@@ -232,14 +232,14 @@ def test_incoming_transfer_gets_minus() -> None:
 
 def test_salary_stays_positive() -> None:
     row = build(
-        amount=33385000,
+        amount=25000000,
         source="VISA 9090 UZS",
         category="ДОХОДЫ",
         subcategory="зарплата",
         direction="income",
     )
     assert isinstance(row, SheetRow)
-    assert (row.category, row.amount) == ("💰 ДОХОДЫ", 33385000)
+    assert (row.category, row.amount) == ("💰 ДОХОДЫ", 25000000)
 
 
 def test_unknown_category_goes_to_misc_with_note() -> None:

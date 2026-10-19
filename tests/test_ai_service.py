@@ -423,8 +423,8 @@ class HistorySheets(FakeSheets):
         self.reads += 1
         return [
             HEADER,
-            ["01.03.2026", "🚧 РАЗНОЕ", "неучтенка", 670000, "", "AI: Showpro"],
-            ["27.08.2026", "⛱️ ОТДЫХ", "развлечения", 2660000, "", "AI: Showpro"],
+            ["01.03.2026", "🚧 РАЗНОЕ", "неучтенка", 500000, "", "AI: Showpro"],
+            ["27.08.2026", "⛱️ ОТДЫХ", "развлечения", 2000000, "", "AI: Showpro"],
             ["01.09.2026", "🚧 РАЗНОЕ", "неучтенка", 1, "", "AI: Toredo Solutions"],
         ]
 
@@ -527,7 +527,7 @@ def test_mixed_merchants_get_no_hint_and_marketplaces_a_rule() -> None:
 async def test_screenshot_is_classified_in_the_same_call() -> None:
     answer = {
         "kind": "balances",
-        "balances": [{"card": "9090", "balance": 11251471, "currency": "UZS"}],
+        "balances": [{"card": "9090", "balance": 7700000, "currency": "UZS"}],
         "transactions": [{"amount": 189, "direction": "expense", "comment": "Shavi"}],
     }
     service, models, _ = make_service(json.dumps(answer))

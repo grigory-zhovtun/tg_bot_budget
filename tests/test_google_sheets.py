@@ -168,10 +168,10 @@ def test_update_balances_writes_known_sources_in_one_call(
 ) -> None:
     ws = FakeWorksheet(cells=[["VISA 9090 UZS"], ["VISA 7878 RUB"]])
     service = make_service(ws)
-    updated = service.update_balances({"VISA 7878 RUB": 3595.38, "CASH UZS": 10.0})
+    updated = service.update_balances({"VISA 7878 RUB": 2345.67, "CASH UZS": 10.0})
     assert updated == ["VISA 7878 RUB"]
     [body] = service.sheet.values_batch
-    assert body["data"] == [{"range": "fact!N3", "values": [[3595.38]]}]
+    assert body["data"] == [{"range": "fact!N3", "values": [[2345.67]]}]
     assert "CASH UZS" in caplog.text
 
 
@@ -244,12 +244,12 @@ def test_statement_marks_are_written_next_to_their_cards(
 
 def test_fact_amounts_are_updated_with_raw_values() -> None:
     service = make_service(FakeWorksheet())
-    service.update_fact_amounts([(4100, 9.51, "AI: Cafe; сумма по выписке")])
+    service.update_fact_amounts([(4100, 7.77, "AI: Cafe; сумма по выписке")])
     [body] = service.sheet.values_batch
     assert body == {
         "valueInputOption": "RAW",
         "data": [
-            {"range": "fact!D4100", "values": [[9.51]]},
+            {"range": "fact!D4100", "values": [[7.77]]},
             {"range": "fact!F4100", "values": [["AI: Cafe; сумма по выписке"]]},
         ],
     }
@@ -285,16 +285,16 @@ def test_table_balances() -> None:
     ws = RangeWorksheet(
         {
             "I2:J30": [
-                ["VISA 9090 UZS", 14982569.45],
+                ["VISA 9090 UZS", 9876543.21],
                 ["UZCARD 5656 UZS", ""],
                 [],
-                ["VISA 3434 USD", 1273.5],
+                ["VISA 3434 USD", 1200.5],
             ]
         }
     )
     assert make_service(ws).get_table_balances() == {
-        "VISA 9090 UZS": 14982569.45,
-        "VISA 3434 USD": 1273.5,
+        "VISA 9090 UZS": 9876543.21,
+        "VISA 3434 USD": 1200.5,
     }
 
 
@@ -381,11 +381,11 @@ def test_balances_get_a_check_stamp_next_to_the_card() -> None:
     ws = FakeWorksheet(cells=[["VISA 9090 UZS"], ["UZCARD 5656 UZS"]])
     service = make_service(ws)
     service.update_balances(
-        {"UZCARD 5656 UZS": 253324.14}, datetime(2026, 10, 9, 11, 41)
+        {"UZCARD 5656 UZS": 444444.14}, datetime(2026, 10, 9, 11, 41)
     )
     [body] = service.sheet.values_batch
     assert body["data"] == [
-        {"range": "fact!N3", "values": [[253324.14]]},
+        {"range": "fact!N3", "values": [[444444.14]]},
         {"range": "fact!Q1", "values": [["Сверено"]]},
         {"range": "fact!Q3", "values": [["09.10.2026 11:41"]]},
     ]

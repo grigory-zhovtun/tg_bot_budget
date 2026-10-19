@@ -68,7 +68,7 @@ def test_service_reads_the_month_tab_and_the_fact() -> None:
         ("USD", 1000),
     ]
     assert [event.name for event in found.currencies[0].events] == ["Аванс", "ЗП"]
-    # квартплата 7,8 млн запланирована в сумах, а платится из списка долларами:
+    # квартплата 4,8 млн запланирована в сумах, а платится из списка долларами:
     # по дням в сумах — только кафе 2,6 и инвентарь 0,5 млн, как во вкладке
     assert found.currencies[0].per_day_plan == pytest.approx(3_100_000 / 30)
     missing = AnalyticsService(Sheets({"fact": fact}))

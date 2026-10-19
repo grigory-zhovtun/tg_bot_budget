@@ -204,7 +204,7 @@ async def test_sms_in_usd_on_uzs_card_is_converted_and_balance_updated() -> None
     ai = FakeAI(
         [
             {
-                "amount": 12.21,
+                "amount": 11.11,
                 "currency": "USD",
                 "source": "*9090",
                 "category": "🌛 ЕЖЕМЕСЯЧНО",
@@ -217,13 +217,13 @@ async def test_sms_in_usd_on_uzs_card_is_converted_and_balance_updated() -> None
             }
         ]
     )
-    update, context, sheets = make_chat("Pokupka JetBrains 12.21 USD", {}, ai)
+    update, context, sheets = make_chat("Pokupka JetBrains 11.11 USD", {}, ai)
     await messages.text_handler(update, context)
 
     [row] = sheets.rows
     assert row[0] == "05.10.2026"
-    assert row[3] == 146520.0
-    assert row[5] == "JetBrains; ≈ 12.21 USD по курсу таблицы"
+    assert row[3] == 133320.0
+    assert row[5] == "JetBrains; ≈ 11.11 USD по курсу таблицы"
     assert row[6:] == ["UZS", "VISA 9090 UZS"]
     assert sheets.cells == {"fact!N2": 15000000.5}
     assert "💳 15 000 000" in summary(update)

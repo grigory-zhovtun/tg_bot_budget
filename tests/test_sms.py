@@ -14,7 +14,7 @@ PURCHASE = (
     '"14-10-2026 12:33". Dostupno: 5000000.00, UZS.'
 )
 USD_ON_UZS = (
-    'Karta *9090. Xarid/Pokupka "GOOGLE *Google One>8", -19.99, USD, '
+    'Karta *9090. Xarid/Pokupka "GOOGLE *Google One>8", -12.34, USD, '
     '"13-10-2026 12:44". Dostupno: 4000000.00, UZS.'
 )
 QR = (
@@ -99,7 +99,7 @@ def test_kapital_purchase() -> None:
 
 def test_amount_in_another_currency_keeps_its_currency() -> None:
     sms = only(USD_ON_UZS)
-    assert (sms.amount, sms.currency, sms.balance_currency) == (19.99, "USD", "UZS")
+    assert (sms.amount, sms.currency, sms.balance_currency) == (12.34, "USD", "UZS")
 
 
 def test_cancelled_purchase_is_money_back_even_without_a_space() -> None:

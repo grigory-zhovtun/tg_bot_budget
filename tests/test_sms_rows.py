@@ -343,7 +343,7 @@ def test_amount_in_another_currency_is_left_for_conversion() -> None:
     book = MerchantBook([("🌛 ЕЖЕМЕСЯЧНО", "подписка", "GOOGLE *Google One")])
     [row], _ = rows_of(USD_ON_UZS, book=book)
     assert (row.item["amount"], row.item["currency"], row.item["source"]) == (
-        19.99,
+        12.34,
         "USD",
         "VISA 9090 UZS",
     )
