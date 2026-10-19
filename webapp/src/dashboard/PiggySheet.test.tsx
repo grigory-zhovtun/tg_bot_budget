@@ -270,11 +270,13 @@ describe("PiggySheet", () => {
     await user.type(screen.getByLabelText("Название"), "Новый год");
     await keys(user, "5", "000");
     await user.click(screen.getByRole("button", { name: "Создать" }));
-    expect(
-      await screen.findByText(
-        "Срок — не раньше сегодня и не дальше чем через 5 лет",
-      ),
-    ).toBeTruthy();
+    const under = await screen.findByText(
+      "Срок — не раньше сегодня и не дальше чем через 5 лет",
+    );
+    // отказ читается так же крупно, как всё окно
+    expect(under.className).toContain("text-line");
+    expect(under.className).toContain("font-bold");
+    expect(under.className).not.toContain("text-sm");
   });
 
   it("sends one request when «Создать» is tapped twice", async () => {

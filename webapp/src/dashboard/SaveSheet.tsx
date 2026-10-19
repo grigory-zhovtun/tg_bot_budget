@@ -7,13 +7,13 @@ import {
   type SavingsScreen,
 } from "../api";
 import { amountValue, apiAmount } from "../entry/amount";
-import { FieldError, cardCurrencies } from "../fields";
+import { cardCurrencies } from "../fields";
 import { money, moneyText } from "../format";
 import AmountPad from "../plan/AmountPad";
 import { amountText } from "../plan/draft";
 import Sheet from "../plan/Sheet";
 import { Line, Table } from "./blocks";
-import { bigSegment } from "./controls";
+import { BigFieldError, bigSegment } from "./controls";
 
 interface Props {
   api: Api;
@@ -143,7 +143,7 @@ export default function SaveSheet({
         </div>
       )}
       <AmountPad text={text} currency={currency} onChange={setText} />
-      <FieldError text={fields.amount ?? fields.currency} />
+      <BigFieldError text={fields.amount ?? fields.currency} />
       {rows.length > 0 && (
         <Table
           label="Куда ляжет"

@@ -22,3 +22,10 @@ export function bigSegment(on: boolean): string {
     on ? "bg-bg font-extrabold shadow-sm" : "font-semibold text-text"
   }`;
 }
+
+/** Отказ сервера под полем — 17 px жирно, как остальные строки окна. */
+export function BigFieldError({ text }: { text: string | undefined }) {
+  return text ? (
+    <p className="text-line font-bold text-danger">{text}</p>
+  ) : null;
+}

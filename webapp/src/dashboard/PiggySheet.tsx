@@ -9,13 +9,19 @@ import {
   type SavingsScreen,
 } from "../api";
 import { amountValue, apiAmount } from "../entry/amount";
-import { FieldError, cardCurrencies } from "../fields";
+import { cardCurrencies } from "../fields";
 import { moneyText, shiftDay } from "../format";
 import { CLOSED_GROUPS, groupTitle } from "../forecast/records";
 import AmountPad from "../plan/AmountPad";
 import { amountText } from "../plan/draft";
 import Sheet from "../plan/Sheet";
-import { BIG_FIELD, BIG_LABEL, bigChip, bigSegment } from "./controls";
+import {
+  BIG_FIELD,
+  BIG_LABEL,
+  BigFieldError,
+  bigChip,
+  bigSegment,
+} from "./controls";
 import { MONTH_NAMES, MONTHS_FROM, MONTHS_IN, monthIndex } from "./piggyText";
 
 const NEW_DEADLINE_DAYS = 60; // срок новой копилки по умолчанию — через два месяца
@@ -197,7 +203,7 @@ export default function PiggySheet({
           currency={piggy.currency}
           onChange={setMoveText}
         />
-        <FieldError text={fields.amount} />
+        <BigFieldError text={fields.amount} />
         {error && (
           <p className="text-line font-bold text-danger" role="alert">
             {error}
@@ -239,7 +245,7 @@ export default function PiggySheet({
           onChange={(change) => setName(change.target.value)}
         />
       </label>
-      <FieldError text={fields.name} />
+      <BigFieldError text={fields.name} />
       <div className="flex items-center justify-between gap-2">
         <span className={BIG_LABEL}>Цель</span>
         {currencies.length > 1 && (
@@ -266,7 +272,7 @@ export default function PiggySheet({
           </div>
         )}
       </div>
-      <FieldError text={fields.currency} />
+      <BigFieldError text={fields.currency} />
       {deadline === null && (
         <button
           type="button"
@@ -280,7 +286,7 @@ export default function PiggySheet({
       {!noTarget && (
         <AmountPad text={text} currency={currency} onChange={setText} />
       )}
-      <FieldError text={fields.target} />
+      <BigFieldError text={fields.target} />
       <span className={BIG_LABEL}>Срок</span>
       {deadline !== null && (
         <input
@@ -310,7 +316,7 @@ export default function PiggySheet({
       >
         Без срока
       </button>
-      <FieldError text={fields.deadline} />
+      <BigFieldError text={fields.deadline} />
       {deadline !== null && <span className={BIG_LABEL}>Повтор</span>}
       {deadline !== null && (
         <div
@@ -332,7 +338,7 @@ export default function PiggySheet({
           ))}
         </div>
       )}
-      <FieldError text={fields.repeat} />
+      <BigFieldError text={fields.repeat} />
       <span className={BIG_LABEL}>Статья трат</span>
       <div
         className="flex flex-wrap gap-1.5"
@@ -365,7 +371,7 @@ export default function PiggySheet({
           </button>
         ))}
       </div>
-      <FieldError text={fields.group} />
+      <BigFieldError text={fields.group} />
       {chosen && (
         <div
           className="flex flex-wrap gap-1.5"
@@ -385,7 +391,7 @@ export default function PiggySheet({
           ))}
         </div>
       )}
-      <FieldError text={fields.subcategory} />
+      <BigFieldError text={fields.subcategory} />
       {hint && <p className="text-line font-bold">{hint}</p>}
       {error && (
         <p className="text-line font-bold text-danger" role="alert">

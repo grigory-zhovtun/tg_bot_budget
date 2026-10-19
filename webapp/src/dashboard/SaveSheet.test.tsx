@@ -2,7 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { bootstrapFixture, savingsFixture } from "../mocks/fixtures";
-import type { SavingsScreen } from "../api";
+import { ApiError, type Api, type SavingsScreen } from "../api";
 import { fakeApi } from "../test/fakeApi";
 import { nb } from "../test/text";
 import SaveSheet from "./SaveSheet";
@@ -87,6 +87,29 @@ describe("SaveSheet", () => {
     const write = screen.getByRole("button", { name: "Записать" });
     expect(write.className).toContain("text-lg");
     expect(write.className).toContain("font-extrabold");
+  });
+
+  it("writes the server's refusal under the sum big", async () => {
+    const savePiggies = vi.fn<Api["savePiggies"]>().mockRejectedValue(
+      new ApiError(422, "validation", "Проверьте введённые данные", {
+        amount: "Сумма больше, чем можно отложить",
+      }),
+    );
+    const user = userEvent.setup();
+    render(
+      <SaveSheet
+        api={fakeApi({ savePiggies })}
+        boot={bootstrapFixture}
+        data={savingsFixture}
+        onSaved={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Записать" }));
+    const under = await screen.findByText("Сумма больше, чем можно отложить");
+    expect(under.className).toContain("text-line");
+    expect(under.className).toContain("font-bold");
+    expect(under.className).not.toContain("text-sm");
   });
 
   it("writes the currencies in the text colour, not pale", () => {
