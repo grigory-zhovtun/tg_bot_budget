@@ -115,15 +115,22 @@ export default function OrderSheet({
           return (
             <li
               key={id}
-              className="flex flex-col gap-1 rounded-2xl bg-section p-3 text-line"
+              className="flex items-center gap-3 rounded-2xl bg-section p-3 text-line"
             >
-              <div className="flex items-center gap-3">
-                <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full bg-text text-line font-black text-bg">
-                  {index + 1}
-                </span>
-                <h4 className="min-w-0 flex-1 text-fact font-extrabold">
-                  {piggy.name}
-                </h4>
+              {/* стрелки — столбиком справа: строкам прогноза остаётся почти вся ширина */}
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-full bg-text text-line font-black text-bg">
+                    {index + 1}
+                  </span>
+                  <h4 className="min-w-0 text-fact font-extrabold break-words">
+                    {piggy.name}
+                  </h4>
+                </div>
+                <p>{will}</p>
+                <p>{of}</p>
+              </div>
+              <div className="flex flex-col gap-2">
                 <button
                   type="button"
                   aria-label={`Выше «${piggy.name}»`}
@@ -143,8 +150,6 @@ export default function OrderSheet({
                   ↓
                 </button>
               </div>
-              <p>{will}</p>
-              <p>{of}</p>
             </li>
           );
         })}

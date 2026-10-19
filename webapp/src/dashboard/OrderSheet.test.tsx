@@ -38,6 +38,7 @@ describe("OrderSheet", () => {
     ]);
     const name = within(list).getByRole("heading", { name: "Новый год" });
     expect(name.className).toContain("text-fact");
+    expect(name.className).toContain("break-words"); // длинное имя не вылезает
     const save = screen.getByRole("button", { name: "Сохранить порядок" });
     expect(save.className).toContain("text-lg");
     expect(save.className).toContain("font-extrabold");

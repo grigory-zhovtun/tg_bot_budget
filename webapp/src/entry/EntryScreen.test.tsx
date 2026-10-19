@@ -410,6 +410,12 @@ describe("EntryScreen", () => {
       name: "🍔 ЕДА · ☕ кофе",
     });
     expect(title.className).toContain("text-fact");
+    // длинная пара переносится только между группой и подкатегорией
+    expect(
+      [...title.querySelectorAll(".whitespace-nowrap")].map(
+        (part) => part.textContent,
+      ),
+    ).toEqual(["🍔 ЕДА", "☕ кофе"]);
     const amount = screen.getByText("48 000");
     expect(amount.className).toContain("text-big");
     expect(amount.className).not.toContain("text-big-long");

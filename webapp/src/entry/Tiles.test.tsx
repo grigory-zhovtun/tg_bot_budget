@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { bootstrapFixture, dashboardFixture } from "../mocks/fixtures";
 import type { WebApp } from "../telegram";
 import { planIndex } from "./plan";
-import { GroupTiles } from "./Tiles";
+import { GroupTiles, SubTiles } from "./Tiles";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -55,6 +55,32 @@ describe("tiles", () => {
     // ЕДА: перерасход — со знаком
     expect(screen.getByText("⚠️ сверх на")).toBeTruthy();
     expect(screen.getByText("300 000")).toBeTruthy();
+  });
+
+  it("breaks a word too long for half a tile instead of letting it out", () => {
+    render(
+      <SubTiles
+        group={{
+          name: "🎉 ПРАЗДНИК",
+          emoji: "🎉",
+          title: "ПРАЗДНИК",
+          subcategories: [
+            { name: "достопримечательности", icon: "🏛️" },
+            { name: "подарки друзьям", icon: "🎁" },
+          ],
+        }}
+        color="#7c5cff"
+        plan={planIndex(null)}
+        onPick={vi.fn()}
+      />,
+    );
+    // одно длинное слово — с дефисом; несколько слов переносятся по пробелам
+    const word = screen.getByText("достопримечательности");
+    expect(word.className).toContain("break-words");
+    expect(word.className).toContain("hyphens-auto");
+    const words = screen.getByText("подарки друзьям");
+    expect(words.className).toContain("break-words");
+    expect(words.className).not.toContain("hyphens-auto");
   });
 
   it("writes the tile title big and bold", () => {

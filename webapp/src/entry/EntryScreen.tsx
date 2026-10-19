@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   ApiError,
   type Api,
@@ -40,11 +47,13 @@ interface Props {
   onCatalogChanged: () => void;
 }
 
+/** Заголовок шага: «🍔 ЕДА» или «🍔 ЕДА · ☕ кофе»; длинная пара переносится
+ * только между частями. */
 function Header({
-  title,
+  parts,
   onBack,
 }: {
-  title: string;
+  parts: string[];
   onBack: (() => void) | null;
 }) {
   return (
@@ -58,7 +67,14 @@ function Header({
           ← Назад
         </button>
       )}
-      <h2 className="text-fact font-extrabold">{title}</h2>
+      <h2 className="text-fact font-extrabold">
+        {parts.map((part, index) => (
+          <Fragment key={part}>
+            {index > 0 && " · "}
+            <span className="whitespace-nowrap">{part}</span>
+          </Fragment>
+        ))}
+      </h2>
     </div>
   );
 }
@@ -313,7 +329,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
       )}
       {step === "sub" && group && (
         <>
-          <Header title={group.name} onBack={tg ? null : back} />
+          <Header parts={[group.name]} onBack={tg ? null : back} />
           <SubTiles
             group={group}
             color={groupColor(
@@ -328,7 +344,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
       {step === "amount" && group && sub && (
         <div className="flex flex-col gap-3">
           <Header
-            title={`${group.name} · ${sub.icon} ${sub.name}`}
+            parts={[group.name, `${sub.icon} ${sub.name}`]}
             onBack={tg ? null : back}
           />
           <p
