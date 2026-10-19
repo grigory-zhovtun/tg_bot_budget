@@ -372,7 +372,7 @@ export default function EntryScreen({ api, boot, onCatalogChanged }: Props) {
           {!tg && (
             <button
               type="button"
-              className="h-14 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
+              className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
               disabled={value <= 0 || sending}
               onClick={submit}
             >

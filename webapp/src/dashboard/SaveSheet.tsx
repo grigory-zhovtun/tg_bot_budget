@@ -8,11 +8,11 @@ import {
 } from "../api";
 import { amountValue, apiAmount } from "../entry/amount";
 import { FieldError, cardCurrencies, segment } from "../fields";
-import { short } from "../format";
+import { money, moneyText } from "../format";
 import AmountPad from "../plan/AmountPad";
 import { amountText } from "../plan/draft";
 import Sheet from "../plan/Sheet";
-import { piggyMoney } from "./piggyText";
+import { Line, Table } from "./blocks";
 
 interface Props {
   api: Api;
@@ -58,7 +58,7 @@ function layout(
     const rate = data.rates[piggy.currency] ?? 1;
     return {
       name: piggy.name,
-      text: piggyMoney(
+      text: moneyText(
         piggy.currency === "UZS"
           ? Math.round(take)
           : Math.round((take / rate) * 100) / 100,
@@ -88,6 +88,9 @@ export default function SaveSheet({
   const inFlight = useRef(false);
   const uzs = amountValue(text) * (data.rates[currency] ?? 0);
   const { parts, rest } = layout(data, uzs);
+  const cushion = rest > 0.5;
+  const rows = parts.map((part) => [part.name, part.text]);
+  if (cushion) rows.push(["подушка", money(rest)]);
 
   function save() {
     if (inFlight.current) return;
@@ -140,23 +143,24 @@ export default function SaveSheet({
       )}
       <AmountPad text={text} currency={currency} onChange={setText} />
       <FieldError text={fields.amount ?? fields.currency} />
-      <ul className="flex flex-col gap-1 text-sm" aria-label="Куда ляжет">
-        {parts.map((part) => (
-          <li key={part.name}>{`«${part.name}» — ${part.text}`}</li>
-        ))}
-        {rest > 0.5 && (
-          <li>{`Подушке — ${short(rest)}, в журнал не пишется`}</li>
-        )}
-      </ul>
+      {rows.length > 0 && (
+        <Table
+          label="Куда ляжет"
+          head={["копилка", "сумма"]}
+          align="lr"
+          rows={rows}
+        />
+      )}
+      {cushion && <Line>подушка — в журнал не пишется</Line>}
       {error && (
-        <p className="text-sm text-danger" role="alert">
+        <p className="text-line font-bold text-danger" role="alert">
           {error}
         </p>
       )}
       <button
         type="button"
         disabled={amountValue(text) <= 0 || busy}
-        className="h-12 rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
+        className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
         onClick={save}
       >
         Записать

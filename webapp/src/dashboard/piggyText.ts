@@ -1,6 +1,6 @@
 /** Тексты «Накоплений»: суммы копилок, сроки, процент, «хватает ли». */
-import type { Enough, Piggy } from "../api";
-import { money, short } from "../format";
+import type { Piggy } from "../api";
+import { money, moneyText, short } from "../format";
 
 /** «В октябре отложить». */
 export const MONTHS_IN = [
@@ -52,17 +52,17 @@ export function dayMonth(deadline: string): string {
   return `${day}.${month}`;
 }
 
-/** «12,00 млн из 12,00 млн ✓», «2 000 $ из 2 500 $» — что копилка успеет к сроку. */
-export function forecastText(piggy: Piggy): string {
-  const money = (value: number) => piggyMoney(value, piggy.currency);
-  const head = `${money(piggy.forecast ?? 0)} из ${money(piggy.target ?? 0)}`;
-  return piggy.status === "short" ? head : `${head} ✓`;
-}
-
-/** «на жизнь остаётся …, обычные траты — …: не хватает …» или «…: хватает, запас …». */
-export function enoughText(enough: Enough): string {
-  const head = `на жизнь остаётся ${short(enough.life)}, обычные траты — ${short(enough.ordinary)}`;
-  return enough.gap < 0
-    ? `${head}: не хватает ${short(-enough.gap)}`
-    : `${head}: хватает, запас ${short(enough.gap)}`;
+/** Что копилка успеет к сроку, двумя строками: «будет 12 000 000» / «из 12 000 000 ✓»;
+ * не успевает — «⚠️ будет 2 000 $» / «из 2 500 $». when — «к 20.12» перед «будет». */
+export function forecastLines(
+  piggy: Piggy,
+  when = "",
+): { will: string; of: string } {
+  const sum = (value: number) => moneyText(value, piggy.currency);
+  const short = piggy.status === "short";
+  const head = `${short ? "⚠️ " : ""}${when ? `${when} ` : ""}`;
+  return {
+    will: `${head}будет ${sum(piggy.forecast ?? 0)}`,
+    of: `из ${sum(piggy.target ?? 0)}${short ? "" : " ✓"}`,
+  };
 }

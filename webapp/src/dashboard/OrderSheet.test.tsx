@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiError, type Api } from "../api";
 import { savingsFixture } from "../mocks/fixtures";
 import { fakeApi } from "../test/fakeApi";
+import { nb } from "../test/text";
 import OrderSheet from "./OrderSheet";
 
 function names(): (string | null)[] {
@@ -14,6 +15,34 @@ function names(): (string | null)[] {
 }
 
 describe("OrderSheet", () => {
+  it("explains the order in two lines and shows each forecast", () => {
+    render(
+      <OrderSheet
+        api={fakeApi()}
+        data={savingsFixture}
+        onSaved={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("если на все сроки не хватает,")).toBeTruthy();
+    expect(screen.getByText("первой собирается копилка сверху")).toBeTruthy();
+    const list = screen.getByRole("list", { name: "Порядок важности" });
+    const rows = within(list).getAllByRole("listitem");
+    expect(
+      rows.map((row) =>
+        [...row.querySelectorAll("p")].map((line) => line.textContent),
+      ),
+    ).toEqual([
+      [nb("к 20.12 будет 12 000 000"), nb("из 12 000 000 ✓")],
+      [nb("⚠️ к 01.06 будет 2 000 $"), nb("из 2 500 $")],
+    ]);
+    const name = within(list).getByRole("heading", { name: "Новый год" });
+    expect(name.className).toContain("text-fact");
+    const save = screen.getByRole("button", { name: "Сохранить порядок" });
+    expect(save.className).toContain("text-lg");
+    expect(save.className).toContain("font-extrabold");
+  });
+
   it("moves a piggy up and previews the order", async () => {
     const api = fakeApi();
     const user = userEvent.setup();
