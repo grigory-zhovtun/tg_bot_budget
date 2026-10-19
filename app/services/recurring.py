@@ -19,6 +19,7 @@ from typing import Protocol
 
 import pandas as pd
 
+from app.rich import NBSP, heading, in_currency, para, whole
 from app.services.analytics_service import MONTHS_RU, expenses, money
 from app.services.day_budget import MONTHS_PREPOSITIONAL, short
 from app.services.receipts import PAYMENT_TOLERANCE
@@ -220,6 +221,30 @@ def format_subs(
     return "\n".join(lines)
 
 
+def _due(series: list[Series], today: date) -> list[tuple[str, list[Series]]]:
+    """«Сегодня»/«Завтра» и подписки, которые в этот день спишутся."""
+    active = [s for s in series if not s.lapsed(today) and not s.charged_in(today)]
+    found = []
+    for label, day in (("Сегодня", today), ("Завтра", today + timedelta(days=1))):
+        if day.month != today.month:
+            continue
+        due = [s for s in active if s.expected_on(today) == day]
+        if due:
+            found.append((label, due))
+    return found
+
+
+def _twice(series: list[Series], today: date) -> list[tuple[Series, list[Charge]]]:
+    """Подписки, списанные вчера второй раз за месяц."""
+    yesterday = today - timedelta(days=1)
+    found = []
+    for s in series:
+        this_month = s.charged_in(today)
+        if len(this_month) >= 2 and this_month[-1].day == yesterday:
+            found.append((s, this_month))
+    return found
+
+
 def morning_lines(series: list[Series], today: date) -> list[str]:
     """Для утреннего сообщения: что спишется сегодня и завтра, второе списание вчера."""
 
@@ -228,22 +253,38 @@ def morning_lines(series: list[Series], today: date) -> list[str]:
             return f"≈ {money(s.last.uzs)}"
         return f"≈ {_amount(s.last).split(' ≈ ')[0]} ({short(s.last.uzs)})"
 
-    active = [s for s in series if not s.lapsed(today) and not s.charged_in(today)]
-    lines = []
-    tomorrow = today + timedelta(days=1)
-    for label, day in (("Сегодня", today), ("Завтра", tomorrow)):
-        if day.month != today.month:
-            continue
-        due = [s for s in active if s.expected_on(today) == day]
-        if due:
-            items = " • ".join(f"{s.name} {amount(s)}" for s in due)
-            lines.append(f"🔁 {label} спишется: {items}")
-    yesterday = today - timedelta(days=1)
-    for s in series:
-        this_month = s.charged_in(today)
-        if len(this_month) >= 2 and this_month[-1].day == yesterday:
-            month = MONTHS_RU[today.month - 1]
-            lines.append(
-                f"⚠️ {s.name} списан второй раз за {month}: {_dates(this_month)}"
-            )
+    lines = [
+        f"🔁 {label} спишется: " + " • ".join(f"{s.name} {amount(s)}" for s in due)
+        for label, due in _due(series, today)
+    ]
+    month = MONTHS_RU[today.month - 1]
+    lines += [
+        f"⚠️ {s.name} списан второй раз за {month}: {_dates(this_month)}"
+        for s, this_month in _twice(series, today)
+    ]
     return lines
+
+
+def rich_morning_lines(series: list[Series], today: date) -> list[str]:
+    """Те же строки блоками: «🔁 … спишется» и второе списание — короткими строками."""
+
+    def amount(s: Series) -> str:
+        if s.last.currency == "UZS":
+            return f"≈{NBSP}{whole(s.last.uzs)}"
+        exact = in_currency(
+            s.last.amount,
+            s.last.currency,
+            with_cents=not float(s.last.amount).is_integer(),
+        )
+        return f"≈{NBSP}{exact} ({whole(s.last.uzs)})"
+
+    blocks = []
+    for label, due in _due(series, today):
+        lines = [f"{s.name}: {amount(s)}" for s in due]
+        blocks += [heading(f"🔁 {label} спишется"), para(*lines)]
+    month = MONTHS_RU[today.month - 1]
+    blocks += [
+        para(f"⚠️ {s.name} списан второй раз за {month}: {_dates(this_month)}")
+        for s, this_month in _twice(series, today)
+    ]
+    return blocks

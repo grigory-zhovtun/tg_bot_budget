@@ -9,6 +9,7 @@ from telegram.error import BadRequest, TelegramError
 
 from app import config
 from app.handlers import analytics, live, messages
+from app.rich import Report
 from app.services.analytics_service import AnalyticsService
 from app.services.day_budget import celebrate
 from tests.test_day_budget import FACT_HEADER, OPENING, Sheets, budget, fact_row, tab
@@ -124,7 +125,7 @@ async def test_morning_message_gets_the_party_effect(
 ) -> None:
     monkeypatch.setattr(config, "CELEBRATE_EFFECT_ID", "42")
     bot = SimpleNamespace(send_message=AsyncMock())
-    service = SimpleNamespace(morning_message=lambda: ("☀️", True))
+    service = SimpleNamespace(morning_message=lambda: (Report("☀️"), True))
     await analytics.send_morning_brief(bot, 7, service)
     bot.send_message.assert_awaited_once_with(7, "☀️", message_effect_id="42")
 
@@ -142,5 +143,5 @@ def test_service_tells_whether_to_celebrate() -> None:
         fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 50_000),
     ]
     service = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab()}))
-    text, party = service.morning_message(date(2026, 10, 2))
-    assert party is True and text.startswith("☀️ Пятница, 2 октября")
+    report, party = service.morning_message(date(2026, 10, 2))
+    assert party is True and report.text.startswith("☀️ Пятница, 2 октября")

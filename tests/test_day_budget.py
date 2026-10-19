@@ -10,6 +10,7 @@ from gspread.exceptions import WorksheetNotFound
 
 from app.domain import Rates
 from app.handlers import analytics
+from app.rich import Report
 from app.services.analytics_service import AnalyticsService, transactions_frame
 from app.services.calendar import HEADER as CALENDAR_HEADER
 from app.services.day_budget import (
@@ -281,15 +282,15 @@ def test_service_builds_the_message_from_the_sheet() -> None:
     service = AnalyticsService(
         Sheets({"fact": fact, "Oct 26": tab(inventory_fact=690_910)})
     )
-    assert service.morning_brief(date(2026, 10, 2)) == format_day_budget(
+    assert service.morning_brief(date(2026, 10, 2)).text == format_day_budget(
         budget(date(2026, 10, 2), OVERSPENT, inventory_fact=690_910)
     )
     no_block = [row[:14] for row in tab()]
     service = AnalyticsService(Sheets({"fact": fact, "Oct 26": no_block}))
-    text = service.morning_brief(date(2026, 10, 2))
+    text = service.morning_brief(date(2026, 10, 2)).text
     assert text.startswith("Во вкладке «Oct 26» нет списка поступлений и платежей")
     assert "📋 План-факт: октябрь 2026" in text
-    assert AnalyticsService(Sheets({})).morning_brief(date(2026, 11, 1)) == (
+    assert AnalyticsService(Sheets({})).morning_brief(date(2026, 11, 1)).text == (
         "Вкладки «Nov 26» с планом нет — бот создаёт её 1-го числа."
     )
 
@@ -304,11 +305,11 @@ def test_a_one_off_record_in_sums_moves_the_sums_card() -> None:
     )
     day = date(2026, 10, 2)
     assert "💳 Сумы 5,00 млн — до конца месяца хватит" in (
-        plain.morning_brief(day).splitlines()
+        plain.morning_brief(day).text.splitlines()
     )
     # 5 млн − лагерь 6 млн 5-го: хватит до 04.10, аванс 15-го закрывает минус
     assert "💳 Сумы 5,00 млн — хватит до 04.10 · до 15.10 обменять ≈ $90" in (
-        planned.morning_brief(day).splitlines()
+        planned.morning_brief(day).text.splitlines()
     )
 
 
@@ -323,9 +324,9 @@ def test_read_error_is_not_reported_as_a_missing_tab() -> None:
 
 async def test_morning_brief_is_sent_and_errors_stay_in_the_log() -> None:
     bot = SimpleNamespace(send_message=AsyncMock())
-    service = SimpleNamespace(morning_message=lambda: ("☀️", False))
+    service = SimpleNamespace(morning_message=lambda: (Report("☀️"), False))
     await analytics.send_morning_brief(bot, 42, service)
-    bot.send_message.assert_awaited_once_with(42, "☀️", message_effect_id=None)
+    bot.send_message.assert_awaited_once_with(42, "☀️")
 
     def broken() -> tuple[str, bool]:
         raise ConnectionError("Google is down")
@@ -338,16 +339,20 @@ async def test_morning_brief_is_sent_and_errors_stay_in_the_log() -> None:
 async def test_today_command_shows_the_day_so_far() -> None:
     calls: list[dict[str, Any]] = []
 
-    def brief(**options: Any) -> str:
+    def brief(**options: Any) -> Report:
         calls.append(options)
-        return "💸"
+        return Report("💸")
 
-    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=42),
+        message=SimpleNamespace(reply_text=AsyncMock()),
+    )
+    bot = SimpleNamespace(send_message=AsyncMock())
     context = SimpleNamespace(
-        bot_data={"analytics_service": SimpleNamespace(morning_brief=brief)}
+        bot=bot, bot_data={"analytics_service": SimpleNamespace(morning_brief=brief)}
     )
     await analytics.today_command(update, context)
-    update.message.reply_text.assert_awaited_once_with("💸")
+    bot.send_message.assert_awaited_once_with(42, "💸")
     assert calls == [{"now": True}]
 
 

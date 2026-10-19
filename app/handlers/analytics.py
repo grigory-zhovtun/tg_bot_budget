@@ -7,11 +7,12 @@ from io import BytesIO
 from typing import Any
 
 from telegram import Bot, Message, Update
-from telegram.error import BadRequest, TelegramError
+from telegram.error import BadRequest, EndPointNotFound, TelegramError
 from telegram.ext import ContextTypes
 
 from app import config
 from app.errors import user_message
+from app.rich import Report
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,7 @@ CHUNK_SIZE = 4000  # лимит Telegram — 4096 символов
 DRAFT_EVERY_SECONDS = 1.0  # как часто обновлять черновик /advice
 
 Send = Callable[..., Awaitable[Message]]
+REFUSED = (BadRequest, EndPointNotFound)  # Telegram ответил «нет» — можно иначе
 
 
 def split_text(text: str, limit: int = CHUNK_SIZE) -> list[str]:
@@ -51,6 +53,56 @@ async def send_markdown(send: Send, text: str) -> None:
             await send(chunk, parse_mode="Markdown")
         except BadRequest:
             await send(chunk, parse_mode=None)
+
+
+async def send_report(
+    bot: Bot, chat_id: int, report: Report, effect: str | None = None
+) -> str:
+    """Сводка расширенным сообщением; Telegram отказал — тем же обычным текстом.
+
+    Попытки по очереди, следующая — только после отказа: расширенное с эффектом,
+    без эффекта, обычный текст с эффектом, без эффекта. Сеть и таймауты — не отказ:
+    сообщение могло дойти, и повтор дал бы дубль. Возвращает, каким видом ушло.
+    """
+    effects = [effect, None] if effect else [None]
+    attempts = (
+        [("rich", current) for current in effects]
+        if report.html is not None and config.RICH_MESSAGES
+        else []
+    )
+    attempts += [("text", current) for current in effects]
+    chunks = split_text(report.text) or [report.text]
+    for number, (kind, current) in enumerate(attempts, 1):
+        options = {"message_effect_id": current} if current else {}
+        try:
+            if kind == "rich":
+                await bot.do_api_request(
+                    "sendRichMessage",
+                    api_kwargs={
+                        "chat_id": chat_id,
+                        "rich_message": {
+                            "html": report.html,
+                            "skip_entity_detection": True,
+                        },
+                        **options,
+                    },
+                )
+                return kind
+            await bot.send_message(chat_id, chunks[0], **options)
+        except REFUSED as error:
+            if number == len(attempts):
+                raise
+            logger.warning(
+                "Telegram refused the %s message%s: %s",
+                kind,
+                " with the effect" if current else "",
+                error,
+            )
+            continue
+        for chunk in chunks[1:]:
+            await bot.send_message(chat_id, chunk)
+        return kind
+    raise RuntimeError("no way to send the report")  # попытка с текстом есть всегда
 
 
 async def _send_charts(send_photo: Send, charts: list[tuple[str, BytesIO]]) -> None:
@@ -159,29 +211,23 @@ async def plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     """/plan: план-факт месяца без AI — сколько потрачено и сколько осталось."""
     analytics_service = context.bot_data.get("analytics_service")
     try:
-        text = await asyncio.to_thread(analytics_service.plan_report)
+        report = await asyncio.to_thread(analytics_service.plan_report)
     except Exception as e:
         logger.exception("Plan report failed")
         await update.message.reply_text(
             f"Не удалось собрать план-факт: {user_message(e)}"
         )
         return
-    await update.message.reply_text(text)
+    await send_report(context.bot, update.effective_chat.id, report)
 
 
 async def send_morning_brief(bot: Bot, chat_id: int, analytics_service: Any) -> None:
     """Утреннее сообщение с лимитом (JobQueue); 🎉, если вчера уложились. Ошибки — в лог."""
     try:
-        text, party = await asyncio.to_thread(analytics_service.morning_message)
+        report, party = await asyncio.to_thread(analytics_service.morning_message)
         effect = config.CELEBRATE_EFFECT_ID if party else None
-        try:
-            await bot.send_message(chat_id, text, message_effect_id=effect)
-        except BadRequest:
-            if effect is None:
-                raise
-            logger.warning("Message effect %s rejected, sending without it", effect)
-            await bot.send_message(chat_id, text)
-        logger.info("Morning brief sent%s", " with the party effect" if effect else "")
+        kind = await send_report(bot, chat_id, report, effect)
+        logger.info("Morning brief sent as %s%s", kind, " (party)" if effect else "")
     except Exception:
         logger.exception("Failed to send the morning brief")
 
@@ -190,14 +236,14 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """/today: лимит на сегодня, сколько уже потрачено и сколько осталось."""
     analytics_service = context.bot_data.get("analytics_service")
     try:
-        text = await asyncio.to_thread(analytics_service.morning_brief, now=True)
+        report = await asyncio.to_thread(analytics_service.morning_brief, now=True)
     except Exception as e:
         logger.exception("Today brief failed")
         await update.message.reply_text(
             f"Не удалось посчитать лимит: {user_message(e)}"
         )
         return
-    await update.message.reply_text(text)
+    await send_report(context.bot, update.effective_chat.id, report)
 
 
 async def subs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -215,9 +261,8 @@ async def subs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def send_weekly_digest(bot: Bot, chat_id: int, analytics_service: Any) -> None:
     """Воскресная сводка (JobQueue). Ошибки только в лог."""
     try:
-        text = await asyncio.to_thread(analytics_service.weekly_digest)
-        for chunk in split_text(text):
-            await bot.send_message(chat_id, chunk)
-        logger.info("Weekly digest sent")
+        report = await asyncio.to_thread(analytics_service.weekly_digest)
+        kind = await send_report(bot, chat_id, report)
+        logger.info("Weekly digest sent as %s", kind)
     except Exception:
         logger.exception("Failed to send the weekly digest")

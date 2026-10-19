@@ -95,6 +95,8 @@ MORNING_TIME = os.getenv("MORNING_TIME", "08:00")
 # Эффект 🎉 у утреннего сообщения, если вчера уложились; «off» — без эффекта
 _EFFECT = os.getenv("CELEBRATE_EFFECT_ID", "5046509860389126442").strip()
 CELEBRATE_EFFECT_ID = None if _EFFECT.lower() in ("", "off") else _EFFECT
+# Сводки расширенными сообщениями Telegram (заголовки, таблицы); off — всем текстом
+RICH_MESSAGES = os.getenv("RICH_MESSAGES", "on").strip().lower() != "off"
 # Заморозка — карты в этой валюте (отложенные деньги) без платежей в ней из жёлтого
 # списка вкладки месяца; пусто или «off» — не показывать
 _FROZEN = os.getenv("FROZEN_CURRENCY", "USD").strip().upper()
