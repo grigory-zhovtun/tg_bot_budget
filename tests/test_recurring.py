@@ -173,7 +173,7 @@ def test_service_and_command_show_the_report() -> None:
     assert service.subs_report(TODAY).startswith(
         "🔁 Регулярные списания ≈ 235 882 в месяц"
     )
-    brief = service.morning_brief(date(2026, 10, 13))
+    brief = service.morning_brief(date(2026, 10, 13)).text
     assert brief.splitlines()[-1] == "🔁 Завтра спишется: Google *google One ≈ 235 882"
     empty = AnalyticsService(Sheets({"fact": [FACT_HEADER, *OPENING], "Oct 26": tab()}))
     assert (
@@ -232,4 +232,4 @@ def test_month_list_payments_stay_out_of_subs_and_the_morning() -> None:
     fact = [FACT_HEADER, *OPENING, *RENDER, *RENT]
     service = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab(items=RENT_LIST)}))
     assert "квартплата" not in service.subs_report(date(2026, 10, 19))
-    assert "🔁" not in service.morning_brief(date(2026, 10, 16))
+    assert "🔁" not in service.morning_brief(date(2026, 10, 16)).text

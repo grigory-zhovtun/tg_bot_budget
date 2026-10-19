@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 from app.handlers import analytics
+from app.rich import Report
 from app.services.analytics_service import (
     AnalyticsService,
     PlanLine,
@@ -97,14 +98,14 @@ class Sheets:
 
 def test_missing_month_tab_is_explained() -> None:
     service = AnalyticsService(Sheets({}))
-    assert service.plan_report(date(2026, 11, 1)) == (
+    assert service.plan_report(date(2026, 11, 1)).text == (
         "Вкладки «Nov 26» с планом нет — бот создаёт её 1-го числа."
     )
 
 
 def test_weekly_digest_compares_weeks_and_appends_the_plan() -> None:
     service = AnalyticsService(Sheets({"fact": FACT, "Oct 26": OCTOBER}))
-    text = service.weekly_digest(date(2026, 10, 6))
+    text = service.weekly_digest(date(2026, 10, 6)).text
     first, second, third = text.splitlines()[:3]
     assert first == "🗓 Неделя 30.09–06.10"
     assert second.startswith("Потрачено ")
@@ -113,11 +114,15 @@ def test_weekly_digest_compares_weeks_and_appends_the_plan() -> None:
 
 
 async def test_plan_command_replies_with_the_report() -> None:
-    service = SimpleNamespace(plan_report=lambda: "📋 План-факт")
-    update = SimpleNamespace(message=SimpleNamespace(reply_text=AsyncMock()))
-    context = SimpleNamespace(bot_data={"analytics_service": service})
+    service = SimpleNamespace(plan_report=lambda: Report("📋 План-факт"))
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=42),
+        message=SimpleNamespace(reply_text=AsyncMock()),
+    )
+    bot = SimpleNamespace(send_message=AsyncMock())
+    context = SimpleNamespace(bot=bot, bot_data={"analytics_service": service})
     await analytics.plan_command(update, context)
-    update.message.reply_text.assert_awaited_once_with("📋 План-факт")
+    bot.send_message.assert_awaited_once_with(42, "📋 План-факт")
 
 
 async def test_plan_command_reports_errors_briefly() -> None:
@@ -137,7 +142,7 @@ async def test_plan_command_reports_errors_briefly() -> None:
 async def test_weekly_digest_is_sent_and_errors_stay_in_the_log() -> None:
     bot = SimpleNamespace(send_message=AsyncMock())
     await analytics.send_weekly_digest(
-        bot, 42, SimpleNamespace(weekly_digest=lambda: "🗓")
+        bot, 42, SimpleNamespace(weekly_digest=lambda: Report("🗓"))
     )
     bot.send_message.assert_awaited_once_with(42, "🗓")
 
@@ -158,7 +163,7 @@ def test_weekly_digest_asks_for_bank_screens_and_names_stale_cards() -> None:
         "UZCARD 5837 UZS": datetime(2026, 9, 24, 9, 0),  # 12 дней
         "МИР 9959 RUB": None,  # не сверяли ни разу — не напоминаем
     }
-    text = AnalyticsService(sheets).weekly_digest(date(2026, 10, 6))
+    text = AnalyticsService(sheets).weekly_digest(date(2026, 10, 6)).text
     assert text.endswith(
         "📸 Пришлите скрины главных экранов банков — сверю остатки по картам.\n"
         "Давно не сверяли: UZCARD 5837 UZS (12 дн.)"

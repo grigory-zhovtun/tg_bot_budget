@@ -18,7 +18,9 @@ from gspread.exceptions import WorksheetNotFound
 from matplotlib.figure import Figure
 
 from app import config
+from app.custom_icons import leading_emoji
 from app.domain import INCOME_GROUP, Rates, local_today, month_title
+from app.rich import NBSP, RULE, Report, heading, para, percent, table, whole
 from app.services.google_sheets import GoogleSheetsService, read_month_sheets
 
 if TYPE_CHECKING:
@@ -243,6 +245,57 @@ def _share(part: float, whole: float) -> str:
     return f"{part / whole:.0%}" if whole else "—"
 
 
+def _plan_groups(
+    spend: list[PlanLine],
+) -> tuple[list[PlanLine], list[PlanLine], list[PlanLine]]:
+    """Статьи сверх плана, «почти всё» (от NEAR_LIMIT) и вне плана — по убыванию."""
+    over = sorted(
+        (line for line in spend if line.plan > 0 and line.fact > line.plan),
+        key=lambda line: line.fact - line.plan,
+        reverse=True,
+    )
+    near = sorted(
+        (
+            line
+            for line in spend
+            if line.plan > 0 and NEAR_LIMIT * line.plan <= line.fact <= line.plan
+        ),
+        key=lambda line: line.fact / line.plan,
+        reverse=True,
+    )
+    outside = sorted(
+        (line for line in spend if line.plan <= 0 and line.fact > 0),
+        key=lambda line: line.fact,
+        reverse=True,
+    )
+    return over, near, outside
+
+
+def _icon_name(group: str, subcategory: str) -> str:
+    """«🎉 ПРАЗДНИК» + «сезонный» → «🎉 сезонный»."""
+    icon, _ = leading_emoji(group)
+    return f"{icon} {subcategory}" if icon else subcategory
+
+
+def _days_word(days: int) -> str:
+    """«из 31 дня», «из 30 дней»."""
+    return "дня" if days % 10 == 1 and days % 100 != 11 else "дней"
+
+
+def week_title(start: date, end: date) -> str:
+    """«12–18 октября»; неделя через границу месяцев — «28 сентября – 4 октября»."""
+    from app.services.day_budget import MONTHS_GENITIVE
+
+    last = f"{end.day} {MONTHS_GENITIVE[end.month - 1]}"
+    if start.month == end.month:
+        return f"{start.day}–{last}"
+    return f"{start.day} {MONTHS_GENITIVE[start.month - 1]} – {last}"
+
+
+def _no_tab(today: date) -> str:
+    return f"Вкладки «{month_title(today)}» с планом нет — бот создаёт её 1-го числа."
+
+
 def format_plan_report(rows: list[list[Any]], today: date) -> str:
     """План-факт месяца для чата: темп трат, остаток в день, перерасход."""
     days = calendar.monthrange(today.year, today.month)[1]
@@ -271,25 +324,7 @@ def format_plan_report(rows: list[list[Any]], today: date) -> str:
     else:
         lines.append(f"План превышен на {money(-left)} сум")
 
-    over = sorted(
-        (line for line in spend if line.plan > 0 and line.fact > line.plan),
-        key=lambda line: line.fact - line.plan,
-        reverse=True,
-    )
-    near = sorted(
-        (
-            line
-            for line in spend
-            if line.plan > 0 and NEAR_LIMIT * line.plan <= line.fact <= line.plan
-        ),
-        key=lambda line: line.fact / line.plan,
-        reverse=True,
-    )
-    outside = sorted(
-        (line for line in spend if line.plan <= 0 and line.fact > 0),
-        key=lambda line: line.fact,
-        reverse=True,
-    )
+    over, near, outside = _plan_groups(spend)
     if over:
         lines += ["", "🔴 Сверх плана:"]
         lines += [
@@ -317,6 +352,66 @@ def format_plan_report(rows: list[list[Any]], today: date) -> str:
             f"({_share(earn_fact, earn_plan)})",
         ]
     return "\n".join(lines)
+
+
+def rich_plan_report(rows: list[list[Any]], today: date) -> list[str]:
+    """План-факт месяца блоками: расходы и остаток крупно, статьи таблицами."""
+    days = calendar.monthrange(today.year, today.month)[1]
+    elapsed = today.day / days
+    spend, earn = plan_lines(rows)
+    plan = sum(line.plan for line in spend)
+    fact = sum(line.fact for line in spend)
+    month = MONTHS_RU[today.month - 1].capitalize()
+    blocks = [heading(f"📋 {month}: {today.day} из {days} {_days_word(days)}", 2)]
+    if plan > 0:
+        calm = fact / plan <= elapsed + PACE_SLACK
+        pace = "в графике" if calm else "быстрее графика"
+        blocks += [
+            heading(f"{'✅' if calm else '⚠️'} Расходы {whole(fact)}"),
+            para(
+                f"из {whole(plan)} — {percent(fact / plan)}",
+                f"{pace}: прошло {percent(elapsed)} месяца",
+            ),
+        ]
+        left = plan - fact
+        if left > 0:
+            per_day = left / (days - today.day + 1)
+            blocks += [
+                heading(f"Осталось {whole(left)}"),
+                para(f"≈{NBSP}{whole(per_day)} в день"),
+            ]
+        else:
+            blocks.append(heading(f"⚠️ План превышен на {whole(-left)}"))
+    else:
+        blocks += [heading(f"Расходы {whole(fact)}"), para("плана на месяц нет")]
+
+    over, near, outside = _plan_groups(spend)
+    head = ["статья", "факт", "план"]
+
+    def rows_of(lines: list[PlanLine]) -> list[list[str]]:
+        return [[x.subcategory, whole(x.fact), whole(x.plan)] for x in lines]
+
+    if over:
+        blocks += [heading("🔴 Сверх плана"), table(rows_of(over), "lrr", head)]
+    if near:
+        blocks += [
+            heading(f"🟡 Почти всё (от {percent(NEAR_LIMIT)})"),
+            table(rows_of(near), "lrr", head),
+        ]
+    if outside:
+        named = [[_icon_name(x.group, x.subcategory), whole(x.fact)] for x in outside]
+        blocks += [heading("⚪ Вне плана"), table(named, "lr")]
+
+    earn_plan = sum(line.plan for line in earn)
+    earn_fact = sum(line.fact for line in earn)
+    if earn_plan or earn_fact:
+        share = (
+            f"из {whole(earn_plan)} — {percent(earn_fact / earn_plan)} плана"
+            if earn_plan
+            else "плана на месяц нет"
+        )
+        blocks += [heading(f"💰 Доходы {whole(earn_fact)}"), para(share)]
+    return blocks
 
 
 class AnalyticsService:
@@ -452,16 +547,24 @@ class AnalyticsService:
             )
         return lines
 
-    def plan_report(self, today: date | None = None) -> str:
-        """/plan: план-факт текущего месяца по вкладке «Oct 26»."""
-        today = today or local_today(config.ANALYTICS_TIMEZONE)
+    def _month_rows(self, today: date) -> list[list[Any]] | None:
+        """Вкладка месяца для план-факта; None — её нет (или не прочиталась)."""
         sheet = month_title(today)
         try:
-            rows = self.gs_service.get_values(sheet)
+            return self.gs_service.get_values(sheet)
         except Exception:
             logger.info("No plan sheet %s", sheet)
-            return f"Вкладки «{sheet}» с планом нет — бот создаёт её 1-го числа."
-        return format_plan_report(rows, today)
+            return None
+
+    def plan_report(self, today: date | None = None) -> Report:
+        """/plan: план-факт текущего месяца по вкладке «Oct 26»."""
+        today = today or local_today(config.ANALYTICS_TIMEZONE)
+        rows = self._month_rows(today)
+        if rows is None:
+            return Report(_no_tab(today))
+        return Report(
+            format_plan_report(rows, today), "".join(rich_plan_report(rows, today))
+        )
 
     def _records(self) -> "tuple[CalendarRecord, ...]":
         """Записи календаря: лист «Календарь» (бот держит его копию минуту)."""
@@ -469,21 +572,31 @@ class AnalyticsService:
 
         return read_calendar(self.gs_service.get_calendar())
 
-    def morning_brief(self, today: date | None = None, now: bool = False) -> str:
+    def morning_brief(self, today: date | None = None, now: bool = False) -> Report:
         """Лимит на сегодня по вкладке месяца: утреннее сообщение и /today."""
         return self._brief(today, now)[0]
 
-    def morning_message(self, today: date | None = None) -> tuple[str, bool]:
+    def morning_message(self, today: date | None = None) -> tuple[Report, bool]:
         """Утреннее сообщение и нужен ли 🎉 (вчера уложились в лимит)."""
         from app.services.day_budget import celebrate
 
-        text, budget = self._brief(today, now=False)
-        return text, budget is not None and celebrate(budget)
+        report, budget = self._brief(today, now=False)
+        return report, budget is not None and celebrate(budget)
 
-    def _brief(self, today: date | None, now: bool) -> tuple[str, Any]:
+    def _brief(self, today: date | None, now: bool) -> tuple[Report, Any]:
         # day_budget и recurring сами берут отсюда plan_lines и expenses
-        from app.services.day_budget import day_budget, format_day_budget, read_forecast
-        from app.services.recurring import find_series, morning_lines, outside_list
+        from app.services.day_budget import (
+            day_budget,
+            format_day_budget,
+            read_forecast,
+            rich_day_budget,
+        )
+        from app.services.recurring import (
+            find_series,
+            morning_lines,
+            outside_list,
+            rich_morning_lines,
+        )
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
         sheet = month_title(today)
@@ -492,7 +605,8 @@ class AnalyticsService:
         except WorksheetNotFound:
             # сбой сети — не «вкладки нет»: ошибка уйдёт в лог или ответ /today
             logger.info("No plan sheet %s", sheet)
-            return f"Вкладки «{sheet}» с планом нет — бот создаёт её 1-го числа.", None
+            text = f"Вкладки «{sheet}» с планом нет — бот создаёт её 1-го числа."
+            return Report(text), None
         rates = self.gs_service.get_rates()
         frame = transactions_frame(
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
@@ -502,15 +616,18 @@ class AnalyticsService:
         )
         if budget is None:
             return (
-                f"Во вкладке «{sheet}» нет списка поступлений и платежей (блок "
-                "прогноза справа) — лимит на день не посчитать.\n\n"
-                + format_plan_report(rows, today)
-            ), None
-        lines = [format_day_budget(budget, now=now)]
+                Report(
+                    f"Во вкладке «{sheet}» нет списка поступлений и платежей (блок "
+                    "прогноза справа) — лимит на день не посчитать.\n\n"
+                    + format_plan_report(rows, today)
+                ),
+                None,
+            )
         listed = read_forecast(rows)
         series = outside_list(find_series(frame, today), listed.items if listed else ())
-        lines += morning_lines(series, today)
-        return "\n".join(lines), budget
+        text = [format_day_budget(budget, now=now), *morning_lines(series, today)]
+        html = [*rich_day_budget(budget, now), *rich_morning_lines(series, today)]
+        return Report("\n".join(text), "".join(html)), budget
 
     def write_feedback(
         self,
@@ -680,7 +797,7 @@ class AnalyticsService:
             read_calendar(sheets.calendar),
         )
 
-    def weekly_digest(self, today: date | None = None) -> str:
+    def weekly_digest(self, today: date | None = None) -> Report:
         """Воскресная сводка: траты недели против прошлой и план-факт месяца."""
         today = today or local_today(config.ANALYTICS_TIMEZONE)
         week_start = today - timedelta(days=6)
@@ -710,9 +827,39 @@ class AnalyticsService:
                 "Больше всего: "
                 + ", ".join(f"{g} / {s} {money(v)}" for (g, s), v in top.items())
             )
-        return "\n".join(
-            [*lines, "", self.plan_report(today), "", self.balance_reminder(today)]
-        )
+        rows = self._month_rows(today)
+        plan_text = format_plan_report(rows, today) if rows is not None else None
+        reminder = self.balance_reminder(today)
+        text = "\n".join([*lines, "", plan_text or _no_tab(today), "", reminder])
+
+        about = ["потрачено за неделю"]
+        if spent_before > 0:
+            ratio = spent / spent_before - 1
+            about.append(
+                "столько же, сколько на прошлой"
+                if round(ratio * 100) == 0
+                else f"на {percent(abs(ratio))} "
+                f"{'меньше' if ratio < 0 else 'больше'} прошлой ({whole(spent_before)})"
+            )
+        blocks = [
+            para(f"🗓 Неделя {week_title(week_start, today)}"),
+            heading(f"{whole(spent)} сум", 1),
+            para(*about),
+        ]
+        if not top.empty:
+            named = [[_icon_name(g, s), whole(v)] for (g, s), v in top.items()]
+            blocks += [heading("Больше всего"), table(named, "lr")]
+        blocks += [
+            RULE,
+            *(
+                rich_plan_report(rows, today)
+                if rows is not None
+                else [para(_no_tab(today))]
+            ),
+            RULE,
+            para(*reminder.splitlines()),
+        ]
+        return Report(text, "".join(blocks))
 
     def balance_reminder(self, today: date) -> str:
         """Напоминание прислать скрины банков; карты, которые давно не сверяли."""
