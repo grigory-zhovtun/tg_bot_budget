@@ -63,14 +63,24 @@ def ops(*texts: str) -> list[Sms]:
     return batch.operations
 
 
+RENT_CASH = 380.0  # выдуманная квартплата наличными; настоящая — в переменной Render
+
+
 def rows_of(
     *texts: str,
     book: MerchantBook | None = None,
     memory: AmountMemory = EMPTY,
     suggestions: dict[str, tuple[str, str]] | None = None,
+    rent: float | None = RENT_CASH,
 ) -> tuple[list[SmsRow], list[Skipped]]:
     return sms_rows(
-        ops(*texts), SOURCES, book or MerchantBook([]), memory, suggestions or {}, RATES
+        ops(*texts),
+        SOURCES,
+        book or MerchantBook([]),
+        memory,
+        suggestions or {},
+        RATES,
+        rent_cash_usd=rent,
     )
 
 
@@ -271,7 +281,7 @@ def test_amount_memory_tells_coffee_from_lunch_in_one_cafe() -> None:
             "transfer_out",
         ),
         (
-            CASH.replace("-650.00", "-700.00"),
+            CASH.replace("-380.00", "-700.00"),
             ("🏚️ ДОМ", "квартплата"),
             CHECK,
             "снятие наличных: OPERU KASSA VISA 2",
@@ -295,11 +305,16 @@ def test_operations_without_a_merchant(
 def test_cash_in_sums_is_misc_to_check() -> None:
     text = (
         CASH.replace("*3434", "*9090")
-        .replace("-650.00, USD", "-500000.00, UZS")
+        .replace("-380.00, USD", "-500000.00, UZS")
         .replace("1000.00, USD", "1000.00, UZS")
     )
     [row], _ = rows_of(text)
     assert (target(row), row.flag) == (("🚧 РАЗНОЕ", "неучтенка"), CHECK)
+
+
+def test_cash_rent_is_marked_when_its_sum_is_not_set() -> None:
+    [row], _ = rows_of(CASH, rent=None)
+    assert (target(row), row.flag) == (("🏚️ ДОМ", "квартплата"), CHECK)
 
 
 def test_unknown_card_is_reported_not_guessed() -> None:

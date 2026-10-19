@@ -126,10 +126,27 @@ def parse_share(text: str) -> float:
     return min(max(share, 0.0), 1.0)
 
 
+def parse_amount(text: str) -> float | None:
+    """Сумма: «380», «380.5», «380,5» → число; пусто, «off», не число, ноль и меньше —
+    None."""
+    value = text.strip().lower().replace(",", ".")
+    if value in ("", "off"):
+        return None
+    try:
+        amount = float(value)
+    except ValueError:
+        return None
+    return amount if amount > 0 else None
+
+
 # Подушка безопасности — «Заморожено»; цель — столько месяцев средних трат
 CUSHION_MONTHS = parse_months(os.getenv("CUSHION_MONTHS", "6"))
 # «Сначала заплати себе»: какую долю поступления бот предлагает отложить; 0 — молчать
 SAVE_SHARE = parse_share(os.getenv("SAVE_SHARE", "0.10"))
+# Квартплата наличными: снятие стольких USD в кассе банка (выписка, SMS) пишется в
+# «квартплату» без пометки «проверить». Сумма — в переменной, а не в коде: репозиторий
+# открытый. Не задана — каждое такое снятие помечается для проверки
+RENT_CASH_USD = parse_amount(os.getenv("RENT_CASH_USD", ""))
 
 # Access control: Telegram user IDs allowed to use the bot ("123, 456").
 # Falls back to ANALYTICS_CHAT_ID (the owner's private chat id == user id).

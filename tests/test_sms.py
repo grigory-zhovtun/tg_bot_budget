@@ -40,7 +40,7 @@ OPERATION = (
     '"03-02-2026 09:30". Dostupno: 6700000.00, UZS.'
 )
 CASH = (
-    'Karta *3434. Naqd yechish/Snyatie nalichnih "OPERU KASSA VISA 2>T", -650.00, '
+    'Karta *3434. Naqd yechish/Snyatie nalichnih "OPERU KASSA VISA 2>T", -380.00, '
     'USD, "08-10-2026 11:00". Dostupno: 1000.00, USD.'
 )
 P2P_OUT = (

@@ -127,6 +127,7 @@ Optional:
 - `GEMINI_API_KEY` - Enables AI features; `GEMINI_MODEL` (default `gemini-flash-latest`), `GEMINI_FALLBACK_MODELS` (default `gemini-flash-lite-latest`, tried on 503/429)
 - `ANALYTICS_CHAT_ID`, `ANALYTICS_TIME`, `ANALYTICS_TIMEZONE` - daily report (JobQueue); the time zone also defines "today"
 - `IGNORED_CARDS` - last 4 digits of cards the screenshot check skips (e.g. a child's card)
+- `RENT_CASH_USD` - the rent paid in USD cash: a withdrawal of exactly this sum at the bank (statement or SMS) goes to «квартплата» with no check mark; empty — every USD cash withdrawal is marked. The owner's sum lives only in Render, never in code, tests or docs (public repo); the start log says only whether it is set
 - `MORNING_TIME` - morning message with the daily limit to the owner, default `08:00`, `off` disables it; `FROZEN_CURRENCY` (default `USD`, `off` — none) - cards in this currency are savings; `CUSHION_MONTHS` (default `6`) - emergency fund target in months of spending; `SAVE_SHARE` (default `0.10`, `0` — off) - share of an income the write summary suggests setting aside
 - `WEEKLY_DIGEST_TIME` - Sunday digest to the owner (`ANALYTICS_CHAT_ID` or the first allowed id), default `20:00`, `off` disables it
 - `RICH_MESSAGES` - `off` sends the morning message, `/today`, the weekly digest and `/plan` as plain text instead of Telegram rich messages; default `on`

@@ -13,7 +13,7 @@ from app.domain import Catalog, MerchantBook
 from app.handlers import messages
 from app.handlers import sms as sms_chat
 from tests.test_messages import again, make_chat, menu_after_summary, summary
-from tests.test_sms import CODE_SMS, PURCHASE, QR
+from tests.test_sms import CASH, CODE_SMS, PURCHASE, QR
 
 HEADER = ["Дата", "Категория", "Название", "Сумма", "Баланс", "Комментарий"]
 SHAVI_LUNCH = ["01.10.2026", "🍔 ЕДА", "кафе", 90000, "", "OOO SHAVI CAFE", "UZS"]
@@ -73,6 +73,23 @@ def last_summary(update: SimpleNamespace) -> str:
         for call in calls
         if isinstance(call.kwargs.get("reply_markup"), ReplyKeyboardMarkup)
     ][-1]
+
+
+async def test_the_rent_cash_sum_comes_from_the_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[float | None] = []
+    real = sms_chat.sms_rows
+
+    def spy(*args: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs.get("rent_cash_usd"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(config, "RENT_CASH_USD", 380.0)
+    monkeypatch.setattr(sms_chat, "sms_rows", spy)
+    update, context, _ = make_chat(CASH, {}, RulesAI())
+    await messages.text_handler(update, context)
+    assert seen == [380.0]
 
 
 async def test_known_merchant_is_written_without_ai() -> None:

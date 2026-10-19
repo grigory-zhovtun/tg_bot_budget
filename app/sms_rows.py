@@ -29,7 +29,6 @@ from app.statements import (
     FX,
     MISC,
     RENT,
-    RENT_CASH_USD,
     SERIAL_ZERO,
     TRANSFERS,
     short,
@@ -326,6 +325,7 @@ def _decide(
     memory: AmountMemory,
     suggestions: dict[str, tuple[str, str]],
     rates: Rates,
+    rent_cash_usd: float | None,
 ) -> tuple[tuple[str, str], str | None, str, str]:
     """Категория, пометка, комментарий и направление одной SMS."""
     kind = purpose(sms)
@@ -338,7 +338,8 @@ def _decide(
     if kind == Purpose.CASH_OUT:
         comment = f"снятие наличных: {where}"
         if sms.currency == "USD":  # доллары в кассе банка — квартплата
-            flag = None if sms.amount == RENT_CASH_USD else CHECK
+            rent = rent_cash_usd is not None and sms.amount == rent_cash_usd
+            flag = None if rent else CHECK
             return RENT, flag, comment, "transfer_out"
         return MISC, CHECK, comment, "transfer_out"
     if kind == Purpose.TRANSFER:
@@ -366,8 +367,12 @@ def sms_rows(
     memory: AmountMemory,
     suggestions: dict[str, tuple[str, str]],
     rates: Rates,
+    *,
+    rent_cash_usd: float | None = None,
 ) -> tuple[list[SmsRow], list[Skipped]]:
     """SMS сообщения → позиции в порядке времени и то, что записать нельзя.
+
+    Доллары наличными в кассе банка — квартплата; ровно rent_cash_usd — без пометки.
 
     Вставку из приложения «сверху новые» сначала разворачиваем: SMS одной минуты
     остаются в порядке банка. Остаток в «Проверку» — только у самой поздней SMS карты.
@@ -407,7 +412,7 @@ def sms_rows(
             rows += _pair_rows(sms, source, pairs[i], balance)
             continue
         target, flag, comment, direction = _decide(
-            sms, source, book, memory, suggestions, rates
+            sms, source, book, memory, suggestions, rates, rent_cash_usd
         )
         rows.append(
             SmsRow(_item(sms, source, target, comment, direction, balance), flag, sms)

@@ -76,6 +76,19 @@ def test_bad_or_missing_report_settings_do_not_break_start(
     assert app.job_queue.get_jobs_by_name("daily_analytics") == ()
 
 
+def test_start_says_whether_the_rent_cash_sum_is_set(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    with caplog.at_level(logging.INFO):
+        build(monkeypatch, RENT_CASH_USD=None)
+    assert "RENT_CASH_USD not set" in caplog.text
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        build(monkeypatch, RENT_CASH_USD=380.0)
+    assert "RENT_CASH_USD is set" in caplog.text
+    assert "380" not in caplog.text  # саму сумму в логи не пишем
+
+
 def test_httpx_logs_no_request_urls() -> None:
     main.setup_logging()
     assert logging.getLogger("httpx").getEffectiveLevel() >= logging.WARNING
