@@ -249,10 +249,10 @@ describe("DashboardScreen", () => {
     // две похожие полосатые диаграммы не стоят рядом: план-факт один, следом — дни
     expect(headings()).toEqual(["План-факт по категориям", "Траты по дням"]);
     await show(user, "Накопления");
-    await screen.findByText("Откладываем 25 % с поступлений"); // свой ответ — «Накопления»
+    await screen.findByText("Откладываем 25 %"); // свой ответ — «Накопления»
     expect(headings()).toEqual([
-      "Откладываем 25 % с поступлений",
-      "🛟 Подушка безопасности",
+      "Откладываем 25\u00a0%",
+      "🛟 Подушка",
       "🐷 Копилки",
       "План на год",
       "Норма сбережений",
@@ -266,7 +266,7 @@ describe("DashboardScreen", () => {
     const first = render(<DashboardScreen api={fakeApi()} />);
     await show(user, "Накопления");
     expect(
-      await screen.findByRole("heading", { name: "🛟 Подушка безопасности" }),
+      await screen.findByRole("heading", { name: "🛟 Подушка" }),
     ).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Можно сегодня" })).toBeNull();
     expect(localStorage.getItem("dashboard-section")).toBe("savings");

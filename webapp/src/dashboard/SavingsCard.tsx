@@ -1,6 +1,7 @@
 import type { SavingMonth, Savings } from "../api";
-import { short } from "../format";
+import { money } from "../format";
 import { monthName, monthRange, monthShort } from "../plan/months";
+import { Card, Chip, Line } from "./blocks";
 
 const GOOD_PERCENT = 10; // от 10 % — мятным: «сначала заплати себе»
 const MAX_PERCENT = 999; // дальше — «< −999 %»: подпись не ломает колонку
@@ -10,14 +11,16 @@ function percentOf(rate: number): number {
   return Math.round(rate * 100);
 }
 
-/** 0.25 → «+25 %», −1.41 → «−141 %», −79 → «< −999 %», null → «—». */
-function rateText(rate: number | null): string {
+/** 0.25 → «+25 %», −1.41 → «−141 %», −79 → «< −999 %», null → «—»;
+ * unit = false — без «%»: так подпись влезает над столбиком крупно. */
+function rateText(rate: number | null, unit = true): string {
   if (rate === null) return "—";
   const percent = percentOf(rate);
-  if (percent > MAX_PERCENT) return `> +${MAX_PERCENT}\u00a0%`;
-  if (percent < -MAX_PERCENT) return `< −${MAX_PERCENT}\u00a0%`;
+  const tail = unit ? "\u00a0%" : "";
+  if (percent > MAX_PERCENT) return `> +${MAX_PERCENT}${tail}`;
+  if (percent < -MAX_PERCENT) return `< −${MAX_PERCENT}${tail}`;
   const sign = percent > 0 ? "+" : percent < 0 ? "−" : "";
-  return `${sign}${Math.abs(percent)}\u00a0%`;
+  return `${sign}${Math.abs(percent)}${tail}`;
 }
 
 /** По числу на экране: от 10 % — мятный, от нуля — жёлтый, минус — оранжевый. */
@@ -30,7 +33,20 @@ function rateTone(rate: number | null): { text: string; bar: string } {
 }
 
 function amountText(value: number): string {
-  return value > 0 ? short(value) : "0";
+  return value > 0 ? money(value) : "0";
+}
+
+/** Плашка нормы за три месяца: «✓ 25 %» от 10 %, «5 %» от нуля, «⚠️ −10 %» в минусе. */
+function RateChip({ rate }: { rate: number }) {
+  const percent = Math.max(
+    -MAX_PERCENT,
+    Math.min(percentOf(rate), MAX_PERCENT),
+  );
+  if (percent >= GOOD_PERCENT) {
+    return <Chip tone="good">{`✓ ${percent}\u00a0%`}</Chip>;
+  }
+  if (percent >= 0) return <Chip tone="mid">{`${percent}\u00a0%`}</Chip>;
+  return <Chip tone="bad">{`⚠️ −${Math.abs(percent)}\u00a0%`}</Chip>;
 }
 
 /**
@@ -51,9 +67,9 @@ function MonthBar({ item }: { item: SavingMonth }) {
       className="flex flex-col items-center gap-1"
     >
       <span
-        className={`text-[13px] font-bold whitespace-nowrap ${rateTone(item.rate).text}`}
+        className={`text-[15px] font-extrabold whitespace-nowrap ${rateTone(item.rate).text}`}
       >
-        {rateText(item.rate)}
+        {rateText(item.rate, false)}
       </span>
       <div className="relative h-16 w-full">
         <div className="absolute inset-x-0 top-1/2 h-0.5 bg-outline" />
@@ -68,9 +84,7 @@ function MonthBar({ item }: { item: SavingMonth }) {
           />
         )}
       </div>
-      <span className="text-[13px] font-semibold">
-        {monthShort(item.month)}
-      </span>
+      <span className="text-[15px] font-bold">{monthShort(item.month)}</span>
     </div>
   );
 }
@@ -82,28 +96,28 @@ export default function SavingsCard({ savings }: { savings: Savings }) {
   const income = recent.reduce((sum, item) => sum + item.income, 0);
   const spent = recent.reduce((sum, item) => sum + item.spent, 0);
   return (
-    <section
-      className="flex flex-col gap-2 rounded-2xl bg-section p-4"
-      aria-label="Норма сбережений"
-    >
-      <div className="flex items-baseline justify-between gap-2">
-        <h2 className="font-semibold">Норма сбережений</h2>
-        <span
-          className={`text-2xl font-extrabold ${rateTone(savings.rate).text}`}
-        >
-          {rateText(savings.rate)}
-        </span>
-      </div>
-      <p className="text-sm">
-        {savings.rate === null
-          ? `за ${range} дохода не было`
-          : `за ${range}: пришло ${amountText(income)}, потрачено ${amountText(spent)}`}
-      </p>
-      <div className="grid grid-cols-6 gap-1">
+    <Card label="Норма сбережений">
+      <h2 className="text-fact font-extrabold">Норма сбережений</h2>
+      {savings.rate !== null && (
+        <div>
+          <RateChip rate={savings.rate} />
+        </div>
+      )}
+      {savings.rate === null ? (
+        <Line>{`за ${range} дохода не было`}</Line>
+      ) : (
+        <>
+          <Line>{`за ${range}`}</Line>
+          <Line>{`пришло ${amountText(income)}`}</Line>
+          <Line>{`потрачено ${amountText(spent)}`}</Line>
+        </>
+      )}
+      <div className="mt-2 grid grid-cols-6 gap-1">
         {savings.months.map((item) => (
           <MonthBar key={item.month} item={item} />
         ))}
       </div>
-    </section>
+      <Line>числа над столбиками — в %</Line>
+    </Card>
   );
 }
