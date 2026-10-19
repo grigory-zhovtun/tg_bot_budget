@@ -1,9 +1,10 @@
 import { useState } from "react";
 import type { PlanArticle, PlanHistory } from "../api";
-import { money } from "../format";
+import { moneyText } from "../format";
 import AmountPad from "./AmountPad";
 import { amountText } from "./draft";
-import { capital, days, monthDative, monthName, monthRange } from "./months";
+import History, { QUICK, rounded } from "./History";
+import { monthIn } from "./months";
 import Sheet from "./Sheet";
 
 interface Props {
@@ -14,8 +15,6 @@ interface Props {
   onClose: () => void;
 }
 
-const QUICK = "rounded-xl bg-section py-2 text-link";
-
 export default function ArticleSheet({
   article,
   text: initial,
@@ -24,47 +23,33 @@ export default function ArticleSheet({
   onClose,
 }: Props) {
   const [text, setText] = useState(initial);
-  const decimals = article.currency !== "UZS";
-  const fraction = decimals ? 2 : 0;
-  // подсказку в сумах округляем до тысяч: план не нужен с точностью до сума
+  const { currency } = article;
+  const decimals = currency !== "UZS";
   const nice = (value: number) =>
-    amountText(decimals ? value : Math.round(value / 1000) * 1000, decimals);
+    amountText(rounded(value, currency), decimals);
+  const sum = (value: number) => moneyText(rounded(value, currency), currency);
   const icon = article.icon ? `${article.icon} ` : "";
   return (
     <Sheet
-      title={`${icon}${article.subcategory} · ${article.currency}`}
+      title={`${icon}${article.subcategory}${decimals ? ` · ${currency}` : ""}`}
       onClose={onClose}
     >
-      <AmountPad text={text} currency={article.currency} onChange={setText} />
-      <p className="text-center text-sm text-hint">
-        было в плане: {money(article.plan, fraction)}
-      </p>
-      {history && (
-        <dl className="flex flex-col gap-1 rounded-2xl bg-section p-3 text-sm">
-          <div className="flex justify-between gap-3">
-            <dt>Среднее за {monthRange(history.average)}</dt>
-            <dd>{money(article.average, fraction)}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt>{capital(monthName(history.last))}</dt>
-            <dd>{money(article.last, fraction)}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt>
-              {capital(monthName(history.current))} пока (
-              {days(history.current_days)})
-            </dt>
-            <dd>{money(article.current, fraction)}</dd>
-          </div>
-        </dl>
-      )}
-      <div className="grid grid-cols-3 gap-2 text-sm">
+      <AmountPad text={text} currency={currency} onChange={setText} />
+      <History
+        currency={currency}
+        history={history}
+        plan={article.plan}
+        average={article.average}
+        last={article.last}
+        current={article.current}
+      />
+      <div className="flex flex-col gap-2">
         <button
           type="button"
           className={QUICK}
           onClick={() => setText(nice(article.average))}
         >
-          = среднему
+          {`= в среднем ${sum(article.average)}`}
         </button>
         {history && (
           <button
@@ -72,7 +57,7 @@ export default function ArticleSheet({
             className={QUICK}
             onClick={() => setText(nice(article.last))}
           >
-            = {monthDative(history.last)}
+            {`= как ${monthIn(history.last)} ${sum(article.last)}`}
           </button>
         )}
         <button
@@ -80,12 +65,12 @@ export default function ArticleSheet({
           className={QUICK}
           onClick={() => setText(amountText(article.plan, decimals))}
         >
-          ↺ как было
+          {`↺ как было ${moneyText(article.plan, currency)}`}
         </button>
       </div>
       <button
         type="button"
-        className="h-12 rounded-xl bg-button font-semibold text-button-text"
+        className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text"
         onClick={() => onDone(text)}
       >
         Готово

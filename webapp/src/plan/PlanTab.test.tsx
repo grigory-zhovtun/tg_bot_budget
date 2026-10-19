@@ -31,7 +31,9 @@ describe("PlanTab", () => {
     const api = fakeApi();
     const user = userEvent.setup();
     render(<Harness api={api} />);
-    expect(await screen.findByText("Свободно")).toBeTruthy();
+    expect(
+      await screen.findByRole("region", { name: "Итог месяца" }),
+    ).toBeTruthy();
     await user.click(screen.getByRole("radio", { name: "Ноябрь" }));
     expect(await screen.findByText("Плана на ноябрь ещё нет")).toBeTruthy();
     expect(vi.mocked(api.plan).mock.lastCall?.[0]).toBe("2026-11");
@@ -41,13 +43,15 @@ describe("PlanTab", () => {
     const user = userEvent.setup();
     render(<Harness api={fakeApi()} />);
     await user.click(await screen.findByRole("button", { name: "кофе" }));
-    await user.click(screen.getByRole("button", { name: "= среднему" }));
+    await user.click(screen.getByRole("button", { name: /^= в среднем/ }));
     await user.click(screen.getByRole("button", { name: "Готово" }));
     await user.click(screen.getByRole("radio", { name: "Ноябрь" }));
     await user.click(
       await screen.findByRole("button", { name: "Создать план на ноябрь" }),
     );
-    expect(await screen.findByText("Свободно")).toBeTruthy();
+    expect(
+      await screen.findByRole("region", { name: "Итог месяца" }),
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Сохранить/ })).toBeNull();
     await user.click(screen.getByRole("radio", { name: /^Октябрь/ }));
     expect(
@@ -59,11 +63,18 @@ describe("PlanTab", () => {
     const user = userEvent.setup();
     render(<Harness api={fakeApi()} />);
     await user.click(await screen.findByRole("button", { name: "кофе" }));
-    await user.click(screen.getByRole("button", { name: "= среднему" }));
+    await user.click(screen.getByRole("button", { name: /^= в среднем/ }));
     await user.click(screen.getByRole("button", { name: "Готово" }));
     expect(
       screen.getByRole("radio", { name: "Октябрь, есть несохранённые правки" }),
     ).toBeTruthy();
     expect(screen.getByRole("radio", { name: "Ноябрь" })).toBeTruthy();
+  });
+
+  it("draws the month buttons in big bold text", async () => {
+    render(<Harness api={fakeApi()} />);
+    const october = await screen.findByRole("radio", { name: "Октябрь" });
+    expect(october.className).toContain("text-line");
+    expect(october.className).toContain("font-extrabold");
   });
 });

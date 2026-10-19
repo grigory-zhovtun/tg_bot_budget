@@ -36,7 +36,7 @@ export default function PlanTab({
               type="button"
               role="radio"
               aria-checked={chosen}
-              className={`rounded-full px-4 py-1.5 text-sm font-medium ${
+              className={`rounded-full px-4 py-2 text-line font-extrabold ${
                 chosen ? "bg-button text-button-text" : "bg-section"
               }`}
               onClick={() => setMonth(item)}
@@ -47,7 +47,7 @@ export default function PlanTab({
                   <span className="sr-only">, есть несохранённые правки</span>
                   <span
                     aria-hidden="true"
-                    className="ml-1 inline-block size-1.5 rounded-full bg-current align-middle"
+                    className="ml-1.5 inline-block size-2.5 rounded-full bg-current align-middle"
                   />
                 </>
               )}

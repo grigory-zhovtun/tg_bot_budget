@@ -12,7 +12,8 @@ interface Props {
   onClose: () => void;
 }
 
-const FIELD = "rounded-xl bg-section px-3 py-2 text-base text-text";
+const FIELD = "rounded-xl bg-section px-3 py-2 text-lg text-text";
+const LABEL = "flex flex-col gap-1 text-line font-bold text-text";
 
 export default function EventSheet({
   event,
@@ -38,13 +39,13 @@ export default function EventSheet({
     dayNumber <= 31 &&
     amountValue(text) > 0;
   const kind = (active: boolean) =>
-    `rounded-lg py-1.5 text-sm font-medium ${active ? "bg-bg shadow-sm" : "text-hint"}`;
+    `rounded-lg py-2 text-line ${active ? "bg-bg font-extrabold shadow-sm" : "font-semibold text-text"}`;
   return (
     <Sheet
       title={filled ? "Поступление или платёж" : "Новая строка списка"}
       onClose={onClose}
     >
-      <label className="flex flex-col gap-1 text-sm text-hint">
+      <label className={LABEL}>
         Название
         <input
           className={FIELD}
@@ -54,7 +55,7 @@ export default function EventSheet({
         />
       </label>
       <div className="flex gap-2">
-        <label className="flex flex-1 flex-col gap-1 text-sm text-hint">
+        <label className={`flex-1 ${LABEL}`}>
           День
           <input
             className={FIELD}
@@ -66,7 +67,7 @@ export default function EventSheet({
             onChange={(change) => setDay(change.target.value)}
           />
         </label>
-        <label className="flex flex-1 flex-col gap-1 text-sm text-hint">
+        <label className={`flex-1 ${LABEL}`}>
           Валюта
           <select
             className={FIELD}
@@ -112,7 +113,7 @@ export default function EventSheet({
       <button
         type="button"
         disabled={!valid}
-        className="h-12 rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
+        className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
         onClick={() =>
           onDone({ name: name.trim(), day: dayNumber, income, text, currency })
         }
@@ -122,7 +123,7 @@ export default function EventSheet({
       {filled && (
         <button
           type="button"
-          className="text-danger"
+          className="py-2 text-line font-extrabold text-danger"
           onClick={() => onDone(null)}
         >
           Удалить строку

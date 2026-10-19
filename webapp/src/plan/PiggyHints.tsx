@@ -1,5 +1,7 @@
 import type { MonthPlan, PlanPiggyHint } from "../api";
-import { MONTHS_IN, monthIndex, piggyMoney } from "../dashboard/piggyText";
+import { Fact, Line } from "../dashboard/blocks";
+import { MONTHS_IN, monthIndex } from "../dashboard/piggyText";
+import { moneyText } from "../format";
 import { amountValue } from "../entry/amount";
 import { groupTitle } from "../forecast/records";
 import {
@@ -50,7 +52,7 @@ function applied(plan: MonthPlan, draft: Draft, hint: PlanPiggyHint): Draft {
   return next;
 }
 
-/** «Из копилки «Новый год» в декабре — 12,00 млн: заложите в статью …» — пока
+/** «🐷 Из копилки 12 000 000», «Новый год» в декабре, «заложите в статью …» — пока
  * плана статьи не хватает на трату копилки (спека 4.7). */
 export default function PiggyHints({ plan, draft, onDraft }: Props) {
   const shown = (plan.piggy_hints ?? []).filter(
@@ -60,19 +62,22 @@ export default function PiggyHints({ plan, draft, onDraft }: Props) {
   return (
     <section
       aria-label="Копилки в плане"
-      className="flex flex-col gap-3 rounded-2xl bg-section p-3"
+      className="flex flex-col gap-4 rounded-2xl bg-section p-4"
     >
       {shown.map((hint) => (
         <div
           key={`${hint.piggy}|${hint.subcategory}|${hint.currency}`}
           className="flex flex-col gap-1"
         >
-          <p className="text-sm">
-            {`Из копилки «${hint.piggy}» в ${MONTHS_IN[monthIndex(hint.month)] ?? hint.month} — ${piggyMoney(hint.amount, hint.currency)}: заложите в статью «${groupTitle(hint.group)} / ${hint.subcategory}»`}
-          </p>
+          <Fact>{`🐷 Из копилки ${moneyText(hint.amount, hint.currency)}`}</Fact>
+          <Line>
+            {`«${hint.piggy}» в ${MONTHS_IN[monthIndex(hint.month)] ?? hint.month}`}
+          </Line>
+          <Line>заложите в статью</Line>
+          <Line>{`«${groupTitle(hint.group)} / ${hint.subcategory}»`}</Line>
           <button
             type="button"
-            className="self-start font-semibold text-link"
+            className="mt-1 h-12 rounded-xl bg-button text-lg font-extrabold text-button-text"
             onClick={() => onDraft(applied(plan, draft, hint))}
           >
             Применить

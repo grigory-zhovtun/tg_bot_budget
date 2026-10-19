@@ -1,10 +1,11 @@
 import { useState } from "react";
 import type { PlanAddable, PlanHistory } from "../api";
 import { amountValue } from "../entry/amount";
-import { money } from "../format";
+import { moneyText } from "../format";
 import AmountPad from "./AmountPad";
 import { amountText, pairKey } from "./draft";
-import { capital, days, monthDative, monthName, monthRange } from "./months";
+import History, { QUICK, rounded } from "./History";
+import { monthIn } from "./months";
 import Sheet from "./Sheet";
 
 interface Props {
@@ -17,10 +18,8 @@ interface Props {
   onClose: () => void;
 }
 
-const QUICK = "rounded-xl bg-section py-2 text-link";
-
 function chip(chosen: boolean): string {
-  return `rounded-full px-3 py-1.5 text-sm ${
+  return `rounded-full px-4 py-2 text-line font-bold ${
     chosen ? "bg-button text-button-text" : "bg-section"
   }`;
 }
@@ -50,10 +49,10 @@ export default function AddArticleSheet({
     (one) => one.subcategory === subcategory && one.currency === currency,
   );
   const decimals = currency !== "UZS";
-  const fraction = decimals ? 2 : 0;
   // подсказку в сумах округляем до тысяч, как в окне статьи
   const nice = (value: number) =>
-    amountText(decimals ? value : Math.round(value / 1000) * 1000, decimals);
+    amountText(rounded(value, currency), decimals);
+  const sum = (value: number) => moneyText(rounded(value, currency), currency);
   const pick = (name: string) => {
     const options = items
       .filter((one) => one.subcategory === name)
@@ -101,33 +100,23 @@ export default function AddArticleSheet({
         </div>
       )}
       <AmountPad text={text} currency={currency} onChange={setText} />
-      {history && item && (
-        <dl className="flex flex-col gap-1 rounded-2xl bg-section p-3 text-sm">
-          <div className="flex justify-between gap-3">
-            <dt>Среднее за {monthRange(history.average)}</dt>
-            <dd>{money(item.average, fraction)}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt>{capital(monthName(history.last))}</dt>
-            <dd>{money(item.last, fraction)}</dd>
-          </div>
-          <div className="flex justify-between gap-3">
-            <dt>
-              {capital(monthName(history.current))} пока (
-              {days(history.current_days)})
-            </dt>
-            <dd>{money(item.current, fraction)}</dd>
-          </div>
-        </dl>
+      {item && (
+        <History
+          currency={currency}
+          history={history}
+          average={item.average}
+          last={item.last}
+          current={item.current}
+        />
       )}
       {item && (
-        <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="flex flex-col gap-2">
           <button
             type="button"
             className={QUICK}
             onClick={() => setText(nice(item.average))}
           >
-            = среднему
+            {`= в среднем ${sum(item.average)}`}
           </button>
           {history && (
             <button
@@ -135,7 +124,7 @@ export default function AddArticleSheet({
               className={QUICK}
               onClick={() => setText(nice(item.last))}
             >
-              = {monthDative(history.last)}
+              {`= как ${monthIn(history.last)} ${sum(item.last)}`}
             </button>
           )}
         </div>
@@ -143,7 +132,7 @@ export default function AddArticleSheet({
       <button
         type="button"
         disabled={!item || amountValue(text) <= 0}
-        className="h-12 rounded-xl bg-button font-semibold text-button-text disabled:opacity-50"
+        className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50"
         onClick={() => {
           if (item) onDone(item, text);
         }}
@@ -151,7 +140,11 @@ export default function AddArticleSheet({
         {initial ? "Готово" : "Добавить"}
       </button>
       {onRemove && (
-        <button type="button" className="py-2 text-danger" onClick={onRemove}>
+        <button
+          type="button"
+          className="py-2 text-line font-extrabold text-danger"
+          onClick={onRemove}
+        >
           Убрать статью
         </button>
       )}

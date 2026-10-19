@@ -74,7 +74,9 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App api={fakeApi()} />);
     await user.click(await screen.findByRole("tab", { name: /План/ }));
-    expect(await screen.findByText("Свободно")).toBeTruthy();
+    expect(
+      await screen.findByRole("region", { name: "Итог месяца" }),
+    ).toBeTruthy();
   });
 
   it("marks unsaved plan edits and offers them again", async () => {
@@ -88,9 +90,7 @@ describe("App", () => {
       await screen.findByLabelText("есть несохранённые правки"),
     ).toBeTruthy();
     await user.click(screen.getByRole("tab", { name: /План/ }));
-    expect(
-      await screen.findByText("Есть несохранённые правки с прошлого раза"),
-    ).toBeTruthy();
+    expect(await screen.findByText("Несохранённые правки")).toBeTruthy();
   });
 
   it("keeps plan edits between tabs", async () => {
@@ -98,7 +98,7 @@ describe("App", () => {
     render(<App api={fakeApi()} />);
     await user.click(await screen.findByRole("tab", { name: /План/ }));
     await user.click(await screen.findByRole("button", { name: "кофе" }));
-    await user.click(screen.getByRole("button", { name: "= среднему" }));
+    await user.click(screen.getByRole("button", { name: /^= в среднем/ }));
     await user.click(screen.getByRole("button", { name: "Готово" }));
     await user.click(screen.getByRole("tab", { name: "Сводка" }));
     expect(screen.getByLabelText("есть несохранённые правки")).toBeTruthy();

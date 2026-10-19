@@ -23,14 +23,14 @@ export default function AdvicePanel({
 }: Props) {
   return (
     <section
-      className="flex flex-col gap-2 rounded-2xl bg-section p-4 text-sm"
+      className="flex flex-col gap-2 rounded-2xl bg-section p-4 text-line"
       aria-label="Совет по плану"
     >
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold">🧠 Совет по плану</h3>
+        <h3 className="text-fact font-extrabold">🧠 Совет по плану</h3>
         <button
           type="button"
-          className="text-hint"
+          className="text-2xl font-bold"
           aria-label="Скрыть совет"
           onClick={onClose}
         >
@@ -38,15 +38,15 @@ export default function AdvicePanel({
         </button>
       </div>
       {state.kind === "loading" && (
-        <p className="text-hint">Советник думает…</p>
+        <p className="text-line">Советник думает…</p>
       )}
       {state.kind === "error" && (
-        <p className="text-danger" role="alert">
+        <p className="text-line font-extrabold text-danger" role="alert">
           {state.message}
         </p>
       )}
       {state.kind === "ready" && state.points.length === 0 && (
-        <p className="text-hint">Советнику нечего добавить</p>
+        <p className="text-line">Советнику нечего добавить</p>
       )}
       {state.kind === "ready" && state.points.length > 0 && (
         <ol className="flex flex-col gap-3">
@@ -58,12 +58,12 @@ export default function AdvicePanel({
                 key={`${index}-${point.text}`}
                 className="flex flex-col gap-1"
               >
-                <p>{point.text}</p>
+                <p className="text-line">{point.text}</p>
                 {label && (
                   <button
                     type="button"
                     disabled={done}
-                    className="self-start rounded-xl bg-bg px-3 py-1.5 text-link disabled:text-hint"
+                    className="w-full rounded-xl bg-bg px-3 py-2 text-left text-line font-extrabold text-link disabled:text-text"
                     onClick={() => onApply(point)}
                   >
                     {done ? "✓ Применено" : label}

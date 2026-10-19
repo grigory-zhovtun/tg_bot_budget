@@ -25,10 +25,10 @@ export default function GoalSheet({
   const [touched, setTouched] = useState(false);
   return (
     <Sheet title="🎯 Отложить за месяц" onClose={onClose}>
-      <label className="flex items-center justify-between gap-3 text-sm text-hint">
+      <label className="flex items-center justify-between gap-3 text-line font-bold text-text">
         Валюта
         <select
-          className="rounded-xl bg-section px-3 py-2 text-base text-text"
+          className="rounded-xl bg-section px-3 py-2 text-lg text-text"
           value={currency}
           onChange={(change) => {
             setCurrency(change.target.value);
@@ -53,7 +53,7 @@ export default function GoalSheet({
       />
       <button
         type="button"
-        className="h-12 rounded-xl bg-button font-semibold text-button-text"
+        className="h-12 rounded-xl bg-button text-lg font-extrabold text-button-text"
         onClick={() =>
           !touched && goal.amount < 0 ? onClose() : onDone(text, currency)
         }
