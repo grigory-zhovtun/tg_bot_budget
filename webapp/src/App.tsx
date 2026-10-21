@@ -169,7 +169,7 @@ export default function App({ api }: { api: Api }) {
     <StoreProvider value={store}>
       <main className="mx-auto flex max-w-md flex-col gap-4 p-4">
         <nav
-          className="flex gap-1 rounded-xl bg-section p-1"
+          className="flex gap-0.5 rounded-xl bg-section p-1"
           role="tablist"
           aria-label="Разделы"
         >
@@ -179,7 +179,7 @@ export default function App({ api }: { api: Api }) {
               type="button"
               role="tab"
               aria-selected={tab === name}
-              className={`flex-auto rounded-lg px-1.5 py-2 text-tab font-semibold ${
+              className={`flex-auto rounded-lg px-0.5 py-2 text-tab font-semibold ${
                 tab === name ? "bg-bg shadow-sm" : "text-hint"
               }`}
               onClick={() => {

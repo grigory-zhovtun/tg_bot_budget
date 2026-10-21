@@ -91,10 +91,16 @@ describe("App", () => {
       "План",
       "Календарь",
     ]);
-    // «Календарь» не влезает в равную четверть ряда — ширина по подписи
-    expect(screen.getByRole("tablist").className).toContain("flex");
-    expect(screen.getByRole("tablist").className).not.toContain("grid-cols-4");
-    for (const tab of tabs) expect(tab.className).toContain("flex-auto");
+    // «Календарь» не влезает в равную четверть ряда — ширина по подписи; отступы
+    // узкие: при крупном шрифте телефона (×1,25) ряд влезает и в 320 px
+    const list = screen.getByRole("tablist");
+    expect(list.className).toContain("flex");
+    expect(list.className).toContain("gap-0.5");
+    expect(list.className).not.toContain("grid-cols-4");
+    for (const tab of tabs) {
+      expect(tab.className).toContain("flex-auto");
+      expect(tab.className).toContain("px-0.5");
+    }
   });
 
   it("switches to the calendar", async () => {

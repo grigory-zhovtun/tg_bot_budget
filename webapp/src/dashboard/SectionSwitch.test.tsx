@@ -51,6 +51,28 @@ describe("SectionSwitch", () => {
     ).toContain("grid-cols-2");
   });
 
+  it("lets a long label break inside its cell with a large phone font", () => {
+    render(
+      <SectionSwitch
+        label="Раздел"
+        sections={[
+          { name: "a", title: "План месяца" },
+          { name: "b", title: "Накопления" },
+        ]}
+        section="a"
+        onSection={vi.fn()}
+      />,
+    );
+    // одно слово — с дефисом; несколько — по пробелам, без дефисов внутри
+    const word = screen.getByRole("radio", { name: "Накопления" });
+    expect(word.className).toContain("break-words");
+    expect(word.className).toContain("hyphens-auto");
+    const words = screen.getByRole("radio", { name: "План месяца" });
+    expect(words.className).toContain("break-words");
+    expect(words.className).not.toContain("hyphens-auto");
+    expect(words.className).toContain("px-1");
+  });
+
   it("tells which section was pressed", async () => {
     const onSection = vi.fn();
     const user = userEvent.setup();

@@ -27,7 +27,11 @@ export default function SectionSwitch<T extends string>({
           type="button"
           role="radio"
           aria-checked={section === name}
-          className={`rounded-lg px-2 py-2 text-base ${
+          // крупный шрифт телефона: одно длинное слово переносится с дефисом,
+          // несколько — по пробелам
+          className={`rounded-lg px-1 py-2 text-base break-words ${
+            title.includes(" ") ? "" : "hyphens-auto"
+          } ${
             section === name
               ? "bg-bg font-extrabold shadow-sm"
               : "font-semibold text-text"
