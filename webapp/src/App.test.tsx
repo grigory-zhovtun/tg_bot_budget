@@ -62,10 +62,25 @@ describe("App", () => {
     expect(tab.className).toContain("text-tab");
   });
 
-  it("switches to the forecast", async () => {
+  it("names the tabs by what they hold, each as wide as its name", () => {
+    render(<App api={fakeApi()} />);
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.map((tab) => tab.textContent)).toEqual([
+      "Ввод",
+      "Сводка",
+      "План",
+      "Календарь",
+    ]);
+    // «Календарь» не влезает в равную четверть ряда — ширина по подписи
+    expect(screen.getByRole("tablist").className).toContain("flex");
+    expect(screen.getByRole("tablist").className).not.toContain("grid-cols-4");
+    for (const tab of tabs) expect(tab.className).toContain("flex-auto");
+  });
+
+  it("switches to the calendar", async () => {
     const user = userEvent.setup();
     render(<App api={fakeApi()} />);
-    await user.click(screen.getByRole("tab", { name: "Прогноз" }));
+    await user.click(screen.getByRole("tab", { name: "Календарь" }));
     expect(await screen.findByText("Октябрь")).toBeTruthy();
   });
 
@@ -150,7 +165,7 @@ describe("App", () => {
       expect(api.plan).toHaveBeenCalledWith("2026-10", false);
     });
     expect(api.forecast).toHaveBeenCalledWith(false);
-    await user.click(screen.getByRole("tab", { name: "Прогноз" }));
+    await user.click(screen.getByRole("tab", { name: "Календарь" }));
     expect(screen.getByText("Октябрь")).toBeTruthy();
     expect(api.forecast).toHaveBeenCalledTimes(1);
   });

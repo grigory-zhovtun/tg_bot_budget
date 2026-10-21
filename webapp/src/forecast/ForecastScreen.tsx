@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import type { Api, Bootstrap, CalendarRecord, Forecast } from "../api";
+import { monthName } from "../plan/months";
 import { useResource, useStore } from "../store";
 import DayCard from "./DayCard";
 import ForecastChart from "./ForecastChart";
@@ -264,7 +265,9 @@ export default function ForecastScreen({ api, boot }: Props) {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">
-          {data ? `Прогноз · ${data.month}` : "Прогноз"}
+          {data
+            ? `Календарь · ${monthName(data.today.slice(0, 7))}`
+            : "Календарь"}
         </h1>
         <button
           type="button"

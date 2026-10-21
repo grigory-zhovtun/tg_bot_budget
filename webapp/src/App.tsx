@@ -23,7 +23,7 @@ const TABS: { name: Tab; title: string }[] = [
   { name: "entry", title: "Ввод" },
   { name: "dashboard", title: "Сводка" },
   { name: "plan", title: "План" },
-  { name: "forecast", title: "Прогноз" },
+  { name: "forecast", title: "Календарь" },
 ];
 
 function errorText(reason: unknown): string {
@@ -167,7 +167,7 @@ export default function App({ api }: { api: Api }) {
     <StoreProvider value={store}>
       <main className="mx-auto flex max-w-md flex-col gap-4 p-4">
         <nav
-          className="grid grid-cols-4 gap-1 rounded-xl bg-section p-1"
+          className="flex gap-1 rounded-xl bg-section p-1"
           role="tablist"
           aria-label="Разделы"
         >
@@ -177,7 +177,7 @@ export default function App({ api }: { api: Api }) {
               type="button"
               role="tab"
               aria-selected={tab === name}
-              className={`rounded-lg py-2 text-tab font-semibold ${
+              className={`flex-auto rounded-lg px-1.5 py-2 text-tab font-semibold ${
                 tab === name ? "bg-bg shadow-sm" : "text-hint"
               }`}
               onClick={() => setTab(name)}
