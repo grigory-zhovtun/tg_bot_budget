@@ -45,7 +45,7 @@ describe("SavingsTab", () => {
     expect(await screen.findByText("⚠️ План месяца не сходится")).toBeTruthy();
     expect(screen.getByText("в плане «Отложить» 2 000 000")).toBeTruthy();
     expect(screen.getByText("по копилкам нужно 7 200 000")).toBeTruthy();
-    expect(screen.getByText("поправьте во вкладке «План»")).toBeTruthy();
+    expect(screen.getByText("поправьте в «Плане месяца»")).toBeTruthy();
   });
 
   it("says nothing more when the plan already matches", async () => {

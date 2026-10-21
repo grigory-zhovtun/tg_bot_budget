@@ -755,7 +755,7 @@ class AnalyticsService:
         percent: float | None = None,
         order: Sequence[str] | None = None,
     ) -> "SavingsTab | None":
-        """Вкладка «Накопления»; None — вкладки месяца нет. percent и order —
+        """«Накопления» (раздел «Плана»); None — вкладки месяца нет. percent и order —
         предпросмотр окон «Процент» и «Порядок».
 
         currencies, groups, subcategories — валюты карт и справочник статей бота:
@@ -792,7 +792,7 @@ class AnalyticsService:
     def forecast(
         self, today: date, currencies: Iterable[str], max_age: float = 0.0
     ) -> "MonthForecast | None":
-        """Экран «Прогноз» Mini App; None — вкладки месяца нет.
+        """Экран «Календарь» Mini App; None — вкладки месяца нет.
 
         max_age > 0 — годятся копии листов не старше стольких секунд.
         """

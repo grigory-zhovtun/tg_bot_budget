@@ -116,7 +116,7 @@ function SetAside({
           <Warn>План месяца не сходится</Warn>
           <Line>{`в плане «Отложить» ${money(differs.inPlan)}`}</Line>
           <Line>{`по копилкам нужно ${money(differs.needed)}`}</Line>
-          <Line>поправьте во вкладке «План»</Line>
+          <Line>поправьте в «Плане месяца»</Line>
         </>
       )}
       {onSave && (

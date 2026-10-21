@@ -213,7 +213,7 @@ def day_budget(
     Строки списка — по сверке с fact (services.receipts): к утру дня — для лимита и
     заморозки; на сейчас — для «Впереди» и трат дня. Прогноз по сумам — линия «по
     темпу» модели прогноза (services.forecast) с записями календаря records, как во
-    вкладке «Прогноз».
+    вкладке «Календарь».
     """
     forecast = read_forecast(rows)
     if forecast is None:
