@@ -26,8 +26,22 @@ function withSavings(changes: Partial<SavingsScreen>): Api {
 }
 
 describe("SavingsTab", () => {
+  it("titles the section with the month and reads the table anew", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(<SavingsTab api={api} boot={null} />);
+    expect(
+      await screen.findByRole("heading", {
+        level: 1,
+        name: "Накопления · октябрь",
+      }),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Обновить" }));
+    expect(api.savings).toHaveBeenLastCalledWith(true);
+  });
+
   it("tells when the month plan's «Отложить» differs from the piggies", async () => {
-    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} />);
     expect(await screen.findByText("⚠️ План месяца не сходится")).toBeTruthy();
     expect(screen.getByText("в плане «Отложить» 2 000 000")).toBeTruthy();
     expect(screen.getByText("по копилкам нужно 7 200 000")).toBeTruthy();
@@ -42,13 +56,13 @@ describe("SavingsTab", () => {
       share: 4_000_000,
       spent: 2_800_000,
     };
-    render(<SavingsTab api={withSavings({ goal })} boot={null} refresh={0} />);
+    render(<SavingsTab api={withSavings({ goal })} boot={null} />);
     await screen.findByText("Откладываем 25 %");
     expect(screen.queryByText(/План месяца не сходится/)).toBeNull();
   });
 
   it("says the percent and how much to set aside of what came in", async () => {
-    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} />);
     const heading = await screen.findByText("Откладываем 25 %");
     expect(heading.className).toContain("text-fact");
     expect(screen.getByText("с каждого поступления")).toBeTruthy();
@@ -70,7 +84,7 @@ describe("SavingsTab", () => {
     const api = withSavings({
       month: { ...month(), cushion: 1_000_000, percent_needed: 20 },
     });
-    render(<SavingsTab api={api} boot={null} refresh={0} />);
+    render(<SavingsTab api={api} boot={null} />);
     const table = await screen.findByRole("table");
     expect(
       [...table.querySelectorAll("tbody tr")].map((row) => row.textContent),
@@ -82,7 +96,7 @@ describe("SavingsTab", () => {
     const api = withSavings({
       month: { ...month(), percent: 10, percent_source: "bad" },
     });
-    render(<SavingsTab api={api} boot={null} refresh={0} />);
+    render(<SavingsTab api={api} boot={null} />);
     expect(await screen.findByText("⚠️ Процент не читается")).toBeTruthy();
     expect(screen.getByText("считаю по 10 %")).toBeTruthy();
   });
@@ -91,7 +105,7 @@ describe("SavingsTab", () => {
     const api = withSavings({
       month: { ...month(), received: 0, due: 0, left: 0 },
     });
-    render(<SavingsTab api={api} boot={null} refresh={0} />);
+    render(<SavingsTab api={api} boot={null} />);
     expect(
       await screen.findByText("в октябре поступлений ещё не было"),
     ).toBeTruthy();
@@ -100,7 +114,7 @@ describe("SavingsTab", () => {
 
   it("opens the percent and the order windows", async () => {
     const user = userEvent.setup();
-    render(<SavingsTab api={fakeApi()} boot={bootstrapFixture} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={bootstrapFixture} />);
     await user.click(
       await screen.findByRole("button", { name: "Изменить процент" }),
     );
@@ -115,7 +129,7 @@ describe("SavingsTab", () => {
   });
 
   it("tells whether the plan leaves enough for life", async () => {
-    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} />);
     const line = await screen.findByText("⚠️ На жизнь не хватит");
     // не хватает — оранжевым, как остальные предупреждения
     expect(line.className).toContain("text-danger");
@@ -134,14 +148,14 @@ describe("SavingsTab", () => {
         gap: 4_000_000,
       },
     });
-    render(<SavingsTab api={api} boot={null} refresh={0} />);
+    render(<SavingsTab api={api} boot={null} />);
     expect(await screen.findByText("✓ На жизнь хватает")).toBeTruthy();
     expect(screen.getByText("останется 38 000 000")).toBeTruthy();
     expect(screen.getByText("запас 4 000 000")).toBeTruthy();
   });
 
   it("shows the cushion without the money of the piggies", async () => {
-    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} />);
     expect(await screen.findByText("заморожено 1 500 $")).toBeTruthy();
     expect(screen.getByText("минус копилки 400 $")).toBeTruthy();
     expect(screen.getByText("на вечер вчера")).toBeTruthy();
@@ -151,7 +165,7 @@ describe("SavingsTab", () => {
     const api = withSavings({
       cushion: { ...cushion(), amount: 0, over: 300 },
     });
-    render(<SavingsTab api={api} boot={null} refresh={0} />);
+    render(<SavingsTab api={api} boot={null} />);
     expect(await screen.findByText("⚠️ Копилки больше карты")).toBeTruthy();
     expect(screen.getByText("разница 300 $")).toBeTruthy();
     expect(screen.getByText("отложите разницу")).toBeTruthy();
@@ -159,7 +173,7 @@ describe("SavingsTab", () => {
   });
 
   it("lists the piggies by deadline with their state", async () => {
-    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} />);
     const list = await screen.findByRole("list", { name: "Копилки" });
     const cards = within(list).getAllByRole("listitem");
     expect(
@@ -194,9 +208,7 @@ describe("SavingsTab", () => {
   });
 
   it("invites to start the first piggy", async () => {
-    render(
-      <SavingsTab api={withSavings({ piggies: [] })} boot={null} refresh={0} />,
-    );
+    render(<SavingsTab api={withSavings({ piggies: [] })} boot={null} />);
     expect(
       await screen.findByText(
         "Заведите копилку на Новый год, отпуск или другую большую трату — бот разложит взносы по месяцам",
@@ -206,7 +218,7 @@ describe("SavingsTab", () => {
 
   it("shows three months of the plan and the whole year on request", async () => {
     const user = userEvent.setup();
-    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} />);
     const plan = await screen.findByRole("region", { name: "План на год" });
     expect(within(plan).getAllByRole("listitem")).toHaveLength(3);
     const november = within(plan).getByText("Ноябрь — 10 000 000");
@@ -222,7 +234,7 @@ describe("SavingsTab", () => {
   });
 
   it("keeps the savings rate at the bottom", async () => {
-    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} />);
     await screen.findByText("Откладываем 25 %");
     expect(
       screen
@@ -239,7 +251,7 @@ describe("SavingsTab", () => {
 
   it("explains a missing month tab", async () => {
     const api = withSavings({ status: "no_month_tab", month: null });
-    render(<SavingsTab api={api} boot={null} refresh={0} />);
+    render(<SavingsTab api={api} boot={null} />);
     expect(
       await screen.findByText(
         "Вкладки месяца нет — бот создаёт её 1-го числа.",
@@ -247,20 +259,10 @@ describe("SavingsTab", () => {
     ).toBeTruthy();
   });
 
-  it("reads the table anew when the summary is refreshed", async () => {
-    const api = fakeApi();
-    const { rerender } = render(
-      <SavingsTab api={api} boot={null} refresh={0} />,
-    );
-    await screen.findByText("Откладываем 25 %");
-    rerender(<SavingsTab api={api} boot={null} refresh={1} />);
-    expect(api.savings).toHaveBeenLastCalledWith(true);
-  });
-
   it("opens a piggy from its card and closes the window after a save", async () => {
     const api = fakeApi();
     const user = userEvent.setup();
-    render(<SavingsTab api={api} boot={bootstrapFixture} refresh={0} />);
+    render(<SavingsTab api={api} boot={bootstrapFixture} />);
     await user.click(
       await screen.findByRole("button", {
         name: "Открыть копилку «Новый год»",
@@ -274,7 +276,7 @@ describe("SavingsTab", () => {
 
   it("starts a new piggy and sets a sum aside from the top", async () => {
     const user = userEvent.setup();
-    render(<SavingsTab api={fakeApi()} boot={bootstrapFixture} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={bootstrapFixture} />);
     await user.click(await screen.findByRole("button", { name: "＋ Копилка" }));
     expect(screen.getByRole("dialog", { name: "Новая копилка" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Закрыть" }));
@@ -283,7 +285,7 @@ describe("SavingsTab", () => {
   });
 
   it("only shows the piggies until the catalog is loaded", async () => {
-    render(<SavingsTab api={fakeApi()} boot={null} refresh={0} />);
+    render(<SavingsTab api={fakeApi()} boot={null} />);
     await screen.findByText("Откладываем 25 %");
     expect(screen.queryByRole("button", { name: "＋ Копилка" })).toBeNull();
     expect(

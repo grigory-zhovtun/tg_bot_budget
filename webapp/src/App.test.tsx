@@ -42,9 +42,29 @@ describe("App", () => {
       expect(
         await screen.findByRole("dialog", { name: "Отложил" }),
       ).toBeTruthy();
+      // «Накопления» теперь — раздел «Плана»
+      expect(
+        screen.getByRole("tab", { name: "План" }).getAttribute("aria-selected"),
+      ).toBe("true");
       expect(
         screen.getByRole("radio", { name: "Накопления", checked: true }),
       ).toBeTruthy();
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
+  });
+
+  it("does not open «Отложил» again after the user moves on", async () => {
+    window.history.replaceState(null, "", "/app/?launch=t&open=save");
+    try {
+      const user = userEvent.setup();
+      render(<App api={fakeApi()} />);
+      await screen.findByRole("dialog", { name: "Отложил" });
+      await user.click(screen.getByRole("button", { name: "Закрыть" }));
+      await user.click(screen.getByRole("tab", { name: "Сводка" }));
+      await user.click(screen.getByRole("tab", { name: "План" }));
+      await screen.findByText("Откладываем 25 %");
+      expect(screen.queryByRole("dialog", { name: "Отложил" })).toBeNull();
     } finally {
       window.history.replaceState(null, "", "/");
     }

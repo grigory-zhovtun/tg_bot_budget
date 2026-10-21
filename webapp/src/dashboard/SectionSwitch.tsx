@@ -1,22 +1,27 @@
-import { SECTIONS, type Section } from "./section";
+// классы колонок — целиком: Tailwind собирает только те, что видит в коде
+const COLUMNS: Record<number, string> = { 2: "grid-cols-2", 3: "grid-cols-3" };
 
-interface Props {
-  section: Section;
-  onSection: (section: Section) => void;
+interface Props<T extends string> {
+  label: string; // подпись группы для чтения с экрана: «Раздел сводки»
+  sections: readonly { name: T; title: string }[];
+  section: T;
+  onSection: (section: T) => void;
 }
 
-/**
- * «Сегодня · Траты» / «Накопления · Впереди» — два ряда по два: крупные подписи
- * не слипаются и при крупном шрифте телефона остаются в своей клетке.
- */
-export default function SectionSwitch({ section, onSection }: Props) {
+/** Разделы экрана в одну строку: крупные подписи, выбранный — фоном и жирностью. */
+export default function SectionSwitch<T extends string>({
+  label,
+  sections,
+  section,
+  onSection,
+}: Props<T>) {
   return (
     <div
       role="radiogroup"
-      aria-label="Раздел сводки"
-      className="grid grid-cols-2 gap-1 rounded-xl bg-section p-1"
+      aria-label={label}
+      className={`grid ${COLUMNS[sections.length] ?? "grid-cols-2"} gap-1 rounded-xl bg-section p-1`}
     >
-      {SECTIONS.map(({ name, title }) => (
+      {sections.map(({ name, title }) => (
         <button
           key={name}
           type="button"

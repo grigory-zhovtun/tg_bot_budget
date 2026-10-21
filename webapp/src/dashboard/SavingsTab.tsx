@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import type {
   Api,
   Bootstrap,
@@ -9,6 +9,7 @@ import type {
   SavingsScreen,
 } from "../api";
 import { money, moneyText } from "../format";
+import { monthName } from "../plan/months";
 import { useResource, useStore } from "../store";
 import { Card, Fact, Good, Line, Table, Warn } from "./blocks";
 import CushionCard from "./CushionCard";
@@ -25,7 +26,6 @@ import { MONTHS_IN, monthIndex, percentText } from "./piggyText";
 interface Props {
   api: Api;
   boot: Bootstrap | null; // нет каталога — окна копилки не открыть
-  refresh: number; // растёт с каждым «Обновить» «Сводки» — читать таблицу заново
   openSave?: boolean; // кнопка бота «Отложил часть…» — сразу окно «Отложил»
 }
 
@@ -142,13 +142,14 @@ function Skeleton() {
   );
 }
 
-/** Вкладка «Накопления»: что отложить, подушка, копилки, план на год и норма. */
 /** «Отложил…» — пока с пришедшего есть что отложить копилкам. */
 function canSetAside(data: SavingsScreen): boolean {
   return (data.month?.left ?? 0) > 0;
 }
 
-export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
+/** «Накопления» — второй раздел «Плана»: строка месяца с «Обновить», что отложить,
+ * подушка, копилки, план на год и норма сбережений. */
+export default function SavingsTab({ api, boot, openSave }: Props) {
   const store = useStore();
   const load = useCallback((fresh: boolean) => api.savings(fresh), [api]);
   const { data, loading, error, reload } = useResource<SavingsScreen>(
@@ -176,33 +177,54 @@ export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
     setAsked(true);
     if (data.status === "ok" && canSetAside(data)) setSaving(true);
   }
-  // «Обновить» «Сводки» после открытия вкладки — читать таблицу заново
-  const seen = useRef(refresh);
-  useEffect(() => {
-    if (refresh !== seen.current) {
-      seen.current = refresh;
-      reload(true);
-    }
-  }, [refresh, reload]);
+  // как у «Сводки»: «Обновить» читает таблицу заново, а не копию на сервере
+  const header = (
+    <div className="flex items-center justify-between">
+      <h1 className="text-xl font-extrabold">
+        {data
+          ? `Накопления · ${monthName(data.today.slice(0, 7))}`
+          : "Накопления"}
+      </h1>
+      <button
+        type="button"
+        className="text-lg font-bold text-link disabled:opacity-50"
+        disabled={loading}
+        onClick={() => reload(true)}
+      >
+        {loading ? "Обновляю…" : "Обновить"}
+      </button>
+    </div>
+  );
 
   if (!data) {
-    if (error) {
-      return (
-        <div className="flex flex-col items-start gap-2" role="alert">
-          <p>{error}</p>
-          <button type="button" className="text-link" onClick={() => reload()}>
-            Повторить
-          </button>
-        </div>
-      );
-    }
-    return loading ? <Skeleton /> : null;
+    return (
+      <>
+        {header}
+        {error ? (
+          <div className="flex flex-col items-start gap-2" role="alert">
+            <p>{error}</p>
+            <button
+              type="button"
+              className="text-link"
+              onClick={() => reload()}
+            >
+              Повторить
+            </button>
+          </div>
+        ) : (
+          loading && <Skeleton />
+        )}
+      </>
+    );
   }
   if (data.status === "no_month_tab") {
     return (
-      <p className="text-line">
-        Вкладки месяца нет — бот создаёт её 1-го числа.
-      </p>
+      <>
+        {header}
+        <p className="text-line">
+          Вкладки месяца нет — бот создаёт её 1-го числа.
+        </p>
+      </>
     );
   }
   const names = Object.fromEntries(
@@ -214,6 +236,7 @@ export default function SavingsTab({ api, boot, refresh, openSave }: Props) {
   );
   return (
     <>
+      {header}
       {data.month && (
         <SetAside
           month={data.month}
