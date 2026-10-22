@@ -84,8 +84,9 @@ function SetAside({ month, enough, goal, onSave, onPercent }: SetAsideProps) {
     piggies > 0 ? Math.min(Math.max(1 - month.left / piggies, 0), 1) : 0;
   return (
     <Card label="Откладываем с поступлений">
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="text-fact font-extrabold">{`Откладываем ${percent}`}</h2>
+      {/* «Изменить» справа; на узком экране с крупным шрифтом — строкой ниже */}
+      <div className="flex flex-wrap items-start justify-between gap-x-3">
+        <h2 className="min-w-min flex-1 text-fact font-extrabold">{`Откладываем ${percent}`}</h2>
         {onPercent && (
           <button
             type="button"
