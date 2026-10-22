@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { Api, Bootstrap, Dashboard } from "../api";
+import type { Api, Dashboard } from "../api";
 import { inCurrency, longDay, money, moneyText, signedMoney } from "../format";
 import { monthName } from "../plan/months";
 import { useResource, useStore } from "../store";
@@ -7,10 +7,9 @@ import Ahead, { NoForecastNote } from "./Ahead";
 import { Big, Card, Fact, Good, Line, Warn } from "./blocks";
 import CardBalances from "./CardBalances";
 import CategoryChart from "./CategoryChart";
-import SavingsTab from "./SavingsTab";
 import SectionSwitch from "./SectionSwitch";
 import SpendingChart from "./SpendingChart";
-import { storeSection, storedSection, type Section } from "./section";
+import { SECTIONS, storeSection, storedSection, type Section } from "./section";
 
 function Skeleton() {
   return (
@@ -129,23 +128,12 @@ function Sums({ data }: { data: Dashboard }) {
 }
 
 interface SectionProps {
-  api: Api;
-  boot: Bootstrap | null;
   data: Dashboard;
   section: Section;
-  refresh: number;
-  openSave: boolean;
 }
 
-/** Карточки выбранной вкладки: «Накопления» — свой ответ, остальные — «Сводки». */
-function SectionCards({
-  api,
-  boot,
-  data,
-  section,
-  refresh,
-  openSave,
-}: SectionProps) {
+/** Карточки выбранного раздела «Сводки». */
+function SectionCards({ data, section }: SectionProps) {
   switch (section) {
     case "today":
       return (
@@ -183,39 +171,18 @@ function SectionCards({
           )}
         </>
       );
-    case "savings":
-      return (
-        <SavingsTab
-          api={api}
-          boot={boot}
-          refresh={refresh}
-          openSave={openSave}
-        />
-      );
     case "ahead":
       return <Ahead data={data} />;
   }
 }
 
 interface ContentProps {
-  api: Api;
-  boot: Bootstrap | null;
   data: Dashboard;
   section: Section;
-  refresh: number;
-  openSave: boolean;
   onSection: (section: Section) => void;
 }
 
-function Content({
-  api,
-  boot,
-  data,
-  section,
-  refresh,
-  openSave,
-  onSection,
-}: ContentProps) {
+function Content({ data, section, onSection }: ContentProps) {
   if (data.status === "no_month_tab") {
     // в таком ответе нет данных ни для одной вкладки
     return (
@@ -226,28 +193,18 @@ function Content({
   }
   return (
     <>
-      <SectionSwitch section={section} onSection={onSection} />
-      <SectionCards
-        api={api}
-        boot={boot}
-        data={data}
+      <SectionSwitch
+        label="Раздел сводки"
+        sections={SECTIONS}
         section={section}
-        refresh={refresh}
-        openSave={openSave}
+        onSection={onSection}
       />
+      <SectionCards data={data} section={section} />
     </>
   );
 }
 
-export default function DashboardScreen({
-  api,
-  boot = null,
-  openSave = false,
-}: {
-  api: Api;
-  boot?: Bootstrap | null; // каталог — для окон копилок
-  openSave?: boolean; // из чата «Отложил часть…» — «Накопления» и окно «Отложил»
-}) {
+export default function DashboardScreen({ api }: { api: Api }) {
   const store = useStore();
   const load = useCallback((fresh: boolean) => api.dashboard(fresh), [api]);
   const { data, loading, error, reload } = useResource<Dashboard>(
@@ -256,16 +213,9 @@ export default function DashboardScreen({
     load,
     { failure: "Не получилось загрузить сводку" },
   );
-  // «Обновить» читает таблицу заново, а не копию листов на сервере — и «Сводку»,
-  // и «Накопления»: у них свой ответ, его вкладка ловит счётчик
-  const [refreshed, setRefreshed] = useState(0);
-  const refresh = useCallback(() => {
-    reload(true);
-    setRefreshed((count) => count + 1);
-  }, [reload]);
-  const [section, setSection] = useState<Section>(() =>
-    openSave ? "savings" : storedSection(),
-  );
+  // «Обновить» читает таблицу заново, а не копию листов на сервере
+  const refresh = useCallback(() => reload(true), [reload]);
+  const [section, setSection] = useState<Section>(storedSection);
   const choose = useCallback((next: Section) => {
     setSection(next);
     storeSection(next);
@@ -295,17 +245,7 @@ export default function DashboardScreen({
           </button>
         </div>
       )}
-      {data && (
-        <Content
-          api={api}
-          boot={boot}
-          data={data}
-          section={section}
-          refresh={refreshed}
-          openSave={openSave}
-          onSection={choose}
-        />
-      )}
+      {data && <Content data={data} section={section} onSection={choose} />}
     </div>
   );
 }

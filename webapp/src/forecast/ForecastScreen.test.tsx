@@ -71,6 +71,16 @@ function show(api: Api = fakeApi()) {
 }
 
 describe("ForecastScreen", () => {
+  it("titles the screen as the month's calendar, in Russian", async () => {
+    show();
+    expect(
+      await screen.findByRole("heading", {
+        level: 1,
+        name: "Календарь · октябрь",
+      }),
+    ).toBeTruthy();
+  });
+
   afterEach(() => {
     localStorage.clear();
   });

@@ -248,15 +248,6 @@ describe("DashboardScreen", () => {
     await show(user, "Траты");
     // две похожие полосатые диаграммы не стоят рядом: план-факт один, следом — дни
     expect(headings()).toEqual(["План-факт по категориям", "Траты по дням"]);
-    await show(user, "Накопления");
-    await screen.findByText("Откладываем 25 %"); // свой ответ — «Накопления»
-    expect(headings()).toEqual([
-      "Откладываем 25\u00a0%",
-      "🛟 Подушка",
-      "🐷 Копилки",
-      "План на год",
-      "Норма сбережений",
-    ]);
     await show(user, "Впереди");
     expect(headings()).toEqual(["Впереди", "Подписки"]);
   });
@@ -264,16 +255,51 @@ describe("DashboardScreen", () => {
   it("switches sections and keeps the choice for the next launch", async () => {
     const user = userEvent.setup();
     const first = render(<DashboardScreen api={fakeApi()} />);
-    await show(user, "Накопления");
+    await show(user, "Впереди");
     expect(
-      await screen.findByRole("heading", { name: "🛟 Подушка" }),
+      await screen.findByRole("heading", { name: "Подписки" }),
     ).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Можно сегодня" })).toBeNull();
-    expect(localStorage.getItem("dashboard-section")).toBe("savings");
+    expect(localStorage.getItem("dashboard-section")).toBe("ahead");
     first.unmount();
     render(<DashboardScreen api={fakeApi()} />);
-    const savings = await screen.findByRole("radio", { name: "Накопления" });
-    expect(savings.getAttribute("aria-checked")).toBe("true");
+    const ahead = await screen.findByRole("radio", { name: "Впереди" });
+    expect(ahead.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("has three sections: «Накопления» moved to «План»", async () => {
+    render(<DashboardScreen api={fakeApi()} />);
+    const group = await screen.findByRole("radiogroup", {
+      name: "Раздел сводки",
+    });
+    expect(
+      within(group)
+        .getAllByRole("radio")
+        .map((radio) => radio.textContent),
+    ).toEqual(["Сегодня", "Траты", "Впереди"]);
+  });
+
+  it("opens «Сегодня» when the phone remembers «Накопления»", async () => {
+    localStorage.setItem("dashboard-section", "savings");
+    render(<DashboardScreen api={fakeApi()} />);
+    expect(
+      await screen.findByRole("region", { name: "Можно сегодня" }),
+    ).toBeTruthy();
+    expect(
+      screen
+        .getByRole("radio", { name: "Сегодня" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+  });
+
+  it("reads only the summary anew on «Обновить»", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    render(<DashboardScreen api={api} />);
+    await screen.findByRole("region", { name: "Можно сегодня" });
+    await user.click(screen.getByRole("button", { name: "Обновить" }));
+    expect(api.dashboard).toHaveBeenLastCalledWith(true);
+    expect(api.savings).not.toHaveBeenCalled();
   });
 
   it("keeps the chosen section when the numbers are read anew", async () => {

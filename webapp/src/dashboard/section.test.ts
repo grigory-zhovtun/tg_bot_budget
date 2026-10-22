@@ -11,8 +11,14 @@ describe("the chosen section of «Сводка»", () => {
   });
 
   it("reads the stored section", () => {
+    localStorage.setItem(SECTION_KEY, "ahead");
+    expect(storedSection()).toBe("ahead");
+  });
+
+  it("opens «Сегодня» when the phone remembers «Накопления»", () => {
+    // «Накопления» переехали во «План»
     localStorage.setItem(SECTION_KEY, "savings");
-    expect(storedSection()).toBe("savings");
+    expect(storedSection()).toBe("today");
   });
 
   it.each(["calendar", "", '{"scope":"UZS"}'])(

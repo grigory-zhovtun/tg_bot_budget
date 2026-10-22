@@ -23,7 +23,7 @@ const TABS: { name: Tab; title: string }[] = [
   { name: "entry", title: "Ввод" },
   { name: "dashboard", title: "Сводка" },
   { name: "plan", title: "План" },
-  { name: "forecast", title: "Прогноз" },
+  { name: "forecast", title: "Календарь" },
 ];
 
 function errorText(reason: unknown): string {
@@ -70,11 +70,13 @@ export default function App({ api }: { api: Api }) {
   const [boot, setBoot] = useState<Bootstrap | null>(initial.boot);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
-  // кнопка бота «Отложил часть…» открывает приложение с ?open=save
-  const [openSave] = useState(
+  // кнопка бота «Отложил часть…» открывает приложение с ?open=save — «План →
+  // Накопления» и окно «Отложил»; просьба гаснет, как только пользователь пошёл дальше
+  const [openSave, setOpenSave] = useState(
     () => new URLSearchParams(window.location.search).get("open") === "save",
   );
-  const [tab, setTab] = useState<Tab>(openSave ? "dashboard" : "entry");
+  const saveSeen = useCallback(() => setOpenSave(false), []);
+  const [tab, setTab] = useState<Tab>(openSave ? "plan" : "entry");
   const [drafts, setDrafts] = useState<Record<string, Draft> | null>(
     initial.drafts?.drafts ?? null,
   );
@@ -167,7 +169,7 @@ export default function App({ api }: { api: Api }) {
     <StoreProvider value={store}>
       <main className="mx-auto flex max-w-md flex-col gap-4 p-4">
         <nav
-          className="grid grid-cols-4 gap-1 rounded-xl bg-section p-1"
+          className="flex gap-0.5 rounded-xl bg-section p-1"
           role="tablist"
           aria-label="Разделы"
         >
@@ -177,10 +179,13 @@ export default function App({ api }: { api: Api }) {
               type="button"
               role="tab"
               aria-selected={tab === name}
-              className={`rounded-lg py-2 text-tab font-semibold ${
+              className={`flex-auto rounded-lg px-0.5 py-2 text-tab font-semibold ${
                 tab === name ? "bg-bg shadow-sm" : "text-hint"
               }`}
-              onClick={() => setTab(name)}
+              onClick={() => {
+                setTab(name);
+                saveSeen();
+              }}
             >
               {title}
               {name === "plan" && unsaved && (
@@ -205,20 +210,21 @@ export default function App({ api }: { api: Api }) {
         {tab === "entry" && boot && (
           <EntryScreen api={api} boot={boot} onCatalogChanged={reload} />
         )}
-        {tab === "dashboard" && (
-          <DashboardScreen api={api} boot={boot} openSave={openSave} />
-        )}
+        {tab === "dashboard" && <DashboardScreen api={api} />}
         {tab === "dashboard" && boot && (
           <HomeScreenButton botUsername={boot.bot_username} />
         )}
-        {tab === "plan" && boot && drafts && (
+        {tab === "plan" && (
           <PlanTab
             api={api}
+            boot={boot}
             months={months}
             drafts={drafts}
             restored={restored}
             onDraft={updateDraft}
             onRestoredSeen={restoredSeen}
+            openSave={openSave}
+            onSaveSeen={saveSeen}
           />
         )}
         {tab === "forecast" && <ForecastScreen api={api} boot={boot} />}
