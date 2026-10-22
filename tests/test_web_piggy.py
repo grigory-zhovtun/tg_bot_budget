@@ -31,8 +31,12 @@ ROW = ["p3k9za", "Кафе с друзьями", 12000000, "UZS", f"{SOON:%d.%m.
        "🍔 ЕДА", "кафе", "", "", "", "", "Иван", ""]  # fmt: skip
 
 
-def saved(amount: float, piggy_id: str = "p3k9za", currency: str = "UZS") -> list[Any]:
-    day = TODAY - timedelta(days=2)
+def saved(
+    amount: float,
+    piggy_id: str = "p3k9za",
+    currency: str = "UZS",
+    day: date = TODAY - timedelta(days=2),
+) -> list[Any]:
     return [f"{day:%d.%m.%Y}", piggy_id, "Кафе с друзьями", amount, currency,
             "отложил", "Иван", ""]  # fmt: skip
 
@@ -227,7 +231,7 @@ def test_savings_screen_shape() -> None:
     assert len(found["savings"]["months"]) == 6
     assert set(found["month"]) == {
         "month", "percent", "percent_source", "percent_needed", "capacity",
-        "received", "due", "left", "cushion",
+        "received", "due", "left", "cushion", "saved",
     }  # fmt: skip
 
 
@@ -559,6 +563,19 @@ def test_savings_answer_has_the_percent_and_the_month() -> None:
     piggy = found["piggies"][0]
     assert (piggy["order"], piggy["status"], piggy["now"]) == (1, "short", 400_000)
     assert piggy["forecast"] < 12_000_000
+
+
+def test_the_month_counts_what_the_piggies_got_since_the_1st() -> None:
+    application, _ = setup(PiggySheets([ROW], [saved(400_000, day=TODAY)]))
+    found = client_for(application).get("/api/savings", headers=auth()).json()
+    assert found["month"]["saved"] == 400_000
+
+
+def test_a_dollar_piggy_counts_in_sums_by_the_tabs_rate() -> None:
+    moves = [saved(100, "tr0001", "USD", day=TODAY)]
+    application, _ = setup(PiggySheets([ROW, TRIP_ROW], moves))
+    found = client_for(application).get("/api/savings", headers=auth()).json()
+    assert found["month"]["saved"] == 1_200_000
 
 
 def test_preview_writes_nothing() -> None:

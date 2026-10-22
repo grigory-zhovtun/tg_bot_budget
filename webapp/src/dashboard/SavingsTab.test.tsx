@@ -17,6 +17,15 @@ function cushion() {
   return savingsFixture.cushion;
 }
 
+/** Первая карточка: «Откладываем N %». */
+function setAside(): HTMLElement {
+  return screen.getByRole("region", { name: "Откладываем с поступлений" });
+}
+
+function bar(): HTMLElement {
+  return screen.getByRole("progressbar", { name: "Отложено копилкам" });
+}
+
 function withSavings(changes: Partial<SavingsScreen>): Api {
   return fakeApi({
     savings: vi
@@ -40,56 +49,99 @@ describe("SavingsTab", () => {
     expect(api.savings).toHaveBeenLastCalledWith(true);
   });
 
-  it("tells when the month plan's «Отложить» differs from the piggies", async () => {
-    render(<SavingsTab api={fakeApi()} boot={null} />);
-    expect(await screen.findByText("⚠️ План месяца не сходится")).toBeTruthy();
-    expect(screen.getByText("в плане «Отложить» 2 000 000")).toBeTruthy();
-    expect(screen.getByText("по копилкам нужно 7 200 000")).toBeTruthy();
-    expect(screen.getByText("поправьте в «Плане месяца»")).toBeTruthy();
-  });
-
-  it("says nothing more when the plan already matches", async () => {
-    const goal = {
-      suggested: 7_200_000,
-      in_plan: 7_200_000,
-      piggies: 6_000_000,
-      share: 4_000_000,
-      spent: 2_800_000,
-    };
-    render(<SavingsTab api={withSavings({ goal })} boot={null} />);
-    await screen.findByText("Откладываем 25 %");
-    expect(screen.queryByText(/План месяца не сходится/)).toBeNull();
-  });
-
-  it("says the percent and how much to set aside of what came in", async () => {
-    render(<SavingsTab api={fakeApi()} boot={null} />);
-    const heading = await screen.findByText("Откладываем 25 %");
-    expect(heading.className).toContain("text-fact");
-    expect(screen.getByText("с каждого поступления")).toBeTruthy();
-    expect(screen.getByText("Отложить 4 000 000").className).toContain(
-      "text-fact",
-    );
-    expect(screen.getByText("в октябре пришло 16 000 000")).toBeTruthy();
-    const table = screen.getByRole("table");
-    expect(
-      [...table.querySelectorAll("tbody tr")].map((row) => row.textContent),
-    ).toEqual([nb("Новый год4 000 000")]);
-    expect(screen.getByText("⚠️ К срокам нужно 30 %").className).toContain(
-      "text-danger",
-    );
-    expect(screen.getByText("чтобы успеть все копилки")).toBeTruthy();
-  });
-
-  it("names the cushion part and a percent that is enough", async () => {
+  it("says the percent, the month's sum and how much is set aside", async () => {
     const api = withSavings({
-      month: { ...month(), cushion: 1_000_000, percent_needed: 20 },
+      month: { ...month(), saved: 1_000_000, left: 3_000_000 },
+    });
+    render(<SavingsTab api={api} boot={bootstrapFixture} />);
+    const heading = await screen.findByRole("heading", {
+      level: 2,
+      name: nb("Откладываем 25 %"),
+    });
+    expect(heading.className).toContain("text-fact");
+    const card = setAside();
+    expect(
+      within(card).getByRole("button", { name: "Изменить процент" })
+        .textContent,
+    ).toBe("Изменить");
+    expect(
+      within(card).getByText("за октябрь отложить 4 000 000"),
+    ).toBeTruthy();
+    expect(bar().getAttribute("aria-valuenow")).toBe("25");
+    expect(
+      within(card).getByText("отложено 1 000 000, ещё 3 000 000"),
+    ).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "Отложил…" })).toBeTruthy();
+    // меньше текста: ни таблицы копилок, ни «пришло», ни «с каждого поступления»
+    expect(within(card).queryByRole("table")).toBeNull();
+    expect(within(card).queryByText(/пришло|с каждого поступления/)).toBeNull();
+  });
+
+  it("says in green when the month's part is set aside", async () => {
+    const api = withSavings({
+      month: { ...month(), saved: 5_000_000, left: 0 },
+    });
+    render(<SavingsTab api={api} boot={bootstrapFixture} />);
+    const done = await screen.findByText("✓ Отложено 5 000 000 из 4 000 000");
+    expect(done.className).toContain("text-ok");
+    expect(bar().getAttribute("aria-valuenow")).toBe("100");
+    expect(screen.queryByRole("button", { name: "Отложил…" })).toBeNull();
+  });
+
+  it("measures the piggies' part and names the cushion's", async () => {
+    const api = withSavings({
+      month: { ...month(), cushion: 300_000, saved: 3_700_000, left: 0 },
     });
     render(<SavingsTab api={api} boot={null} />);
-    const table = await screen.findByRole("table");
     expect(
-      [...table.querySelectorAll("tbody tr")].map((row) => row.textContent),
-    ).toEqual([nb("Новый год4 000 000"), nb("подушка1 000 000")]);
-    expect(screen.getByText("✓ Успеваем всё к срокам")).toBeTruthy();
+      await screen.findByText("✓ Отложено 3 700 000 из 3 700 000"),
+    ).toBeTruthy();
+    expect(screen.getByText("подушке — 300 000")).toBeTruthy();
+    expect(bar().getAttribute("aria-valuenow")).toBe("100");
+  });
+
+  it("puts each warning in one line with its number", async () => {
+    render(<SavingsTab api={fakeApi()} boot={null} />);
+    await screen.findByText("Откладываем 25 %");
+    const card = setAside();
+    const warnings = within(card).getAllByText(/^⚠️/);
+    expect(warnings.map((line) => line.textContent)).toEqual(
+      [
+        "⚠️ К срокам нужно 30 %",
+        "⚠️ На жизнь не хватит 2 200 000",
+        "⚠️ В плане «Отложить» 2 000 000, нужно 7 200 000",
+      ].map(nb),
+    );
+    expect(warnings[0]?.className).toContain("text-danger");
+    // подробности — в окне процента, не здесь
+    expect(
+      within(card).queryByText(
+        /успеть все копилки|останется|обычные траты|разница|поправьте|не сходится/,
+      ),
+    ).toBeNull();
+  });
+
+  it("leaves out the good news to keep the card short", async () => {
+    const api = withSavings({
+      month: { ...month(), percent_needed: 20 },
+      enough: {
+        income: 42_000_000,
+        save: 4_000_000,
+        life: 38_000_000,
+        ordinary: 34_000_000,
+        gap: 4_000_000,
+      },
+      goal: {
+        suggested: 7_200_000,
+        in_plan: 7_200_000,
+        piggies: 6_000_000,
+        share: 4_000_000,
+        spent: 2_800_000,
+      },
+    });
+    render(<SavingsTab api={api} boot={null} />);
+    await screen.findByText("Откладываем 25 %");
+    expect(within(setAside()).queryByText(/^(⚠️|✓)/)).toBeNull();
   });
 
   it("says when the percent cell cannot be read", async () => {
@@ -97,8 +149,9 @@ describe("SavingsTab", () => {
       month: { ...month(), percent: 10, percent_source: "bad" },
     });
     render(<SavingsTab api={api} boot={null} />);
-    expect(await screen.findByText("⚠️ Процент не читается")).toBeTruthy();
-    expect(screen.getByText("считаю по 10 %")).toBeTruthy();
+    expect(
+      await screen.findByText("⚠️ Процент не читается, считаю 10 %"),
+    ).toBeTruthy();
   });
 
   it("says nothing came in yet", async () => {
@@ -109,6 +162,9 @@ describe("SavingsTab", () => {
     expect(
       await screen.findByText("в октябре поступлений ещё не было"),
     ).toBeTruthy();
+    expect(
+      screen.queryByRole("progressbar", { name: "Отложено копилкам" }),
+    ).toBeNull();
     expect(screen.queryByRole("button", { name: "Отложил…" })).toBeNull();
   });
 
@@ -126,32 +182,6 @@ describe("SavingsTab", () => {
     expect(
       screen.getByRole("dialog", { name: "Порядок важности" }),
     ).toBeTruthy();
-  });
-
-  it("tells whether the plan leaves enough for life", async () => {
-    render(<SavingsTab api={fakeApi()} boot={null} />);
-    const line = await screen.findByText("⚠️ На жизнь не хватит");
-    // не хватает — оранжевым, как остальные предупреждения
-    expect(line.className).toContain("text-danger");
-    expect(screen.getByText("останется 31 800 000")).toBeTruthy();
-    expect(screen.getByText("обычные траты 34 000 000")).toBeTruthy();
-    expect(screen.getByText("разница 2 200 000")).toBeTruthy();
-  });
-
-  it("says when the plan leaves enough for life", async () => {
-    const api = withSavings({
-      enough: {
-        income: 42_000_000,
-        save: 4_000_000,
-        life: 38_000_000,
-        ordinary: 34_000_000,
-        gap: 4_000_000,
-      },
-    });
-    render(<SavingsTab api={api} boot={null} />);
-    expect(await screen.findByText("✓ На жизнь хватает")).toBeTruthy();
-    expect(screen.getByText("останется 38 000 000")).toBeTruthy();
-    expect(screen.getByText("запас 4 000 000")).toBeTruthy();
   });
 
   it("shows the cushion without the money of the piggies", async () => {

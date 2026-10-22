@@ -8,12 +8,11 @@ import type {
   SavingsMonth,
   SavingsScreen,
 } from "../api";
-import { money, moneyText } from "../format";
+import { money } from "../format";
 import { monthName } from "../plan/months";
 import { useResource, useStore } from "../store";
-import { Card, Fact, Good, Line, Table, Warn } from "./blocks";
+import { Card, Good, Line, Warn } from "./blocks";
 import CushionCard from "./CushionCard";
-import EnoughLines from "./EnoughLines";
 import OrderSheet from "./OrderSheet";
 import PercentSheet from "./PercentSheet";
 import PiggyCard from "./PiggyCard";
@@ -31,7 +30,6 @@ interface Props {
 
 interface SetAsideProps {
   month: SavingsMonth;
-  piggies: Piggy[];
   enough: Enough | null;
   goal: SavingsGoal | null;
   onSave: (() => void) | null; // null — откладывать нечего
@@ -53,71 +51,76 @@ function goalDiffers(
   return { inPlan, needed: goal.suggested };
 }
 
-/** «Откладываем N %»: сколько пришло, сколько отложить и куда, успеваем ли к
- * срокам и хватает ли на жизнь. */
-function SetAside({
-  month,
-  piggies,
-  enough,
-  goal,
-  onSave,
-  onPercent,
-}: SetAsideProps) {
+/** Полоса: какая часть доли копилок (сумма месяца без подушки) отложена; доходит
+ * до конца, когда откладывать больше нечего. */
+function SavedBar({ share }: { share: number }) {
+  const percent = Math.round(share * 100);
+  return (
+    <div
+      role="progressbar"
+      aria-label="Отложено копилкам"
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={percent}
+      className="my-1 h-3 overflow-hidden rounded-full border border-outline"
+    >
+      <div
+        className="h-full rounded-full bg-ok"
+        style={{ width: `${percent}%` }}
+      />
+    </div>
+  );
+}
+
+/** «Откладываем N %» коротко: сколько отложить за месяц, полоса отложенного и
+ * предупреждения по одной строке; подробности — в окне процента. */
+function SetAside({ month, enough, goal, onSave, onPercent }: SetAsideProps) {
   const differs = goalDiffers(goal);
   const named = MONTHS_IN[monthIndex(month.month)] ?? month.month;
-  const rows = piggies
-    .filter((piggy) => piggy.status !== "broken" && piggy.now > 0)
-    .map((piggy) => [piggy.name, moneyText(piggy.now, piggy.currency)]);
-  if (month.cushion > 0) rows.push(["подушка", money(month.cushion)]);
   const needed = month.percent_needed;
   const percent = `${percentText(month.percent)}${NBSP}%`;
+  const piggies = Math.max(month.due - month.cushion, 0); // доля копилок
+  const share =
+    piggies > 0 ? Math.min(Math.max(1 - month.left / piggies, 0), 1) : 0;
   return (
     <Card label="Откладываем с поступлений">
-      <h2 className="text-fact font-extrabold">{`Откладываем ${percent}`}</h2>
-      <Line>с каждого поступления</Line>
-      {onPercent && (
-        <button
-          type="button"
-          className="self-start text-line font-extrabold text-link"
-          onClick={onPercent}
-        >
-          Изменить процент
-        </button>
-      )}
+      <div className="flex items-start justify-between gap-3">
+        <h2 className="text-fact font-extrabold">{`Откладываем ${percent}`}</h2>
+        {onPercent && (
+          <button
+            type="button"
+            aria-label="Изменить процент"
+            className="shrink-0 text-line font-extrabold text-link"
+            onClick={onPercent}
+          >
+            Изменить
+          </button>
+        )}
+      </div>
       {month.percent_source === "bad" && (
-        <>
-          <Warn>Процент не читается</Warn>
-          <Line>{`считаю по ${percent}`}</Line>
-        </>
+        <Warn>{`Процент не читается, считаю ${percent}`}</Warn>
       )}
       {month.received > 0 ? (
         <>
-          <Fact>{`Отложить ${money(month.due)}`}</Fact>
-          <Line>{`в ${named} пришло ${money(month.received)}`}</Line>
+          <Line>{`за ${monthName(month.month)} отложить ${money(month.due)}`}</Line>
+          {piggies > 0 && (
+            <>
+              <SavedBar share={share} />
+              {month.left > 0 ? (
+                <Line>
+                  {`отложено ${money(month.saved)}, ещё ${money(month.left)}`}
+                </Line>
+              ) : (
+                <Good>{`Отложено ${money(month.saved)} из ${money(piggies)}`}</Good>
+              )}
+            </>
+          )}
+          {month.cushion > 0 && (
+            <Line>{`подушке — ${money(month.cushion)}`}</Line>
+          )}
         </>
       ) : (
         <Line>{`в ${named} поступлений ещё не было`}</Line>
-      )}
-      {rows.length > 0 && (
-        <Table head={["копилка", "сумма"]} align="lr" rows={rows} />
-      )}
-      {needed !== null && month.percent < needed && (
-        <>
-          <Warn>{`К срокам нужно ${needed}${NBSP}%`}</Warn>
-          <Line>чтобы успеть все копилки</Line>
-        </>
-      )}
-      {needed !== null && month.percent >= needed && (
-        <Good>Успеваем всё к срокам</Good>
-      )}
-      {enough && <EnoughLines enough={enough} />}
-      {differs && (
-        <>
-          <Warn>План месяца не сходится</Warn>
-          <Line>{`в плане «Отложить» ${money(differs.inPlan)}`}</Line>
-          <Line>{`по копилкам нужно ${money(differs.needed)}`}</Line>
-          <Line>поправьте в «Плане месяца»</Line>
-        </>
       )}
       {onSave && (
         <button
@@ -127,6 +130,17 @@ function SetAside({
         >
           Отложил…
         </button>
+      )}
+      {needed !== null && month.percent < needed && (
+        <Warn>{`К срокам нужно ${needed}${NBSP}%`}</Warn>
+      )}
+      {enough && enough.gap < 0 && (
+        <Warn>{`На жизнь не хватит ${money(-enough.gap)}`}</Warn>
+      )}
+      {differs && (
+        <Warn>
+          {`В плане «Отложить» ${money(differs.inPlan)}, нужно ${money(differs.needed)}`}
+        </Warn>
       )}
     </Card>
   );
@@ -240,7 +254,6 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
       {data.month && (
         <SetAside
           month={data.month}
-          piggies={data.piggies}
           enough={data.enough}
           goal={data.goal ?? null}
           onSave={canSave ? () => setSaving(true) : null}

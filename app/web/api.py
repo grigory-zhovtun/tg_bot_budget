@@ -491,10 +491,13 @@ def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOu
     first = screen.plan[0] if screen.plan else None
     month = None
     if first is not None:
+        working = [state for state in screen.piggies if state.status != "broken"]
         left = sum(
-            state.now * rates.to_uzs.get(state.piggy.currency, 0.0)
-            for state in screen.piggies
-            if state.status != "broken"
+            state.now * rates.to_uzs.get(state.piggy.currency, 0.0) for state in working
+        )
+        saved = sum(
+            state.saved_month * rates.to_uzs.get(state.piggy.currency, 0.0)
+            for state in working
         )
         needed = screen.percent_needed
         month = SavingsMonthOut(
@@ -507,6 +510,7 @@ def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOu
             due=float(round(screen.due)),
             left=float(round(left)),
             cushion=float(round(screen.cushion_now)),
+            saved=float(round(saved)),
         )
     cushion = cushion_out(screen.cushion)
     if cushion is not None:

@@ -689,6 +689,7 @@ class SavingsMonthOut(ApiModel):
     due: float  # процент от пришедшего
     left: float  # отложить сейчас — копилкам и долгим целям
     cushion: float  # часть подушке
+    saved: float  # отложено копилкам с 1-го числа
 
 
 class EnoughOut(ApiModel):
