@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   type Api,
-  type CalendarRecord,
   type DayArticle,
   type Forecast,
   type ForecastPast,
@@ -18,6 +17,13 @@ import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
 import ForecastScreen from "./ForecastScreen";
 import { VIEW_KEY } from "./view";
+
+/** Карточка выбранного дня по её заголовку. */
+function dayCard(title: string): HTMLElement {
+  const card = screen.getByText(title).closest("section");
+  if (!card) throw new Error("no day card");
+  return card;
+}
 
 function pill(day: number): HTMLElement {
   return screen.getByRole("button", { name: new RegExp(`^${day} октября`) });
@@ -211,7 +217,7 @@ describe("ForecastScreen", () => {
     );
   });
 
-  it("shows the chosen day with its events and ordinary spending", async () => {
+  it("shows the chosen day with its events, without «обычные траты»", async () => {
     const user = userEvent.setup();
     show();
     await screen.findByText("Октябрь");
@@ -219,10 +225,13 @@ describe("ForecastScreen", () => {
     expect(screen.getByText("Суббота, 17 октября")).toBeTruthy();
     expect(screen.getByText("Детский центр")).toBeTruthy();
     expect(screen.getByText("−320 000 сум")).toBeTruthy();
-    // во «Всего» — одной суммой в сумах по курсу таблицы
-    expect(
-      screen.getByText("обычные траты ≈ 551 000 сум (по плану)"),
-    ).toBeTruthy();
+    expect(screen.queryByText(/обычные траты/)).toBeNull();
+  });
+
+  it("shows today without «обычные траты» either", async () => {
+    show();
+    await screen.findByText("Октябрь");
+    expect(screen.queryByText(/обычные траты/)).toBeNull();
   });
 
   it("lists the records of the chosen day", async () => {
@@ -436,84 +445,46 @@ describe("ForecastScreen", () => {
   });
 
   it("shows record sums in the color of records", async () => {
-    show();
-    // запись — голубым, как в клетках календаря и в карточке дня
-    expect((await screen.findByText("$20")).className).toContain(
-      "text-planned",
-    );
-  });
-
-  it("lists the repeats and the one-offs ahead", async () => {
+    const user = userEvent.setup();
     show();
     await screen.findByText("Октябрь");
-    expect(screen.getByText("Повторы")).toBeTruthy();
+    await user.click(pill(16));
+    // запись — голубым, как в клетках календаря
     expect(
-      screen.getByText("ЕДА / кофе · каждый день · до 31.10 — 510 000 сум"),
-    ).toBeTruthy();
-    expect(
-      screen.getByText(
-        "ДОМ / продукты · 18-го каждого месяца · до 31.10 — $20",
-      ),
-    ).toBeTruthy();
-    expect(screen.getByText("Разовые")).toBeTruthy();
-    expect(screen.getByText("24.10")).toBeTruthy();
-    expect(screen.getByText("Продукты на неделю")).toBeTruthy();
+      within(dayCard("Пятница, 16 октября")).getByText("−150 000 сум")
+        .className,
+    ).toContain("text-planned");
   });
 
-  it("lists records without days left in the month", async () => {
-    // рынок 5-го уже прошёл, лагерь — в ноябре: обе записи видны и открываются
-    const market: CalendarRecord = {
-      id: "r3n7aa",
-      date: "2026-09-05",
-      repeat: "monthly",
-      weekdays: [],
-      group: "🏚️ ДОМ",
-      subcategory: "продукты",
-      currency: "UZS",
-      amount: 200_000,
-      name: "Рынок",
-      author: "Тест",
-      month_total: 0,
-      booked: 0,
-      over: false,
-    };
-    const camp: CalendarRecord = {
-      ...market,
-      id: "c4mp00",
-      date: "2026-11-03",
-      repeat: "once",
-      amount: 700_000,
-      name: "Лагерь",
-    };
-    const forecast = vi
-      .fn<Api["forecast"]>()
-      .mockResolvedValue({ ...forecastFixture, calendar: [market, camp] });
-    show(fakeApi({ forecast }));
-    expect(
-      await screen.findByText("ДОМ / продукты · 5-го каждого месяца"),
-    ).toBeTruthy();
-    expect(screen.getByText("03.11")).toBeTruthy();
-    expect(screen.getByText("700 000 сум")).toBeTruthy(); // не «✓»: лагерь впереди
+  it("has no list of records under the calendar", async () => {
+    show();
+    await screen.findByText("Октябрь");
+    expect(screen.queryByRole("heading", { name: "Записи" })).toBeNull();
+    expect(screen.queryByText("Повторы")).toBeNull();
+    expect(screen.queryByRole("button", { name: "＋ Новая" })).toBeNull();
   });
 
-  it("plans a new record from today when a past day is chosen", async () => {
+  it("offers no planning on a past day", async () => {
     const user = userEvent.setup();
     show();
     await screen.findByText("Октябрь");
     await user.click(pill(3));
-    await user.click(screen.getByRole("button", { name: "＋ Новая" }));
-    // в прошлое не планируют: окно открывается на сегодня, а не на 3-е
-    const sheet = screen.getByRole("dialog");
-    expect(within(sheet).getByLabelText("Дата")).toHaveProperty(
-      "value",
-      "2026-10-15",
-    );
+    // в прошлое не планируют: новую запись ставят из сегодняшнего или будущего дня
+    expect(
+      screen.queryByRole("button", { name: /Запланировать|＋ Новая/ }),
+    ).toBeNull();
   });
 
   it("plans a record on the chosen day and shows the fresh forecast", async () => {
-    const addRecord = vi
-      .fn<Api["addRecord"]>()
-      .mockResolvedValue({ ...forecastFixture, calendar: [] });
+    const fresh: Forecast = {
+      ...forecastFixture,
+      calendar: [],
+      currencies: forecastFixture.currencies.map((line) => ({
+        ...line,
+        records: [],
+      })),
+    };
+    const addRecord = vi.fn<Api["addRecord"]>().mockResolvedValue(fresh);
     const user = userEvent.setup();
     show(fakeApi({ addRecord }));
     await screen.findByText("Октябрь");
@@ -547,20 +518,22 @@ describe("ForecastScreen", () => {
       amount: "160000",
       name: "Кафе",
     });
-    expect(
-      await screen.findByText(
-        "Запланируйте траты на дни — прогноз вычтет их в свой день.",
-      ),
-    ).toBeTruthy();
+    // свежий прогноз: в карточке дня больше нет записей
+    await vi.waitFor(() => {
+      expect(screen.queryByText("Запланировано на день")).toBeNull();
+    });
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("opens a record from the list", async () => {
+  it("opens a record from the day card", async () => {
     const user = userEvent.setup();
     show();
     await screen.findByText("Октябрь");
+    await user.click(pill(24));
     await user.click(
-      screen.getByRole("button", { name: /Продукты на неделю/ }),
+      within(dayCard("Суббота, 24 октября")).getByRole("button", {
+        name: /Продукты на неделю/,
+      }),
     );
     const sheet = screen.getByRole("dialog", { name: "Запись" });
     expect(within(sheet).getByLabelText("Название")).toHaveProperty(
@@ -602,8 +575,11 @@ describe("ForecastScreen", () => {
       </StoreProvider>,
     );
     await screen.findByText("Октябрь");
+    await user.click(pill(24));
     await user.click(
-      screen.getByRole("button", { name: /Продукты на неделю/ }),
+      within(dayCard("Суббота, 24 октября")).getByRole("button", {
+        name: /Продукты на неделю/,
+      }),
     );
     const sheet = screen.getByRole("dialog", { name: "Запись" });
     await user.click(

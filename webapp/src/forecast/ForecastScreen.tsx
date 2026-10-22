@@ -6,7 +6,6 @@ import DayCard from "./DayCard";
 import ForecastChart from "./ForecastChart";
 import MonthGrid from "./MonthGrid";
 import RecordSheet from "./RecordSheet";
-import RecordsList from "./RecordsList";
 import {
   TOTAL,
   amount,
@@ -166,12 +165,6 @@ function Month({
           </p>
         )}
       </section>
-      <RecordsList
-        data={data}
-        // в прошлое не планируют: при выбранном прошедшем дне — с сегодня
-        onAdd={onAdd && (() => onAdd(Math.max(day, dayOf(data.today))))}
-        onEdit={onEdit}
-      />
       <section className="flex flex-col gap-1">
         <h2 className="font-semibold">
           {`По валютам: сейчас → ${shortDate(end, data.today)}`}

@@ -9,7 +9,6 @@ import {
   dayOf,
   dayTitle,
   isoDay,
-  ordinary,
   signed,
   viewCode,
   viewDays,
@@ -159,7 +158,7 @@ function PastCard({ data, view, day }: Pick<Props, "data" | "view" | "day">) {
 
 /**
  * Выбранный день: остаток на вечер по плану и по темпу; сегодня — что уже
- * потрачено и пришло по статьям; события, обычные траты, записи.
+ * потрачено и пришло по статьям; события и записи.
  */
 export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
   const today = dayOf(data.today);
@@ -173,7 +172,6 @@ export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
     day === today
       ? viewPast(data, view).find((item) => item.day === day)
       : undefined;
-  const usual = ordinary(data, view, day);
   const records = dayRecords(data, view, day);
   const iso = isoDay(data.today, day);
   return (
@@ -230,7 +228,6 @@ export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
           </li>
         ))}
       </ul>
-      {usual && <p className="text-sm text-hint">{usual}</p>}
       {records.length > 0 && (
         <div className="mt-2 flex flex-col">
           <h3 className="text-sm font-semibold text-hint">
