@@ -1,7 +1,6 @@
 import type { DaySpend } from "../api";
 import { money } from "../format";
 import { days } from "../plan/months";
-import { Card, Line } from "./blocks";
 import {
   daysInMonth,
   spendingBars,
@@ -14,6 +13,7 @@ const HEIGHT = 150;
 const SIZE = { width: WIDTH, top: 18, bottom: HEIGHT - 16 };
 const LABEL_DAYS = [1, 5, 10, 15, 20, 25];
 const FONT = 15; // подписи графика — крупно, как строки «Сводки»
+const NBSP = "\u00a0"; // «на 800 000» и «за 9 дней» не разрываются
 const CHAR = 8.4; // средняя ширина знака подписи при FONT, жирным
 
 /** Примерная ширина подписи: хватает, чтобы не уйти за край графика. */
@@ -47,24 +47,22 @@ interface Props {
   planPerDay: number | null;
 }
 
-/** Итог прошедших дней: запас или перерасход крупно, ниже — траты и план. */
+/** Итог прошедших дней одной строкой — перерасход или запас против плана на эти
+ * дни; «потрачено» вкладки — одно, в итоге месяца над категориями. */
 function Summary({ spending, today, planPerDay }: Omit<Props, "limit">) {
   const summary = spendingSummary(spending, today, planPerDay);
   if (!summary) return null;
   const over = Math.round(summary.spent - summary.plan);
-  let verdict = "✓ Ровно по плану";
-  if (over > 0) verdict = `⚠️ Сверх на ${money(over)}`;
-  if (over < 0) verdict = `✓ Запас ${money(-over)}`;
+  const period = `за${NBSP}${days(summary.days).replace(" ", NBSP)}`;
+  let verdict = `✓ Ровно по плану ${period}`;
+  if (over > 0) verdict = `⚠️ Сверх плана на${NBSP}${money(over)} ${period}`;
+  if (over < 0) verdict = `✓ Запас ${money(-over)} ${period}`;
   return (
-    <Card>
-      <p
-        className={`text-fact font-extrabold ${over > 0 ? "text-danger" : "text-ok"}`}
-      >
-        {verdict}
-      </p>
-      <Line>{`потрачено ${money(summary.spent)} за ${days(summary.days)}`}</Line>
-      <Line>{`по плану ${money(summary.plan)}`}</Line>
-    </Card>
+    <p
+      className={`text-fact font-extrabold ${over > 0 ? "text-danger" : "text-ok"}`}
+    >
+      {verdict}
+    </p>
   );
 }
 

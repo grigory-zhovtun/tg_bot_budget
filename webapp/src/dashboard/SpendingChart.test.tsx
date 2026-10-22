@@ -20,13 +20,14 @@ function show(
 }
 
 describe("SpendingChart", () => {
-  it("leads with the margin left by the finished days", () => {
+  it("says the margin of the finished days in one line", () => {
     show();
-    const verdict = screen.getByText("✓ Запас 1 100 000");
+    const verdict = screen.getByText("✓ Запас 1 100 000 за 9 дней");
     expect(verdict.className).toContain("text-fact");
     expect(verdict.className).toContain("text-ok");
-    expect(screen.getByText("потрачено 2 950 000 за 9 дней")).toBeTruthy();
-    expect(screen.getByText("по плану 4 050 000")).toBeTruthy();
+    // строка — без своей карточки, а «потрачено» на вкладке одно — сверху
+    expect(verdict.closest(".bg-section")).toBeNull();
+    expect(screen.queryByText(/потрачено|по плану \d/)).toBeNull();
   });
 
   it("says how far the finished days went over the plan", () => {
@@ -38,9 +39,9 @@ describe("SpendingChart", () => {
       ],
       "2026-10-03",
     );
-    expect(screen.getByText("⚠️ Сверх на 800 000").className).toContain(
-      "text-danger",
-    );
+    expect(
+      screen.getByText("⚠️ Сверх плана на 800 000 за 2 дня").className,
+    ).toContain("text-danger");
   });
 
   it("says when the finished days match the plan exactly", () => {
@@ -51,7 +52,7 @@ describe("SpendingChart", () => {
       ],
       "2026-10-02",
     );
-    expect(screen.getByText("✓ Ровно по плану")).toBeTruthy();
+    expect(screen.getByText("✓ Ровно по плану за 1 день")).toBeTruthy();
   });
 
   it("labels the chart in big whole numbers", () => {

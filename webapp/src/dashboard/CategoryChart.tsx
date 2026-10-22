@@ -24,6 +24,7 @@ function amounts(plan: number, fact: number): string | null {
 }
 
 const TONE = { ok: "good", warn: "mid", over: "bad" } as const;
+const NBSP = "\u00a0"; // «из 12 500 000» переносится целиком
 const SIGN = { ok: "✓ ", warn: "", over: "⚠️ " } as const;
 
 /** Плашка «доля плана»: зелёная до 80 %, жёлтая до 100 %, красная сверх; без плана — нет. */
@@ -121,10 +122,10 @@ export default function CategoryChart({ categories, untracked, today }: Props) {
       aria-label="План-факт по категориям"
     >
       <h2 className="text-fact font-extrabold">План-факт по категориям</h2>
+      {/* единственное «потрачено» вкладки: все траты месяца против его плана */}
       <Card>
-        <Fact>{`Потрачено ${money(fact)}`}</Fact>
+        <Fact>{`Потрачено ${money(fact)} из${NBSP}${money(plan)}`}</Fact>
         <Line>{period(today)}</Line>
-        <Line>{`план на месяц ${money(plan)}`}</Line>
       </Card>
       <ul className="flex flex-col gap-4">
         {categories.map((group) => {

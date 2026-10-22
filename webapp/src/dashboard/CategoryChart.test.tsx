@@ -46,11 +46,11 @@ function show(today = "2026-10-15") {
 describe("CategoryChart", () => {
   it("shows the month against the plan and every group with its plan share", () => {
     show();
-    const summary = screen.getByText("Потрачено 8 400 000");
-    expect(summary.className).toContain("text-fact");
     // план — на весь месяц, а не на прошедшие дни
+    const summary = screen.getByText("Потрачено 8 400 000 из 12 500 000");
+    expect(summary.className).toContain("text-fact");
     expect(screen.getByText("за 1–15 октября")).toBeTruthy();
-    expect(screen.getByText("план на месяц 12 500 000")).toBeTruthy();
+    expect(screen.queryByText(/план на месяц/)).toBeNull();
     expect(
       screen.getAllByRole("button").map((button) => button.textContent),
     ).toEqual([
