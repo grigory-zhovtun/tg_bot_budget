@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ForecastArticle } from "../api";
+import type { CalendarRecord, ForecastArticle } from "../api";
 import { forecastFixture } from "../mocks/fixtures";
 import {
   cellAmount,
@@ -9,6 +9,7 @@ import {
   groupTitle,
   hintChips,
   isoWeekday,
+  laterRecords,
   overBy,
   ruleDays,
   ruleText,
@@ -51,6 +52,45 @@ describe("calendar records", () => {
     expect(
       ruleDays("monthly", [], "2026-08-31", "2026-11-01", "2026-11-30"),
     ).toEqual([30]); // 31-е в ноябре — его последний день
+  });
+
+  it("finds the records no day card of the month can open", () => {
+    // у всех записей фикстуры есть дни до конца месяца
+    expect(laterRecords(forecastFixture)).toEqual([]);
+    const [first] = forecastFixture.calendar;
+    if (!first) throw new Error("fixture");
+    const market: CalendarRecord = {
+      ...first,
+      id: "r3n7aa",
+      date: "2026-09-05",
+      repeat: "monthly",
+      currency: "UZS",
+      name: "Рынок",
+    };
+    const camp: CalendarRecord = {
+      ...market,
+      id: "c4mp00",
+      date: "2026-11-03",
+      repeat: "once",
+      name: "Лагерь",
+    };
+    const euro: CalendarRecord = {
+      ...market,
+      id: "e1u2r0",
+      date: "2026-09-10",
+      currency: "EUR",
+      name: "Кружок",
+    };
+    const data = {
+      ...forecastFixture,
+      calendar: [camp, ...forecastFixture.calendar, euro, market],
+    };
+    // 5-е прошло, лагерь в ноябре, евро без карты; по дате записи
+    expect(laterRecords(data).map((record) => record.id)).toEqual([
+      "r3n7aa",
+      "e1u2r0",
+      "c4mp00",
+    ]);
   });
 
   it("lays the month out in weeks from the current one", () => {

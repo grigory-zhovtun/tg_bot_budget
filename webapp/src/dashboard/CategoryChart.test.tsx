@@ -144,7 +144,7 @@ describe("CategoryChart", () => {
     expect(screen.getByText("квартплата")).toBeTruthy();
   });
 
-  it("explains the bar and lists the spending the month tab does not count", () => {
+  it("lists the spending the month tab does not count, without a caption", () => {
     render(
       <CategoryChart
         categories={CATEGORIES}
@@ -159,7 +159,7 @@ describe("CategoryChart", () => {
         today="2026-10-15"
       />,
     );
-    expect(screen.getByText("полоса — потрачено, черта — план")).toBeTruthy();
+    expect(screen.queryByText("полоса — потрачено, черта — план")).toBeNull();
     const note = screen.getByRole("region", { name: "Нет в плане месяца" });
     expect(within(note).getByText("⚠️ Нет в плане месяца")).toBeTruthy();
     const row = within(note).getByText("кафе (USD)").closest("tr");

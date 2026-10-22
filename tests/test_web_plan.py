@@ -646,10 +646,10 @@ def test_list_rows_tell_what_came_in_this_month(
         (e["name"], e["status"], e["received"], e["received_on"])
         for e in body["events"][:5]
     ] == [
-        ("Аванс", "done", 3_000_000, "2026-10-15"),
+        ("Аванс", "partial", 2_000_000, "2026-10-15"),
         ("ЗП RUB", "partial", 40_000, "2026-10-10"),
         ("Квартплата", "future", None, None),
-        ("Премия", "waiting", None, None),
+        ("Премия", "done", 1_000_000, "2026-10-15"),
         (None, "future", None, None),
     ]
 

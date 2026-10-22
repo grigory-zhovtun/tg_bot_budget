@@ -747,6 +747,7 @@ export const savingsFixture: SavingsScreen = {
     due: 4_000_000,
     left: 4_000_000,
     cushion: 0,
+    saved: 0,
   },
   cushion: {
     amount: 1100,

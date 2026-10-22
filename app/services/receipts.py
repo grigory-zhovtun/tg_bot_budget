@@ -1,10 +1,12 @@
 """Сверка жёлтого списка вкладки месяца с листом fact: что пришло и что ушло.
 
 Строка списка — поступление (+) или крупный платёж (−): день, сумма со знаком,
-валюта. Поступление набирается из доходов той же валюты с дня строки − EARLY_DAYS
-до конца месяца: части складываются, доход достаётся строке с ближайшим днём.
-Платёж закрывает одна трата той же валюты на сумму плана ± PAYMENT_TOLERANCE.
-Строка закрыта, когда пришло DONE_SHARE плана; иначе впереди — недостающая часть.
+валюта. Поступления — по плану месяца, без окна: доходы валюты с 1-го числа по
+порядку дней заполняют строки этой валюты по порядку их дней — первую до её суммы,
+что сверх — следующую, что сверх последней — последнюю. Так зарплата, пришедшая
+частями и раньше своего дня, засчитывается ей. Платёж закрывает одна трата той же
+валюты на сумму плана ± PAYMENT_TOLERANCE с дня строки − EARLY_DAYS. Строка закрыта,
+когда пришло DONE_SHARE плана; иначе впереди — недостающая часть.
 """
 
 import calendar
@@ -17,7 +19,7 @@ import pandas as pd
 
 from app.services.analytics_service import expenses, income
 
-EARLY_DAYS = 5  # поступление может прийти на несколько дней раньше дня в списке
+EARLY_DAYS = 5  # платёж может уйти на несколько дней раньше дня в списке
 DONE_SHARE = 0.9  # строка закрыта, когда пришло 90 % плана
 PAYMENT_TOLERANCE = 0.1  # платёж — одна трата на сумму плана ± 10 %
 
@@ -71,29 +73,37 @@ def match_receipts(
     month = frame[(frame["day"] >= first) & (frame["day"] <= through)]
     found: dict[int, Receipt] = {}
 
-    incomes = [line for line in lines if line.amount > 0]
-    got = income(month)
-    got = got[got["amount"] > 0]
-    for index, day, amount, currency in zip(
-        got.index, got["day"], got["amount"], got["currency"], strict=True
-    ):
-        fits = [
-            line
-            for line in incomes
-            if line.currency == currency and _opens(first, line) <= day
-        ]
-        if not fits:
-            continue
-        line = min(
-            fits,
-            key=lambda item: (abs((day - _due(first, item.day)).days), item.day),
-        )
+    def add(line: ListLine, amount: float, day: date, index: int) -> None:
         old = found.get(line.row, NOTHING)
         found[line.row] = Receipt(
-            old.received + float(amount),
+            old.received + amount,
             day if old.on is None else max(old.on, day),
-            old.operations | {int(index)},
+            old.operations | {index},
         )
+
+    got = income(month)
+    got = got[got["amount"] > 0].sort_values("day", kind="stable")
+    for currency in sorted({line.currency for line in lines if line.amount > 0}):
+        queue = sorted(
+            (line for line in lines if line.amount > 0 and line.currency == currency),
+            key=lambda line: (line.day, line.row),
+        )
+        room = {line.row: float(line.amount) for line in queue}
+        mine = got[got["currency"] == currency]
+        for index, day, amount in zip(
+            mine.index, mine["day"], mine["amount"], strict=True
+        ):
+            rest = float(amount)
+            for place, line in enumerate(queue):
+                last = place == len(queue) - 1
+                take = rest if last else min(rest, room[line.row])
+                if take <= 0:
+                    continue
+                room[line.row] -= take
+                add(line, take, day, int(index))
+                rest -= take
+                if rest <= 1e-9:
+                    break
 
     spent = expenses(month)
     spent = spent[spent["amount"] > 0]

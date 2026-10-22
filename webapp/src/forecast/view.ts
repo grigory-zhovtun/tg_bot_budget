@@ -203,53 +203,6 @@ export function warnings(data: Forecast, view: View): string[] {
   });
 }
 
-/** Сумма валют в числах вида: во «Всего» — по курсу таблицы, без валют без курса. */
-function inView(
-  data: Forecast,
-  view: View,
-  pick: (line: ForecastCurrency) => number,
-): number {
-  const lines = viewCurrencies(data, view);
-  if (view.scope !== TOTAL)
-    return lines.reduce((sum, line) => sum + pick(line), 0);
-  const sums = lines.reduce((sum, line) => {
-    const rate = line.code === "UZS" ? 1 : data.rates[line.code];
-    return line.in_total && rate ? sum + pick(line) * rate : sum;
-  }, 0);
-  const dollar = data.rates.USD;
-  return view.unit === "usd" && dollar ? sums / dollar : sums;
-}
-
-/**
- * Строка обычных трат дня по плану в числах вида: «обычные траты ≈ 470 000 сум
- * (по плану)». Сегодня — сколько от них осталось или что они уже потрачены;
- * во «Всего» — чистым остатком: перерасход сумов не прячется за остатком рублей.
- */
-export function ordinary(
-  data: Forecast,
-  view: View,
-  day: number,
-): string | null {
-  const code = viewCode(view);
-  const planned = inView(data, view, (line) => line.per_day_plan);
-  if (day !== dayOf(data.today)) {
-    return Math.round(planned) > 0
-      ? `обычные траты ≈ ${amount(planned, code)} (по плану)`
-      : null;
-  }
-  const left = inView(
-    data,
-    view,
-    (line) => line.per_day_plan - line.spent_today,
-  );
-  if (Math.round(left) > 0) {
-    return `на обычные траты осталось ≈ ${amount(left, code)} (по плану)`;
-  }
-  return Math.round(planned) > 0
-    ? "обычные траты на сегодня по плану уже потрачены"
-    : null;
-}
-
 export interface ShownArticle extends DayArticle {
   currency: string;
 }

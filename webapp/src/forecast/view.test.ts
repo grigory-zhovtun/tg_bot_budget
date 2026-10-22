@@ -15,7 +15,6 @@ import {
   minusRange,
   articleText,
   dayArticles,
-  ordinary,
   pillUnit,
   pillValue,
   storeView,
@@ -106,36 +105,6 @@ describe("forecast view", () => {
     ]);
   });
 
-  it("tells the ordinary spending of a day in the numbers of the view", () => {
-    // «Всего» — одной суммой по курсу таблицы: 470 000 + $3 × 12 000 + 300 ₽ × 150
-    expect(ordinary(forecastFixture, DEFAULT_VIEW, 17)).toBe(
-      nb("обычные траты ≈ 551 000 сум (по плану)"),
-    );
-    expect(ordinary(forecastFixture, DOLLARS, 17)).toBe(
-      "обычные траты ≈ $46 (по плану)",
-    );
-    const spent = withUzs({ spent_today: 100_000 });
-    expect(ordinary(spent, UZS, 15)).toBe(
-      nb("на обычные траты осталось ≈ 370 000 сум (по плану)"),
-    );
-    expect(ordinary(spent, UZS, 16)).toBe(
-      nb("обычные траты ≈ 470 000 сум (по плану)"),
-    );
-    // во «Всего» — чистый остаток: перерасход сумов не прячется за остатком
-    // долларов и рублей (36 000 + 45 000 сум)
-    const over = withUzs({ spent_today: 600_000 });
-    expect(ordinary(over, UZS, 15)).toBe(
-      "обычные траты на сегодня по плану уже потрачены",
-    );
-    expect(ordinary(over, DEFAULT_VIEW, 15)).toBe(
-      "обычные траты на сегодня по плану уже потрачены",
-    );
-    const little = withUzs({ spent_today: 500_000 });
-    expect(ordinary(little, DEFAULT_VIEW, 15)).toBe(
-      nb("на обычные траты осталось ≈ 51 000 сум (по плану)"),
-    );
-  });
-
   it("lists the articles of a day, each in its currency, the biggest first", () => {
     const total = dayArticles(forecastFixture, DEFAULT_VIEW, 14);
     expect(
@@ -167,19 +136,12 @@ describe("forecast view", () => {
         line.code === "RUB" ? { ...line, in_total: false } : line,
       ),
     };
-    // рубли без курса не входят ни в итог дня, ни в его статьи, ни в обычные траты
+    // рубли без курса не входят ни в итог дня, ни в его статьи
     expect(
       dayArticles(noRubles, DEFAULT_VIEW, 14).spent.map(
         (item) => item.currency,
       ),
     ).toEqual(["UZS", "UZS", "USD"]);
-    expect(ordinary(noRubles, DEFAULT_VIEW, 17)).toBe(
-      nb("обычные траты ≈ 506 000 сум (по плану)"),
-    );
-    const noRate: Forecast = { ...forecastFixture, rates: { USD: 12_000 } };
-    expect(ordinary(noRate, DEFAULT_VIEW, 17)).toBe(
-      nb("обычные траты ≈ 506 000 сум (по плану)"),
-    );
   });
 
   it("writes a sum of an article in its currency, a refund as a refund", () => {

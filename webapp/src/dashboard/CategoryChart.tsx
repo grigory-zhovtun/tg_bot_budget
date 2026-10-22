@@ -172,7 +172,6 @@ export default function CategoryChart({ categories, untracked, today }: Props) {
           );
         })}
       </ul>
-      <Line>полоса — потрачено, черта — план</Line>
       {untracked.length > 0 && <NotInPlan items={untracked} />}
     </section>
   );

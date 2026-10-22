@@ -4,9 +4,9 @@ import { monthName } from "../plan/months";
 import { useResource, useStore } from "../store";
 import DayCard from "./DayCard";
 import ForecastChart from "./ForecastChart";
+import LaterRecords from "./LaterRecords";
 import MonthGrid from "./MonthGrid";
 import RecordSheet from "./RecordSheet";
-import RecordsList from "./RecordsList";
 import {
   TOTAL,
   amount,
@@ -141,6 +141,7 @@ function Month({
         onAdd={onAdd}
         onEdit={onEdit}
       />
+      <LaterRecords data={data} onEdit={onEdit} />
       <section className="flex flex-col gap-2 rounded-2xl bg-section p-4">
         <div className="flex items-baseline justify-between gap-2">
           <h2 className="font-semibold">До конца месяца</h2>
@@ -166,12 +167,6 @@ function Month({
           </p>
         )}
       </section>
-      <RecordsList
-        data={data}
-        // в прошлое не планируют: при выбранном прошедшем дне — с сегодня
-        onAdd={onAdd && (() => onAdd(Math.max(day, dayOf(data.today))))}
-        onEdit={onEdit}
-      />
       <section className="flex flex-col gap-1">
         <h2 className="font-semibold">
           {`По валютам: сейчас → ${shortDate(end, data.today)}`}

@@ -368,6 +368,14 @@ def test_an_early_salary_is_not_counted_twice() -> None:
     assert day.upcoming == ()
 
 
+def test_half_a_salary_a_week_early_leaves_only_the_rest_ahead() -> None:
+    half = fact_row(date(2026, 10, 21), "💰 ДОХОДЫ", "зарплата", 5_000_000)
+    day = budget(date(2026, 10, 22), ADVANCE_PAID, RENT_PAID, half)
+    # половина уже на картах — впереди только вторая, лимит не считает её дважды
+    [salary] = day.upcoming
+    assert (salary.name, salary.amount) == ("ЗП", 5_000_000)
+
+
 def test_a_late_salary_stays_ahead() -> None:
     day = budget(date(2026, 10, 31), ADVANCE_PAID, RENT_PAID)
     # 14,2 млн на картах + 10 млн зарплаты впереди − 21,1 млн к концу месяца
