@@ -2,6 +2,7 @@
 
 import type {
   AmountHint,
+  CalendarRecord,
   Forecast,
   ForecastArticle,
   ForecastRecord,
@@ -98,6 +99,17 @@ export function gridWeeks(today: string, end: string): (number | null)[][] {
     weeks.push(week);
   }
   return weeks;
+}
+
+/** Записи, до которых не дойти из карточек дней месяца: разовые позже месяца,
+ * повторы без дней с сегодня до его конца, валюта без карты; по дате записи. */
+export function laterRecords(data: Forecast): CalendarRecord[] {
+  const shown = new Set(
+    data.currencies.flatMap((line) => line.records.map((record) => record.id)),
+  );
+  return data.calendar
+    .filter((record) => !shown.has(record.id))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export interface DayRecord extends ForecastRecord {

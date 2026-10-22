@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   type Api,
+  type CalendarRecord,
   type DayArticle,
   type Forecast,
   type ForecastPast,
@@ -462,6 +463,67 @@ describe("ForecastScreen", () => {
     expect(screen.queryByRole("heading", { name: "Записи" })).toBeNull();
     expect(screen.queryByText("Повторы")).toBeNull();
     expect(screen.queryByRole("button", { name: "＋ Новая" })).toBeNull();
+  });
+
+  it("lists the records no day of the month shows, to open them", async () => {
+    // рынок 5-го уже прошёл, лагерь — в ноябре: карточки дней их не покажут
+    const [first] = forecastFixture.calendar;
+    if (!first) throw new Error("fixture");
+    const market: CalendarRecord = {
+      ...first,
+      id: "r3n7aa",
+      date: "2026-09-05",
+      repeat: "monthly",
+      weekdays: [],
+      group: "🏚️ ДОМ",
+      subcategory: "продукты",
+      currency: "UZS",
+      amount: 200_000,
+      name: "Рынок",
+    };
+    const camp: CalendarRecord = {
+      ...market,
+      id: "c4mp00",
+      date: "2026-11-03",
+      repeat: "once",
+      amount: 700_000,
+      name: "Лагерь",
+    };
+    const forecast = vi.fn<Api["forecast"]>().mockResolvedValue({
+      ...forecastFixture,
+      calendar: [...forecastFixture.calendar, camp, market],
+    });
+    const user = userEvent.setup();
+    show(fakeApi({ forecast }));
+    const later = await screen.findByRole("region", {
+      name: "Запланировано дальше",
+    });
+    const rows = within(later).getAllByRole("button");
+    expect(rows.map((row) => row.textContent?.split("ДОМ")[0])).toEqual([
+      "Рынок",
+      "Лагерь",
+    ]);
+    expect(
+      within(later).getByText("ДОМ / продукты · 5-го каждого месяца"),
+    ).toBeTruthy();
+    expect(within(later).getByText("ДОМ / продукты · 3 ноября")).toBeTruthy();
+    expect(within(later).getByText("700 000 сум").className).toContain(
+      "text-planned",
+    );
+    await user.click(within(later).getByRole("button", { name: /Лагерь/ }));
+    const sheet = screen.getByRole("dialog", { name: "Запись" });
+    expect(within(sheet).getByLabelText("Название")).toHaveProperty(
+      "value",
+      "Лагерь",
+    );
+  });
+
+  it("shows no «Запланировано дальше» while every record has its day", async () => {
+    show();
+    await screen.findByText("Октябрь");
+    expect(
+      screen.queryByRole("region", { name: "Запланировано дальше" }),
+    ).toBeNull();
   });
 
   it("offers no planning on a past day", async () => {
