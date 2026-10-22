@@ -44,15 +44,39 @@ def test_a_salary_paid_in_parts_adds_up() -> None:
     assert remaining(RUB_SALARY, found[RUB_SALARY.row]) == 0
 
 
-def test_an_income_goes_to_the_row_with_the_nearest_day() -> None:
+def test_incomes_fill_the_lines_in_the_order_of_their_days() -> None:
     found = received(income(29, 9_900_000), income(17, 2_000_000))
     assert found[SALARY.row].received == 9_900_000  # на день раньше 30-го
     assert found[ADVANCE.row].received == 2_000_000  # аванс опоздал на два дня
 
 
-def test_the_window_opens_five_days_before_the_row() -> None:
-    assert ADVANCE.row not in received(income(9, 2_000_000))
-    assert received(income(10, 2_000_000))[ADVANCE.row].received == 2_000_000
+def test_an_early_income_counts_toward_the_months_plan() -> None:
+    # окна нет: доход месяца — в план месяца, даже за шесть дней до строки
+    assert received(income(9, 2_000_000))[ADVANCE.row].received == 2_000_000
+
+
+def test_half_of_a_salary_a_week_early_counts() -> None:
+    found = received(income(21, 47_000, "RUB"))
+    assert found[RUB_SALARY.row].received == 47_000
+    assert found[RUB_SALARY.row].on == date(2026, 10, 21)
+    assert remaining(RUB_SALARY, found[RUB_SALARY.row]) == 53_000
+
+
+def test_an_income_over_a_line_flows_to_the_next() -> None:
+    found = received(income(15, 2_500_000))
+    assert found[ADVANCE.row].received == 2_000_000
+    assert found[SALARY.row].received == 500_000
+
+
+def test_after_the_advance_an_income_goes_to_the_salary() -> None:
+    found = received(income(15, 2_000_000), income(17, 3_000_000))
+    assert found[ADVANCE.row].received == 2_000_000
+    assert found[SALARY.row].received == 3_000_000
+
+
+def test_more_than_the_month_lands_on_the_last_line() -> None:
+    found = received(income(28, 150_000, "RUB"))
+    assert found[RUB_SALARY.row].received == 150_000
 
 
 def test_operations_after_through_do_not_count_yet() -> None:
