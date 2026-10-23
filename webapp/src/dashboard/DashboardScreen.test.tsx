@@ -49,8 +49,9 @@ describe("DashboardScreen", () => {
         name: "Траты по дням: 9 дней, сверх лимита — 2",
       }),
     ).toBeTruthy();
-    expect(screen.getByText("потрачено 2 950 000 за 9 дней")).toBeTruthy();
-    expect(screen.getByText("✓ Запас 1 100 000")).toBeTruthy();
+    expect(screen.getByText("✓ Запас 1 100 000 за 9 дней")).toBeTruthy();
+    // «потрачено» на вкладке одно — в итоге месяца сверху
+    expect(screen.getAllByText(/^Потрачено/i)).toHaveLength(1);
     expect(screen.getByText("можно 500 000 в день")).toBeTruthy();
     expect(screen.getByText("план 450 000 в день")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Можно сегодня" })).toBeNull();
@@ -142,7 +143,7 @@ describe("DashboardScreen", () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
     await show(user, "Траты");
-    expect(screen.getByText("⚠️ Сверх на 800 000")).toBeTruthy();
+    expect(screen.getByText("⚠️ Сверх плана на 800 000 за 2 дня")).toBeTruthy();
     expect(
       screen.getByRole("img", {
         name: "Траты по дням: 2 дня, сверх лимита — 2",
@@ -162,7 +163,7 @@ describe("DashboardScreen", () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
     await show(user, "Траты");
-    expect(screen.getByText("✓ Ровно по плану")).toBeTruthy();
+    expect(screen.getByText("✓ Ровно по плану за 1 день")).toBeTruthy();
   });
 
   it("opens a group to show its subcategories", async () => {
@@ -197,7 +198,9 @@ describe("DashboardScreen", () => {
       name: "План-факт по категориям",
     });
     expect(within(spent).getByText("за 1–10 октября")).toBeTruthy();
-    expect(within(spent).getByText("план на месяц 5 000 000")).toBeTruthy();
+    expect(
+      within(spent).getByText("Потрачено 3 842 000 из 5 000 000"),
+    ).toBeTruthy();
     expect(
       within(spent).getByRole("button", { name: /ЕДА.*⚠️ 111\s%/ }),
     ).toBeTruthy();
