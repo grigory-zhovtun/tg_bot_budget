@@ -210,3 +210,26 @@ async def test_today_command_sends_the_report_to_the_chat() -> None:
     await analytics.today_command(update, context)
     assert bot.do_api_request.await_args.kwargs["api_kwargs"]["chat_id"] == 5
     assert calls == [{"now": True}]
+
+
+async def test_fonts_command_sends_each_variant_as_its_own_message() -> None:
+    # временная проверка шрифтов: одна сумма разными способами, каждый — отдельно,
+    # чтобы отказ Telegram в одном варианте не скрыл остальные
+    bot = SimpleNamespace(do_api_request=AsyncMock(), send_message=AsyncMock())
+    update = SimpleNamespace(
+        effective_chat=SimpleNamespace(id=5),
+        message=SimpleNamespace(reply_text=AsyncMock()),
+    )
+    context = SimpleNamespace(bot=bot, bot_data={})
+    await analytics.fonts_command(update, context)
+    sent = [
+        call.kwargs["api_kwargs"]["rich_message"]["html"]
+        for call in bot.do_api_request.await_args_list
+    ]
+    assert len(sent) == 7
+    number = whole(1_234_567_890)
+    assert (
+        sent[0] == f"<p>Вариант 1 — заголовок, как сейчас</p><h1>💸 {number} сум</h1>"
+    )
+    assert f"<h1>💸 <code>{number}</code> сум</h1>" in sent[1]
+    assert f"<p><b>💸 {number} сум</b></p>" in sent[3]

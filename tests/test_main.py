@@ -47,6 +47,7 @@ def test_gate_runs_before_all_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
         "today",
         "icons",
         "subs",
+        "fonts",  # временная проверка шрифтов сводки
     }
 
 

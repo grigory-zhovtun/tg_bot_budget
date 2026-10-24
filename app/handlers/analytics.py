@@ -12,7 +12,7 @@ from telegram.ext import ContextTypes
 
 from app import config
 from app.errors import user_message
-from app.rich import Report
+from app.rich import Report, whole
 
 logger = logging.getLogger(__name__)
 
@@ -305,6 +305,32 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
     await send_report(context.bot, update.effective_chat.id, report)
+
+
+def _font_variants() -> list[tuple[str, str]]:
+    """Временная проверка шрифтов: одна сумма разными способами (подпись, блок)."""
+    number = whole(1_234_567_890)
+    sample = f"💸 {number} сум"
+    return [
+        ("1 — заголовок, как сейчас", f"<h1>{sample}</h1>"),
+        ("2 — заголовок, цифры моноширинным", f"<h1>💸 <code>{number}</code> сум</h1>"),
+        ("3 — заголовок целиком моноширинным", f"<h1><code>{sample}</code></h1>"),
+        ("4 — жирный текст обычного размера", f"<p><b>{sample}</b></p>"),
+        ("5 — заголовок поменьше", f"<h4>{sample}</h4>"),
+        ("6 — моноширинный блок", f"<pre>{sample}</pre>"),
+        (
+            "7 — таблица, жирным",
+            f"<table bordered><tr><td><b>{sample}</b></td></tr></table>",
+        ),
+    ]
+
+
+async def fonts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """/fonts — временная: одна сумма семью способами, чтобы выбрать вид без засечек;
+    каждый вариант — своим сообщением: отказ Telegram в одном не скроет остальные."""
+    for label, block in _font_variants():
+        report = Report(f"Вариант {label}", f"<p>Вариант {label}</p>{block}")
+        await send_report(context.bot, update.effective_chat.id, report)
 
 
 async def subs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
