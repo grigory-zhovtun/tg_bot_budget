@@ -160,6 +160,17 @@ def test_without_salaries_in_sums_the_limit_lasts_until_the_month_end() -> None:
     assert day.limit == pytest.approx(5_000_000 / 22)
 
 
+def test_only_a_salary_row_sets_the_limits_horizon() -> None:
+    # возврат долга 3-го — поступление, а не зарплата: срок лимита — до аванса 15-го
+    refund = [*ITEMS, ("Возврат долга", 3, 1_000_000, "UZS")]
+    day = budget(date(2026, 10, 2), items=refund)
+    assert (day.payday, day.payday_name) == (date(2026, 10, 15), "Аванс")
+    assert day.limit == pytest.approx(5_000_000 / 13)
+    salary = fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000)
+    last = budget(date(2026, 10, 31), ADVANCE_PAID, RENT_PAID, salary, items=refund)
+    assert (last.payday, last.payday_name) == (date(2026, 11, 15), "Аванс")
+
+
 BILLS = [*ITEMS, ("Интернет", 10, -300_000, "UZS"), ("Кружок", 20, -500_000, "UZS")]
 
 
