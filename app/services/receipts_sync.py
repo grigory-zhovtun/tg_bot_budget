@@ -8,6 +8,7 @@
 их сумму до зарплаты бот пишет в Q той же строки.
 """
 
+import logging
 from datetime import date, timedelta
 from typing import Any
 
@@ -26,6 +27,8 @@ from app.services.day_budget import (
 )
 from app.services.google_sheets import GoogleSheetsService
 from app.services.receipts import Receipt, match_receipts
+
+logger = logging.getLogger(__name__)
 
 COLUMN_T = COLUMN_O + 5  # справа от «В сумах» (S)
 RECEIVED_HEADER = "Пришло к утру"
@@ -102,7 +105,11 @@ def sync_receipts(gs: GoogleSheetsService, today: date) -> int:
     first = today.replace(day=1)
     receipts = match_receipts(frame, forecast.items, first, today - timedelta(days=1))
     data = received_cells(title, rows, receipts)
-    budget = day_budget(frame, rows, today, rates, None)
+    try:
+        budget = day_budget(frame, rows, today, rates, None)
+    except Exception:  # сбой лимита не должен остановить «Пришло к утру»
+        logger.exception("Subscriptions for the limit cell failed")
+        budget = None
     if budget is not None:
         data += subscription_cells(title, rows, budget.subscriptions)
     if data:

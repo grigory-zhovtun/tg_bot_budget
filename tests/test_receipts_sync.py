@@ -3,8 +3,10 @@
 from datetime import date
 from typing import Any
 
+import pytest
 from gspread.exceptions import WorksheetNotFound
 
+from app.services import receipts_sync
 from app.services.receipts_sync import (
     COLUMN_SUBSCRIPTIONS,
     COLUMN_T,
@@ -126,3 +128,15 @@ def test_no_subscriptions_write_a_zero_and_no_limit_row_writes_nothing() -> None
     assert all(
         row[COLUMN_SUBSCRIPTIONS] in ("", None) for row in plain.tabs["Oct 26"][:10]
     )
+
+
+def test_a_broken_limit_does_not_stop_the_received_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(*args: Any, **kwargs: Any) -> None:
+        raise ValueError("bad list")
+
+    monkeypatch.setattr(receipts_sync, "day_budget", broken)
+    sheets = Sheets(with_limit_row(), ADVANCE_PAID, *CLOUD)
+    assert sync_receipts(sheets, date(2026, 10, 16)) == 2  # T11 и T12 — как всегда
+    assert sheets.column() == [RECEIVED_HEADER, 2_000_000, "", "", ""]
