@@ -656,7 +656,7 @@ def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
     else:
         allowed = max(b.yesterday_limit, 0)
         over = b.yesterday_spent - allowed
-        pair = f"{whole(b.yesterday_spent)} из {whole(allowed)}"
+        pair = f"{whole(b.yesterday_spent)} из{NBSP}{whole(allowed)}"  # «из» — с числом
         blocks += (
             [heading(f"⚠️ Вчера {pair}"), para(f"больше на {whole(over)}")]
             if over > 0

@@ -59,7 +59,10 @@ def test_morning_blocks_follow_the_mockup() -> None:
             "можно тратить в день до аванса 15-го", f"на сумовых картах {whole(b.sums)}"
         ),
         heading(f"⚠️ Сверх плана на {whole(400_000 - b.plan_per_day)} за 1 день"),
-        heading(f"⚠️ Вчера {whole(b.yesterday_spent)} из {whole(b.yesterday_limit)}"),
+        # «из» — с числом: блок переносит строку перед ним, а не после
+        heading(
+            f"⚠️ Вчера {whole(b.yesterday_spent)} из{NBSP}{whole(b.yesterday_limit)}"
+        ),
         para(f"больше на {whole(b.yesterday_spent - b.yesterday_limit)}"),
         heading(f"💳 Сумы {whole(b.runway.balance)}"),
     ]
@@ -210,28 +213,3 @@ async def test_today_command_sends_the_report_to_the_chat() -> None:
     await analytics.today_command(update, context)
     assert bot.do_api_request.await_args.kwargs["api_kwargs"]["chat_id"] == 5
     assert calls == [{"now": True}]
-
-
-async def test_fonts_command_sends_each_variant_as_its_own_message() -> None:
-    # временная проверка шрифтов: крупные числа разными способами, каждый — отдельно,
-    # чтобы отказ Telegram в одном варианте не скрыл остальные
-    bot = SimpleNamespace(do_api_request=AsyncMock(), send_message=AsyncMock())
-    update = SimpleNamespace(
-        effective_chat=SimpleNamespace(id=5),
-        message=SimpleNamespace(reply_text=AsyncMock()),
-    )
-    context = SimpleNamespace(bot=bot, bot_data={})
-    await analytics.fonts_command(update, context)
-    sent = [
-        call.kwargs["api_kwargs"]["rich_message"]["html"]
-        for call in bot.do_api_request.await_args_list
-    ]
-    assert len(sent) == 6
-    number = whole(1_234_567_890)
-    assert sent[0] == (
-        f"<p>Вариант 6 — моноширинный блок (выбранный)</p><pre>💸 {number} сум</pre>"
-    )
-    # «математические» моноширинные цифры: 𝟷 𝟸𝟹𝟺 𝟻𝟼𝟽 𝟾𝟿𝟶
-    mono = number.translate({ord(str(d)): chr(0x1D7F6 + d) for d in range(10)})
-    assert f"<h1>💸 {mono} сум</h1>" in sent[1]
-    assert "<pre>⚠️ Сверх плана на" in sent[4]

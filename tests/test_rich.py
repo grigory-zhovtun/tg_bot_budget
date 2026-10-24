@@ -31,9 +31,17 @@ def test_numbers_keep_together() -> None:
     assert percent(0.437) == f"44{N}%"
 
 
+def test_big_lines_are_monospace_blocks() -> None:
+    # заголовки h1–h6 Telegram рисует с засечками — крупные строки идут блоком
+    assert heading(f"💸 1{N}203{N}253 сум", 1) == f"<pre>💸 1{N}203{N}253 сум</pre>"
+    # блок сам не переносит: длинную строку переносим по словам, число не рвём
+    over = f"⚠️ Сверх плана на 7{N}142{N}116 за 23 дня"
+    assert heading(over) == f"<pre>⚠️ Сверх плана на 7{N}142{N}116\nза 23 дня</pre>"
+    assert all(len(line) <= 28 for line in heading(over)[5:-6].split("\n"))
+
+
 def test_blocks_escape_sheet_text() -> None:
-    assert heading("Аренда & <офис>", 1) == "<h1>Аренда &amp; &lt;офис&gt;</h1>"
-    assert heading("Вчера") == "<h3>Вчера</h3>"
+    assert heading("Аренда & <офис>", 1) == "<pre>Аренда &amp; &lt;офис&gt;</pre>"
     assert para("a < b", "c") == "<p>a &lt; b<br>c</p>"
     assert table([["кафе & бар", f"1{N}000"]], "lr", ["статья", "факт"]) == (
         "<table bordered striped><tr><th>статья</th><th>факт</th></tr>"
