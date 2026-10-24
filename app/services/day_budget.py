@@ -109,6 +109,7 @@ class DayBudget:
     ahead: tuple[ForecastItem, ...] = ()  # не пришедшие строки списка: что впереди
     sums: float = 0.0  # сумы на вечер вчера: строки fact в UZS — карты и наличные
     bills: float = 0.0  # платежи в сумах до дня перед зарплатой
+    subscriptions: float = 0.0  # из них подписки: формула вкладки их не найдёт
     payday: date | None = (
         None  # зарплата в сумах, до которой лимит; None — конец месяца
     )
@@ -123,6 +124,7 @@ class Allowance:
     limit: float
     sums: float
     bills: float
+    subscriptions: float  # часть bills: подписки вне списка
     payday: date | None
     payday_name: str
     days: int
@@ -249,16 +251,14 @@ def _payday(
     return _on(_next_month(first), salaries[0].day), salaries[0].name
 
 
-def _bills(
+def _list_bills(
     items: tuple[ForecastItem, ...],
     receipts: Mapping[int, Receipt],
-    series: Sequence[Any],
     day: date,
     until: date,
 ) -> float:
-    """Платежи в сумах с day по день перед until: открытые строки списка с минусом в
-    UZS (и опоздавшие), в части срока в следующем месяце — эти строки целиком, и
-    подписки в UZS, не отменённые и ещё не списанные в своём месяце до day."""
+    """Платежи списка в сумах с day по день перед until: открытые строки с минусом в
+    UZS (и опоздавшие), в части срока в следующем месяце — эти строки целиком."""
     first = day.replace(day=1)
     later = _next_month(first)
     total = 0.0
@@ -270,6 +270,15 @@ def _bills(
             total -= remaining(item, receipt)
         if until > later and _on(later, item.day) < until:
             total -= item.amount
+    return total
+
+
+def _subscriptions(series: Sequence[Any], day: date, until: date) -> float:
+    """Подписки в UZS с day по день перед until: не отменённые и ещё не списанные в
+    своём месяце до day."""
+    first = day.replace(day=1)
+    later = _next_month(first)
+    total = 0.0
     for one in series:
         if one.last.currency != "UZS" or one.lapsed(day):
             continue
@@ -344,9 +353,12 @@ def day_budget(
         payday, name = _payday(items, receipts, day)
         until = payday or month_end + timedelta(days=1)
         sums = _sums(frame, day - timedelta(days=1))
-        bills = _bills(items, receipts, series, day, until)
+        subscriptions = _subscriptions(series, day, until)
+        bills = _list_bills(items, receipts, day, until) + subscriptions
         spread = (until - day).days
-        return Allowance((sums - bills) / spread, sums, bills, payday, name, spread)
+        return Allowance(
+            (sums - bills) / spread, sums, bills, subscriptions, payday, name, spread
+        )
 
     passed = yesterday.day if yesterday >= first else 0
     now_allowance = allowance_on(today)
@@ -408,6 +420,7 @@ def day_budget(
         ahead=left_now,
         sums=now_allowance.sums,
         bills=now_allowance.bills,
+        subscriptions=now_allowance.subscriptions,
         payday=now_allowance.payday,
         payday_name=now_allowance.payday_name,
         plan_gap=done - per_day * passed if passed else None,

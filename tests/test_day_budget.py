@@ -176,8 +176,8 @@ BILLS = [*ITEMS, ("Интернет", 10, -300_000, "UZS"), ("Кружок", 20,
 
 def test_list_payments_in_sums_before_the_salary_come_off_the_limit() -> None:
     day = budget(date(2026, 10, 5), items=BILLS)
-    # интернет 10-го — до аванса 15-го, кружок 20-го — после
-    assert day.bills == pytest.approx(300_000)
+    # интернет 10-го — до аванса 15-го, кружок 20-го — после; подписок нет
+    assert (day.bills, day.subscriptions) == (pytest.approx(300_000), 0)
     assert day.limit == pytest.approx(4_700_000 / 10)
     paid = budget(
         date(2026, 10, 7),
@@ -198,7 +198,10 @@ CLOUD = [
 def test_a_subscription_in_sums_before_the_salary_comes_off_the_limit() -> None:
     day = budget(date(2026, 10, 16), ADVANCE_PAID, *CLOUD)
     # 20-го спишется 50 000 — до зарплаты 30-го; сумы — 7 млн минус две оплаты
-    assert day.bills == pytest.approx(50_000)
+    assert (day.bills, day.subscriptions) == (
+        pytest.approx(50_000),
+        pytest.approx(50_000),
+    )
     assert day.limit == pytest.approx((6_900_000 - 50_000) / 14)
 
 

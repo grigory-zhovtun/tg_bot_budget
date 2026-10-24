@@ -5,8 +5,14 @@ from typing import Any
 
 from gspread.exceptions import WorksheetNotFound
 
-from app.services.receipts_sync import COLUMN_T, RECEIVED_HEADER, sync_receipts
-from tests.test_day_budget import FACT_HEADER, OPENING, RATES, fact_row, tab
+from app.services.receipts_sync import (
+    COLUMN_SUBSCRIPTIONS,
+    COLUMN_T,
+    LIMIT_LABEL,
+    RECEIVED_HEADER,
+    sync_receipts,
+)
+from tests.test_day_budget import FACT_HEADER, OPENING, RATES, charge, fact_row, tab
 
 ADVANCE_PAID = fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000)
 
@@ -37,8 +43,9 @@ class Sheets:
         self.writes.append(data)
         for item in data:
             title, cell = item["range"].split("!")
-            row = int(cell.removeprefix("T"))
-            self.tabs[title.strip("'")][row - 1][COLUMN_T] = item["values"][0][0]
+            column = ord(cell[0]) - ord("A")
+            row = int(cell[1:])
+            self.tabs[title.strip("'")][row - 1][column] = item["values"][0][0]
 
     def column(self) -> list[Any]:
         """T11:T15 — заголовок, аванс, ЗП, квартплата, пустая строка списка."""
@@ -88,3 +95,34 @@ def test_without_the_tab_or_the_list_nothing_is_written() -> None:
     no_list = Sheets([["Статья", "Категория"], ["Расходы", "🍔 ЕДА", "кафе"]])
     assert sync_receipts(no_list, date(2026, 10, 16)) == 0
     assert no_list.writes == []
+
+
+CLOUD = [
+    charge(date(2026, 8, 20), 50_000, "CLOUD STORAGE"),
+    charge(date(2026, 9, 20), 50_000, "CLOUD STORAGE"),
+]
+
+
+def with_limit_row() -> list[list[Any]]:
+    rows = wide(tab())
+    rows[4][14] = f"{LIMIT_LABEL} (с утра; сумы до зарплаты)"
+    return rows
+
+
+def test_the_subscriptions_until_the_salary_go_next_to_the_limit_cell() -> None:
+    # формула лимита во вкладке подписок не найдёт — их сумму пишет бот, в Q той строки
+    sheets = Sheets(with_limit_row(), ADVANCE_PAID, *CLOUD)
+    sync_receipts(sheets, date(2026, 10, 16))
+    assert sheets.tabs["Oct 26"][4][COLUMN_SUBSCRIPTIONS] == 50_000
+    assert sync_receipts(sheets, date(2026, 10, 16)) == 0  # не поменялось — не пишем
+
+
+def test_no_subscriptions_write_a_zero_and_no_limit_row_writes_nothing() -> None:
+    sheets = Sheets(with_limit_row(), ADVANCE_PAID)
+    sync_receipts(sheets, date(2026, 10, 16))
+    assert sheets.tabs["Oct 26"][4][COLUMN_SUBSCRIPTIONS] == 0
+    plain = Sheets(tab(), ADVANCE_PAID, *CLOUD)
+    sync_receipts(plain, date(2026, 10, 16))
+    assert all(
+        row[COLUMN_SUBSCRIPTIONS] in ("", None) for row in plain.tabs["Oct 26"][:10]
+    )

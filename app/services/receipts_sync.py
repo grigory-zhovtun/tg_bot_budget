@@ -1,8 +1,11 @@
-"""Колонка «Пришло к утру» жёлтого списка вкладки текущего месяца.
+"""Колонка «Пришло к утру» жёлтого списка вкладки текущего месяца и подписки до
+зарплаты рядом с лимитом.
 
 Бот сверяет строки списка с fact (services.receipts) по операциям до вчерашнего
 дня включительно — как лимит «с утра» — и пишет в колонку T, сколько пришло по
 строке, в её валюте и со знаком. Формулы вкладки (P5, Q10) считают по колонке.
+Формула лимита (P5) — по сумам до зарплаты, как у бота; подписки она не найдёт —
+их сумму до зарплаты бот пишет в Q той же строки.
 """
 
 from datetime import date, timedelta
@@ -18,6 +21,7 @@ from app.services.day_budget import (
     GOAL_LABEL,
     LIST_HEADER,
     TABLE_HEADER,
+    day_budget,
     read_forecast,
 )
 from app.services.google_sheets import GoogleSheetsService
@@ -25,6 +29,10 @@ from app.services.receipts import Receipt, match_receipts
 
 COLUMN_T = COLUMN_O + 5  # справа от «В сумах» (S)
 RECEIVED_HEADER = "Пришло к утру"
+LIMIT_LABEL = (
+    "Лимит на сегодня"  # строка лимита в сводке блока: O — подпись, P — формула
+)
+COLUMN_SUBSCRIPTIONS = COLUMN_O + 2  # Q той строки: подписки до зарплаты для формулы
 
 
 def _cell(row: list[Any], column: int) -> Any:
@@ -66,6 +74,19 @@ def received_cells(
     return data
 
 
+def subscription_cells(
+    title: str, rows: list[list[Any]], subscriptions: float
+) -> list[dict[str, Any]]:
+    """Q строки лимита — подписки до зарплаты; строки нет или число то же — ничего."""
+    for index, row in enumerate(rows):
+        if str(_cell(row, COLUMN_O)).startswith(LIMIT_LABEL):
+            want = round(subscriptions, 2)
+            if _same(_cell(row, COLUMN_SUBSCRIPTIONS), want):
+                return []
+            return [{"range": f"'{title}'!Q{index + 1}", "values": [[want]]}]
+    return []
+
+
 def sync_receipts(gs: GoogleSheetsService, today: date) -> int:
     """Записать «Пришло к утру» во вкладку текущего месяца; сколько ячеек переписано."""
     title = month_title(today)
@@ -76,10 +97,14 @@ def sync_receipts(gs: GoogleSheetsService, today: date) -> int:
     forecast = read_forecast(rows)
     if forecast is None:
         return 0
-    frame = transactions_frame(gs.get_values(config.FACT_SHEET_NAME), gs.get_rates())
+    rates = gs.get_rates()
+    frame = transactions_frame(gs.get_values(config.FACT_SHEET_NAME), rates)
     first = today.replace(day=1)
     receipts = match_receipts(frame, forecast.items, first, today - timedelta(days=1))
     data = received_cells(title, rows, receipts)
+    budget = day_budget(frame, rows, today, rates, None)
+    if budget is not None:
+        data += subscription_cells(title, rows, budget.subscriptions)
     if data:
         gs.write_cells(data)
     return len(data)

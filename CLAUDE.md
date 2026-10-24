@@ -53,7 +53,7 @@ app/
 │   ├── last_write.py    # Buttons under a write summary: last:fix (start_fix), last:undo → confirm → undo_last
 │   ├── month.py         # Daily job: month plan tab exists (copy of the last one), owner notified
 │   ├── piggy.py         # «🐷» in the chat: income_prompt (the percent of the income, «Отложил всё» → «set aside now», «Отложил часть…» → app `?open=save`), spend_note («🐷 Из копилки…», «Не из копилки»); journal row and note helpers shared with api.py
-│   ├── receipts.py      # Job every few minutes after writes: «Пришло к утру» (sync_receipts), then the piggy banks (sync_piggy)
+│   ├── receipts.py      # Job every few minutes after writes: «Пришло к утру» and the subscriptions until the salary next to the tab's limit formula (sync_receipts → Q of the «Лимит на сегодня» row), then the piggy banks (sync_piggy)
 │   ├── balances.py      # Bank main-screen screenshots: «Проверка» + «Сверено», «Выровнять» buttons
 │   └── analytics.py     # /advice, /analytics, daily report
 ├── services/
