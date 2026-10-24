@@ -213,7 +213,7 @@ async def test_today_command_sends_the_report_to_the_chat() -> None:
 
 
 async def test_fonts_command_sends_each_variant_as_its_own_message() -> None:
-    # временная проверка шрифтов: одна сумма разными способами, каждый — отдельно,
+    # временная проверка шрифтов: крупные числа разными способами, каждый — отдельно,
     # чтобы отказ Telegram в одном варианте не скрыл остальные
     bot = SimpleNamespace(do_api_request=AsyncMock(), send_message=AsyncMock())
     update = SimpleNamespace(
@@ -226,10 +226,12 @@ async def test_fonts_command_sends_each_variant_as_its_own_message() -> None:
         call.kwargs["api_kwargs"]["rich_message"]["html"]
         for call in bot.do_api_request.await_args_list
     ]
-    assert len(sent) == 7
+    assert len(sent) == 6
     number = whole(1_234_567_890)
-    assert (
-        sent[0] == f"<p>Вариант 1 — заголовок, как сейчас</p><h1>💸 {number} сум</h1>"
+    assert sent[0] == (
+        f"<p>Вариант 6 — моноширинный блок (выбранный)</p><pre>💸 {number} сум</pre>"
     )
-    assert f"<h1>💸 <code>{number}</code> сум</h1>" in sent[1]
-    assert f"<p><b>💸 {number} сум</b></p>" in sent[3]
+    # «математические» моноширинные цифры: 𝟷 𝟸𝟹𝟺 𝟻𝟼𝟽 𝟾𝟿𝟶
+    mono = number.translate({ord(str(d)): chr(0x1D7F6 + d) for d in range(10)})
+    assert f"<h1>💸 {mono} сум</h1>" in sent[1]
+    assert "<pre>⚠️ Сверх плана на" in sent[4]

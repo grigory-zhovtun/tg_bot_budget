@@ -307,27 +307,45 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     await send_report(context.bot, update.effective_chat.id, report)
 
 
+def _digits(text: str, zero: int) -> str:
+    """Цифры — символами Unicode «математических» цифр с кодом нуля zero: телефон
+    берёт их из другого шрифта, без засечек, а размер — от заголовка."""
+    return "".join(chr(zero + int(c)) if c.isdigit() else c for c in text)
+
+
+MONO_ZERO = 0x1D7F6  # 𝟶: моноширинные цифры
+SANS_BOLD_ZERO = 0x1D7EC  # 𝟬: жирные цифры без засечек
+
+
 def _font_variants() -> list[tuple[str, str]]:
-    """Временная проверка шрифтов: одна сумма разными способами (подпись, блок)."""
+    """Временная проверка шрифтов, второй круг: вид 6 (моноширинный блок) крупнее —
+    «математические» цифры в заголовках и длинная строка блоком (подпись, блок)."""
     number = whole(1_234_567_890)
-    sample = f"💸 {number} сум"
+    yesterday = f"⚠️ Вчера {whole(1_234_567)} из {whole(1_200_000)}"
+    over = f"⚠️ Сверх плана на {whole(1_234_567)} за 23 дня"
     return [
-        ("1 — заголовок, как сейчас", f"<h1>{sample}</h1>"),
-        ("2 — заголовок, цифры моноширинным", f"<h1>💸 <code>{number}</code> сум</h1>"),
-        ("3 — заголовок целиком моноширинным", f"<h1><code>{sample}</code></h1>"),
-        ("4 — жирный текст обычного размера", f"<p><b>{sample}</b></p>"),
-        ("5 — заголовок поменьше", f"<h4>{sample}</h4>"),
-        ("6 — моноширинный блок", f"<pre>{sample}</pre>"),
+        ("6 — моноширинный блок (выбранный)", f"<pre>💸 {number} сум</pre>"),
         (
-            "7 — таблица, жирным",
-            f"<table bordered><tr><td><b>{sample}</b></td></tr></table>",
+            "8 — крупный заголовок, моноширинные цифры",
+            f"<h1>💸 {_digits(number, MONO_ZERO)} сум</h1>",
         ),
+        (
+            "9 — крупный заголовок, жирные цифры без засечек",
+            f"<h1>💸 {_digits(number, SANS_BOLD_ZERO)} сум</h1>",
+        ),
+        (
+            "10 — средний заголовок, моноширинные цифры",
+            f"<h3>{_digits(yesterday, MONO_ZERO)}</h3>",
+        ),
+        ("11 — длинная строка моноширинным блоком", f"<pre>{over}</pre>"),
+        ("12 — моноширинный текст с переносом", f"<p><code>{over}</code></p>"),
     ]
 
 
 async def fonts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """/fonts — временная: одна сумма семью способами, чтобы выбрать вид без засечек;
-    каждый вариант — своим сообщением: отказ Telegram в одном не скроет остальные."""
+    """/fonts — временная: крупные числа разными способами, чтобы выбрать вид без
+    засечек; каждый вариант — своим сообщением: отказ Telegram в одном не скроет
+    остальные."""
     for label, block in _font_variants():
         report = Report(f"Вариант {label}", f"<p>Вариант {label}</p>{block}")
         await send_report(context.bot, update.effective_chat.id, report)
