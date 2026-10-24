@@ -21,7 +21,7 @@ from app import config
 from app.domain import Rates, merchant_key, month_title
 from app.services.analytics_service import MONTHS_RU, expenses, transactions_frame
 from app.services.calendar import read_calendar
-from app.services.day_budget import DayBudget, day_budget
+from app.services.day_budget import DayBudget, day_budget, until_text
 from app.services.google_sheets import GoogleSheetsService
 from app.services.plan import (
     TOLERANCE,
@@ -177,7 +177,7 @@ def _now(budget: DayBudget, today: date) -> list[str]:
         f"Сейчас ({today:%d.%m.%Y}):",
         f"Потрачено за {len(done)} дн.: {_plain(spent, 'UZS')} UZS "
         f"при плане {_plain(plan, 'UZS')} UZS",
-        f"Лимит на сегодня: {_plain(budget.limit, 'UZS')} UZS",
+        f"Можно в день {until_text(budget)}: {_plain(budget.limit, 'UZS')} UZS",
     ]
     runway = budget.runway
     if runway is not None:

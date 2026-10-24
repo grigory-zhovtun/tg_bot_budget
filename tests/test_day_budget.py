@@ -306,10 +306,10 @@ def test_morning_message() -> None:
     )
     assert text.splitlines() == [
         "☀️ Пятница, 2 октября",
-        "💸 Можно потратить сегодня: 90 000 сум",
-        "   по плану месяца — 100 000 в день",
-        "Вчера: 400 000 при лимите 100 000 — больше на 300 000",
-        "⚠️ Отстаём от плана на 300 000: на картах 16,60 млн, по плану 16,90 млн",
+        "💸 Можно тратить в день до аванса 15-го: 353 846 сум",
+        "   на сумовых картах 4 600 000",
+        "⚠️ Сверх плана на 300 000 за 1 день",
+        "Вчера: 400 000 при лимите 357 143 — больше на 42 857",
         "🧊 Заморожено: 600,00 USD ≈ 7,20 млн",
         "💳 Сумы 4,60 млн — до конца месяца хватит",
         "🔴 Сверх плана: инвентарь 720 000 из 500 000",
@@ -320,24 +320,23 @@ def test_morning_message() -> None:
 def test_today_adds_what_is_spent_and_left() -> None:
     coffee = fact_row(date(2026, 10, 2), "🍔 ЕДА", "кафе", 30_000)
     text = format_day_budget(budget(date(2026, 10, 2), OVERSPENT, coffee), now=True)
-    assert "   потрачено 30 000 — осталось 60 000" in text.splitlines()
+    assert "   потрачено 30 000 — осталось 323 846" in text.splitlines()
 
 
 def test_no_limit_left_and_goal_lines() -> None:
-    spree = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 4_000_000)
+    spree = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 6_000_000)
     text = format_day_budget(budget(date(2026, 10, 2), spree))
-    assert (
-        "💸 Лимита на сегодня нет: до плана на конец месяца не хватает 900 000" in text
-    )
+    assert "💸 Лимита на сегодня нет: до аванса 15-го не хватает 1 000 000" in text
 
     goal = format_day_budget(budget(date(2026, 10, 1), goal=6_000_000))
-    assert (
-        "🎯 Цель отложить 6,00 млн больше плановой экономии 4,10 млн — "
-        "лимит ниже на 61 290 в день" in goal
+    # лимит от цели больше не зависит — про лимит в строке цели ни слова
+    assert "🎯 Цель отложить 6,00 млн больше плановой экономии 4,10 млн" in (
+        goal.splitlines()
     )
     covered = format_day_budget(budget(date(2026, 10, 1), goal=500_000))
     assert "🎯 Цель отложить 500 000: план её покрывает" in covered
-    assert "Вчера: 0" in covered and "Отстаём" not in covered  # 1-е число
+    assert "Вчера: 0" in covered  # 1-е число: ни строки плана, ни «Отстаём»
+    assert "Сверх плана на" not in covered and "Отстаём" not in covered
 
 
 class Sheets:

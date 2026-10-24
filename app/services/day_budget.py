@@ -13,7 +13,7 @@
 """
 
 import calendar
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Any
@@ -442,6 +442,54 @@ def _ahead_text(item: ForecastItem, today: date) -> str:
     return f"{late}{item.day:02d}.{today.month:02d} {item.name} {_item_amount(item)}"
 
 
+def days_text(count: int) -> str:
+    """«1 день», «2 дня», «5 дней», «21 день»."""
+    if count % 10 == 1 and count % 100 != 11:
+        return f"{count} день"
+    if 2 <= count % 10 <= 4 and not 12 <= count % 100 <= 14:
+        return f"{count} дня"
+    return f"{count} дней"
+
+
+def _payday_on(budget: DayBudget) -> str:
+    """«15-го» — в этом месяце, «15 ноября» — в следующем."""
+    day = budget.payday
+    if day is None:
+        return "конца месяца"
+    if day.month == budget.today.month:
+        return f"{day.day}-го"
+    return f"{day.day} {MONTHS_GENITIVE[day.month - 1]}"
+
+
+def until_text(budget: DayBudget) -> str:
+    """«до аванса 15-го», «до зарплаты 15 ноября», «до конца месяца»."""
+    if budget.payday is None:
+        return "до конца месяца"
+    word = "аванса" if "аванс" in budget.payday_name.lower() else "зарплаты"
+    return f"до {word} {_payday_on(budget)}"
+
+
+def _money_line(budget: DayBudget, amount: Callable[[float], str] = whole) -> str:
+    """«на сумовых картах 7 200 000, платежи до 30-го 80 000»."""
+    line = f"на сумовых картах {amount(budget.sums)}"
+    if round(budget.bills) > 0:
+        line += f", платежи до {_payday_on(budget)} {amount(budget.bills)}"
+    return line
+
+
+def _plan_text(budget: DayBudget, amount: Callable[[float], str] = whole) -> str | None:
+    """Траты дня против плана — как строка у графика «Траты»; 1-го числа — None."""
+    if budget.plan_gap is None:
+        return None
+    period = f"за {days_text(budget.today.day - 1)}"
+    gap = round(budget.plan_gap)
+    if gap > 0:
+        return f"⚠️ Сверх плана на {amount(gap)} {period}"
+    if gap < 0:
+        return f"✓ Запас {amount(-gap)} {period}"
+    return f"✓ Ровно по плану {period}"
+
+
 def runway_line(runway: Runway, today: date) -> str:
     """«💳 Сумы 2,00 млн — хватит до 18.10 · до 30.10 обменять ≈ $460»."""
     head = f"💳 Сумы {short(runway.balance)}"
@@ -467,12 +515,13 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
     b = budget
     weekday = WEEKDAYS[b.today.weekday()].capitalize()
     lines = [f"☀️ {weekday}, {b.today.day} {MONTHS_GENITIVE[b.today.month - 1]}"]
+    until = until_text(b)
     if b.limit > 0:
-        lines.append(f"💸 Можно потратить сегодня: {money(b.limit)} сум")
+        lines.append(f"💸 Можно тратить в день {until}: {money(b.limit)} сум")
     else:
         lines.append(
-            "💸 Лимита на сегодня нет: до плана на конец месяца не хватает "
-            f"{short(-b.limit * b.days_left)}"
+            f"💸 Лимита на сегодня нет: {until} не хватает "
+            f"{money(-b.limit * b.days_left)}"
         )
     if now:
         left = max(b.limit, 0) - b.spent_today
@@ -480,7 +529,10 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
             f"осталось {money(left)}" if left >= 0 else f"сверх лимита {money(-left)}"
         )
         lines.append(f"   потрачено {money(b.spent_today)} — {rest}")
-    lines.append(f"   по плану месяца — {money(b.plan_per_day)} в день")
+    lines.append(f"   {_money_line(b, money)}")
+    plan = _plan_text(b, money)
+    if plan is not None:
+        lines.append(plan)
 
     if b.yesterday_limit is None:
         lines.append(f"Вчера: {money(b.yesterday_spent)}")
@@ -495,13 +547,6 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
         lines.append(
             f"Вчера: {money(b.yesterday_spent)} при лимите {money(allowed)} — {verdict}"
         )
-        gap = b.balance - b.planned_balance
-        where = f"на картах {short(b.balance)}, по плану {short(b.planned_balance)}"
-        lines.append(
-            f"⚠️ Отстаём от плана на {short(-gap)}: {where}"
-            if gap < 0
-            else f"✅ Идём лучше плана на {short(gap)}: {where}"
-        )
 
     if b.frozen is not None:
         line = f"🧊 Заморожено: {_cents(b.frozen)} {b.frozen_currency} ≈ {short(b.frozen_uzs)}"
@@ -513,10 +558,9 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
         lines.append(runway_line(b.runway, b.today))
     if b.goal > 0:
         if b.goal > b.growth:
-            cut = (b.goal - b.growth) / b.days_left
             lines.append(
                 f"🎯 Цель отложить {short(b.goal)} больше плановой экономии "
-                f"{short(b.growth)} — лимит ниже на {money(cut)} в день"
+                f"{short(b.growth)}"
             )
         else:
             lines.append(f"🎯 Цель отложить {short(b.goal)}: план её покрывает")
@@ -562,28 +606,32 @@ def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
     weekday = WEEKDAYS[b.today.weekday()].capitalize()
     month = MONTHS_GENITIVE[b.today.month - 1]
     blocks = [para(f"☀️ {weekday}, {b.today.day} {month}")]
-    per_day = f"по плану месяца — {whole(b.plan_per_day)} в день"
-    spent = f"лимит {whole(b.limit)}, потрачено {whole(b.spent_today)}"
+    until = until_text(b)
+    limit = f"лимит {whole(b.limit)} в день {until}"
+    spent = f"потрачено {whole(b.spent_today)}"
     if b.limit <= 0:
-        lines = [f"до плана на конец месяца не хватает {whole(-b.limit * b.days_left)}"]
+        lines = [f"{until} не хватает {whole(-b.limit * b.days_left)}"]
         if now:
             lines.append(f"потрачено сегодня {whole(b.spent_today)}")
-        blocks += [heading("💸 Лимита на сегодня нет", 2), para(*lines, per_day)]
+        blocks += [heading("💸 Лимита на сегодня нет", 2), para(*lines, _money_line(b))]
     elif not now:
         blocks += [
             heading(f"💸 {whole(b.limit)} сум", 1),
-            para("можно потратить сегодня", per_day),
+            para(f"можно тратить в день {until}", _money_line(b)),
         ]
     elif b.spent_today <= b.limit:
         blocks += [
             heading(f"💸 {whole(b.limit - b.spent_today)} сум", 1),
-            para("осталось на сегодня", spent, per_day),
+            para("осталось на сегодня", limit, spent),
         ]
     else:
         blocks += [
             heading(f"⚠️ Сверх лимита на {whole(b.spent_today - b.limit)}", 2),
-            para(spent, per_day),
+            para(limit, spent),
         ]
+    plan = _plan_text(b)
+    if plan is not None:
+        blocks.append(heading(plan))
 
     if b.yesterday_limit is None:
         blocks.append(heading(f"Вчера {whole(b.yesterday_spent)}"))
@@ -592,21 +640,10 @@ def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
         over = b.yesterday_spent - allowed
         pair = f"{whole(b.yesterday_spent)} из {whole(allowed)}"
         blocks += (
-            [heading(f"⚠️ Вчера {pair}"), para(f"больше лимита на {whole(over)}")]
+            [heading(f"⚠️ Вчера {pair}"), para(f"больше на {whole(over)}")]
             if over > 0
             else [heading(f"✅ Вчера {pair}"), para(f"уложились, запас {whole(-over)}")]
         )
-        gap = b.balance - b.planned_balance
-        blocks += [
-            heading(
-                f"⚠️ Отстаём от плана на {whole(-gap)}"
-                if gap < 0
-                else f"✅ Идём лучше плана на {whole(gap)}"
-            ),
-            para(
-                f"на картах {whole(b.balance)}", f"по плану {whole(b.planned_balance)}"
-            ),
-        ]
 
     if b.runway is not None:
         blocks += _rich_runway(b.runway, b.today)
@@ -621,11 +658,7 @@ def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
         blocks += [heading(f"🧊 Заморожено {frozen}"), para(*lines)]
     if b.goal > 0:
         if b.goal > b.growth:
-            cut = (b.goal - b.growth) / b.days_left
-            reason = (
-                f"больше плановой экономии {whole(b.growth)}",
-                f"лимит ниже на {whole(cut)} в день",
-            )
+            reason: tuple[str, ...] = (f"больше плановой экономии {whole(b.growth)}",)
         else:
             reason = ("план её покрывает",)
         blocks += [heading(f"🎯 Цель отложить {whole(b.goal)}"), para(*reason)]
@@ -700,35 +733,38 @@ def rich_plan_status(line: PlanLine | None, subcategory: str, today: date) -> li
 
 def rich_today_line(budget: DayBudget) -> list[str]:
     """Сколько ещё можно сегодня — после записи, блоками."""
+    until = until_text(budget)
     if budget.limit <= 0:
         short_by = whole(-budget.limit * budget.days_left)
         return [
             heading("💸 Лимита на сегодня нет"),
-            para(f"до плана на конец месяца не хватает {short_by}"),
+            para(f"{until} не хватает {short_by}"),
         ]
     left = budget.limit - budget.spent_today
     if left < 0:
         return [
             heading(f"⚠️ Сверх лимита на {whole(-left)}"),
-            para(f"лимит {whole(budget.limit)}"),
+            para(f"лимит {whole(budget.limit)} в день {until}"),
         ]
     return [
         heading(f"💸 Осталось {whole(left)}"),
-        para(f"на сегодня, лимит {whole(budget.limit)}"),
+        para(f"на сегодня, лимит {whole(budget.limit)} в день {until}"),
     ]
 
 
 def today_line(budget: DayBudget) -> str:
     """Сколько ещё можно сегодня — после каждой записи."""
+    until = until_text(budget)
     if budget.limit <= 0:
         return (
-            "💸 Лимита на сегодня нет: до плана на конец месяца не хватает "
-            f"{short(-budget.limit * budget.days_left)}"
+            f"💸 Лимита на сегодня нет: {until} не хватает "
+            f"{money(-budget.limit * budget.days_left)}"
         )
     left = budget.limit - budget.spent_today
     if left < 0:
         return (
-            f"💸 Сегодня сверх лимита на {money(-left)} (лимит {money(budget.limit)})"
+            f"💸 Сегодня сверх лимита на {money(-left)} "
+            f"(лимит {money(budget.limit)} в день {until})"
         )
     return f"💸 На сегодня осталось {money(left)} из {money(budget.limit)}"
 

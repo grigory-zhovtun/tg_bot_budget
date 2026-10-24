@@ -52,19 +52,18 @@ MUSIC = [
 def test_morning_blocks_follow_the_mockup() -> None:
     b = budget(date(2026, 10, 2), OVERSPENT, inventory_fact=640_000, items=LIST)
     blocks = rich_day_budget(b)
-    assert blocks[:8] == [
+    assert blocks[:7] == [
         para("☀️ Пятница, 2 октября"),
         heading(f"💸 {whole(b.limit)} сум", 1),
         para(
-            "можно потратить сегодня",
-            f"по плану месяца — {whole(b.plan_per_day)} в день",
+            "можно тратить в день до аванса 15-го", f"на сумовых картах {whole(b.sums)}"
         ),
+        heading(f"⚠️ Сверх плана на {whole(400_000 - b.plan_per_day)} за 1 день"),
         heading(f"⚠️ Вчера {whole(b.yesterday_spent)} из {whole(b.yesterday_limit)}"),
-        para(f"больше лимита на {whole(b.yesterday_spent - b.yesterday_limit)}"),
-        heading(f"⚠️ Отстаём от плана на {whole(b.planned_balance - b.balance)}"),
-        para(f"на картах {whole(b.balance)}", f"по плану {whole(b.planned_balance)}"),
+        para(f"больше на {whole(b.yesterday_spent - b.yesterday_limit)}"),
         heading(f"💳 Сумы {whole(b.runway.balance)}"),
     ]
+    assert not any("Отстаём" in block or "по плану месяца" in block for block in blocks)
     assert para("до конца месяца хватит") in blocks
     frozen = in_currency(b.frozen, "USD", with_cents=True)
     assert heading(f"🧊 Заморожено {frozen}") in blocks
@@ -88,15 +87,44 @@ def test_today_shows_what_is_left_or_the_overspend() -> None:
         heading(f"💸 {whole(b.limit - 30_000)} сум", 1),
         para(
             "осталось на сегодня",
-            f"лимит {whole(b.limit)}, потрачено {whole(30_000)}",
-            f"по плану месяца — {whole(b.plan_per_day)} в день",
+            f"лимит {whole(b.limit)} в день до аванса 15-го",
+            f"потрачено {whole(30_000)}",
         ),
     ]
     spree = fact_row(date(2026, 10, 2), "🍔 ЕДА", "кафе", 10 * b.limit)
     over = budget(date(2026, 10, 2), OVERSPENT, spree, items=LIST)
-    assert rich_day_budget(over, now=True)[1] == heading(
-        f"⚠️ Сверх лимита на {whole(over.spent_today - over.limit)}", 2
+    assert rich_day_budget(over, now=True)[1:3] == [
+        heading(f"⚠️ Сверх лимита на {whole(over.spent_today - over.limit)}", 2),
+        para(
+            f"лимит {whole(over.limit)} в день до аванса 15-го",
+            f"потрачено {whole(over.spent_today)}",
+        ),
+    ]
+
+
+def test_the_limit_names_its_salary_and_the_payments_before_it() -> None:
+    bills = [*LIST, ("Интернет", 10, -300_000, "UZS")]
+    b = budget(date(2026, 10, 5), items=bills)
+    assert rich_day_budget(b)[2] == para(
+        "можно тратить в день до аванса 15-го",
+        f"на сумовых картах {whole(5_000_000)}, платежи до 15-го {whole(300_000)}",
     )
+    paid = [
+        fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000),
+        fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000),
+    ]
+    last = budget(date(2026, 10, 31), *paid, items=LIST)
+    assert rich_day_budget(last)[2] == para(
+        "можно тратить в день до аванса 15 ноября",
+        f"на сумовых картах {whole(17_000_000)}",
+    )
+    rent = budget(date(2026, 10, 10), items=[("Аренда & Ко", 18, -420, "USD")])
+    assert rich_day_budget(rent)[2] == para(
+        "можно тратить в день до конца месяца", f"на сумовых картах {whole(5_000_000)}"
+    )
+    calm = budget(date(2026, 10, 3), items=LIST)
+    spare = whole(2 * calm.plan_per_day)  # два дня без трат
+    assert heading(f"✓ Запас {spare} за 2 дня") in rich_day_budget(calm)
 
 
 def test_no_limit_goal_and_the_first_day() -> None:
@@ -105,14 +133,14 @@ def test_no_limit_goal_and_the_first_day() -> None:
     assert rich_day_budget(b)[1:3] == [
         heading("💸 Лимита на сегодня нет", 2),
         para(
-            f"до плана на конец месяца не хватает {whole(-b.limit * b.days_left)}",
-            f"по плану месяца — {whole(b.plan_per_day)} в день",
+            f"до аванса 15-го не хватает {whole(3_000_000)}",
+            f"на сумовых картах {whole(-3_000_000)}",
         ),
     ]
     first = budget(date(2026, 10, 1), goal=500_000, items=LIST)
     blocks = rich_day_budget(first)
     assert heading(f"Вчера {whole(0)}") in blocks
-    assert not any("Отстаём" in block for block in blocks)
+    assert not any("Отстаём" in block or "Сверх плана на" in block for block in blocks)
     assert heading(f"🎯 Цель отложить {whole(500_000)}") in blocks
     assert para("план её покрывает") in blocks
 
