@@ -162,7 +162,10 @@ export interface Dashboard {
   plan_per_day: number | null;
   days_left: number | null;
   balance: number | null;
-  planned_balance: number | null;
+  sums: number | null; // сумы на вечер вчера: из них лимит до зарплаты
+  bills: number | null; // платежи в сумах до дня перед зарплатой
+  until: string | null; // «до зарплаты 30-го», «до аванса 15 ноября», «до конца месяца»
+  payday_on: string | null; // «30-го», «15 ноября», «конца месяца»
   frozen: {
     amount: number;
     currency: string;

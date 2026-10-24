@@ -9,6 +9,7 @@ import CardBalances from "./CardBalances";
 import CategoryChart from "./CategoryChart";
 import SectionSwitch from "./SectionSwitch";
 import SpendingChart from "./SpendingChart";
+import { paceVerdict } from "./spending";
 import { SECTIONS, storeSection, storedSection, type Section } from "./section";
 
 function Skeleton() {
@@ -21,7 +22,16 @@ function Skeleton() {
   );
 }
 
-/** Сколько можно сегодня: главная цифра и под ней лимит и траты дня. */
+/** «на сумовых картах X, платежи до 15-го Y» — из чего лимит до зарплаты. */
+function sumsLine(data: Dashboard): string | null {
+  if (data.sums === null) return null;
+  const line = `на сумовых картах ${money(data.sums)}`;
+  if (data.bills === null || Math.round(data.bills) <= 0) return line;
+  return `${line}, платежи до ${data.payday_on ?? "конца месяца"} ${money(data.bills)}`;
+}
+
+/** Сколько можно сегодня — по деньгам до зарплаты, как утром в боте: главная цифра,
+ * лимит и траты дня, из чего лимит и план месяца одной строкой, как у графика. */
 function Today({ data }: { data: Dashboard }) {
   if (
     data.limit === null ||
@@ -30,15 +40,26 @@ function Today({ data }: { data: Dashboard }) {
   ) {
     return null;
   }
+  const until = data.until ?? "до конца месяца";
+  const sums = sumsLine(data);
+  const pace = paceVerdict(data.spending, data.today, data.plan_per_day);
+  const plan = pace && (
+    <p
+      className={`text-line font-extrabold ${pace.over ? "text-danger" : "text-ok"}`}
+    >
+      {pace.text}
+    </p>
+  );
   if (data.limit <= 0) {
-    // как /today: до плана на конец месяца уже не хватает — лимита на день нет
+    // как /today: сумов до зарплаты не хватает даже на платежи — лимита на день нет
     const missing = -data.limit * (data.days_left ?? 1);
     return (
       <Card label="Можно сегодня">
         <p className="text-fact font-extrabold text-danger">⚠️ Лимита нет</p>
-        <Line>{`не хватает ${money(missing)}`}</Line>
-        <Line>до плана на конец месяца</Line>
+        <Line>{`${until} не хватает ${money(missing)}`}</Line>
         <Line>{`потрачено сегодня ${money(data.spent_today)}`}</Line>
+        {sums && <Line>{sums}</Line>}
+        {plan}
       </Card>
     );
   }
@@ -51,40 +72,27 @@ function Today({ data }: { data: Dashboard }) {
       ) : (
         <Line>можно потратить сегодня</Line>
       )}
-      <Line>
-        {`лимит ${money(data.limit)}, потрачено ${money(data.spent_today)}`}
-      </Line>
+      <Line>{`лимит ${money(data.limit)} в день ${until}`}</Line>
+      <Line>{`потрачено сегодня ${money(data.spent_today)}`}</Line>
+      {sums && <Line>{sums}</Line>}
+      {plan}
     </Card>
   );
 }
 
-/** На картах утром против плана и «Заморожено» — каждая своей карточкой. */
-function Cards({ data }: { data: Dashboard }) {
-  if (data.balance === null || data.planned_balance === null) return null;
-  const gap = Math.round(data.balance - data.planned_balance);
+/** «Заморожено» — своей карточкой. */
+function Frozen({ data }: { data: Dashboard }) {
   const frozen = data.frozen;
+  if (!frozen) return null;
   return (
-    <>
-      <Card label="На картах">
-        <Fact>{`На картах ${money(data.balance)}`}</Fact>
-        <Line>{`утром, по плану ${money(data.planned_balance)}`}</Line>
-        {gap < 0 && <Warn>{`меньше плана на ${money(-gap)}`}</Warn>}
-        {gap > 0 && <Good>{`больше плана на ${money(gap)}`}</Good>}
-        {gap === 0 && <Good>ровно по плану</Good>}
-      </Card>
-      {frozen && (
-        <Card label="Заморожено">
-          <Fact>
-            {`🧊 Заморожено ${moneyText(frozen.amount, frozen.currency)}`}
-          </Fact>
-          <Line>
-            {Math.round(frozen.change * 100) === 0
-              ? "с 1-го числа без изменений"
-              : `с 1-го числа ${signedMoney(frozen.change, frozen.currency)}`}
-          </Line>
-        </Card>
-      )}
-    </>
+    <Card label="Заморожено">
+      <Fact>{`🧊 Заморожено ${moneyText(frozen.amount, frozen.currency)}`}</Fact>
+      <Line>
+        {Math.round(frozen.change * 100) === 0
+          ? "с 1-го числа без изменений"
+          : `с 1-го числа ${signedMoney(frozen.change, frozen.currency)}`}
+      </Line>
+    </Card>
   );
 }
 
@@ -141,7 +149,7 @@ function SectionCards({ data, section }: SectionProps) {
           {/* лимита нет именно здесь — здесь и объясняем */}
           {data.status === "no_forecast" && <NoForecastNote />}
           <Today data={data} />
-          <Cards data={data} />
+          <Frozen data={data} />
           <Sums data={data} />
           {data.cards.length > 0 && (
             <CardBalances cards={data.cards} today={data.today} />

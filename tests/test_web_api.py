@@ -348,6 +348,10 @@ def test_dashboard_numbers_come_from_the_month_tab() -> None:
     assert body["status"] == "ok"
     assert body["limit"] == pytest.approx(4_600_000 / 13)  # тот же расчёт, что /today
     assert body["left_today"] == pytest.approx(body["limit"] - body["spent_today"])
+    # лимит — до аванса 15-го: сумы на вечер вчера минус платежи до него
+    assert (body["sums"], body["bills"], body["days_left"]) == (4_600_000, 0, 13)
+    assert (body["until"], body["payday_on"]) == ("до аванса 15-го", "15-го")
+    assert body["planned_balance"] is None  # старое приложение прячет «по плану»
     assert body["frozen"]["currency"] == "USD"
     assert body["groups"][0]["items"][0] == {
         "name": "кафе",

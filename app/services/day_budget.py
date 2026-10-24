@@ -86,7 +86,6 @@ class DayBudget:
         int  # дней лимита: до дня перед зарплатой, до конца месяца — с сегодняшним
     )
     balance: float  # на всех картах на вечер вчера, в сумах
-    planned_balance: float  # сколько должно было быть по плану на вечер вчера
     yesterday_spent: float
     yesterday_limit: float | None  # None — вчера был прошлый месяц
     spent_today: float
@@ -339,11 +338,6 @@ def day_budget(
 
     passed = yesterday.day if yesterday >= first else 0
     now_allowance = allowance_on(today)
-    planned = (
-        opening
-        + sum(item.uzs for item in items if item.day <= passed)
-        - per_day * passed
-    )
     morning = _ahead(items, match_receipts(frame, items, first, yesterday))
     now = match_receipts(frame, items, first, today)
     paid = frozenset(index for receipt in now.values() for index in receipt.operations)
@@ -382,7 +376,6 @@ def day_budget(
         plan_per_day=per_day,
         days_left=now_allowance.days,
         balance=_balance(frame, yesterday),
-        planned_balance=planned,
         yesterday_spent=_spent_on(frame, yesterday, paid),
         yesterday_limit=history[-2].limit if passed else None,
         spent_today=_spent_on(frame, today, paid),
@@ -451,7 +444,7 @@ def days_text(count: int) -> str:
     return f"{count} дней"
 
 
-def _payday_on(budget: DayBudget) -> str:
+def payday_on(budget: DayBudget) -> str:
     """«15-го» — в этом месяце, «15 ноября» — в следующем."""
     day = budget.payday
     if day is None:
@@ -466,14 +459,14 @@ def until_text(budget: DayBudget) -> str:
     if budget.payday is None:
         return "до конца месяца"
     word = "аванса" if "аванс" in budget.payday_name.lower() else "зарплаты"
-    return f"до {word} {_payday_on(budget)}"
+    return f"до {word} {payday_on(budget)}"
 
 
 def _money_line(budget: DayBudget, amount: Callable[[float], str] = whole) -> str:
     """«на сумовых картах 7 200 000, платежи до 30-го 80 000»."""
     line = f"на сумовых картах {amount(budget.sums)}"
     if round(budget.bills) > 0:
-        line += f", платежи до {_payday_on(budget)} {amount(budget.bills)}"
+        line += f", платежи до {payday_on(budget)} {amount(budget.bills)}"
     return line
 
 

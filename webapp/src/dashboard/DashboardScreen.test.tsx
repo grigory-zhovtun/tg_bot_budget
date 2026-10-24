@@ -27,8 +27,19 @@ describe("DashboardScreen", () => {
     );
     expect(within(today).getByText("можно потратить сегодня")).toBeTruthy();
     expect(
-      within(today).getByText("лимит 500 000, потрачено 120 000"),
+      within(today).getByText("лимит 500 000 в день до аванса 15-го"),
     ).toBeTruthy();
+    expect(within(today).getByText("потрачено сегодня 120 000")).toBeTruthy();
+    expect(
+      within(today).getByText(
+        "на сумовых картах 2 800 000, платежи до 15-го 300 000",
+      ),
+    ).toBeTruthy();
+    // план — одной строкой, той же, что у графика «Траты»
+    const plan = within(today).getByText("✓ Запас 1 100 000 за 9 дней");
+    expect(plan.className).toContain("text-ok");
+    // «На картах … утром, по плану» больше нет
+    expect(screen.queryByRole("region", { name: "На картах" })).toBeNull();
     expect(
       screen
         .getByRole("radio", { name: "Сегодня" })
@@ -92,8 +103,9 @@ describe("DashboardScreen", () => {
     expect(within(today).getByText("−20 000 сум")).toBeTruthy();
     expect(within(today).getByText("⚠️ сверх лимита дня")).toBeTruthy();
     expect(
-      within(today).getByText("лимит 500 000, потрачено 520 000"),
+      within(today).getByText("лимит 500 000 в день до аванса 15-го"),
     ).toBeTruthy();
+    expect(within(today).getByText("потрачено сегодня 520 000")).toBeTruthy();
   });
 
   it("shows the frozen dollars in a card of their own", async () => {
@@ -103,15 +115,14 @@ describe("DashboardScreen", () => {
     expect(within(frozen).getByText("с 1-го числа −50 $")).toBeTruthy();
   });
 
-  it("says when the cards are above the plan and the frozen sum stood still", async () => {
+  it("says when the frozen sum stood still", async () => {
     const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
       ...dashboardFixture,
-      balance: 43_000_000,
       frozen: { amount: 1000, currency: "USD", uzs: 12_000_000, change: 0 },
     });
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
-    expect(await screen.findByText("✓ больше плана на 1 500 000")).toBeTruthy();
-    expect(screen.getByText("с 1-го числа без изменений")).toBeTruthy();
+    expect(await screen.findByText("с 1-го числа без изменений")).toBeTruthy();
+    expect(screen.queryByText(/плана на \d/)).toBeNull();
   });
 
   it("says when the sums last until the end of the month", async () => {
@@ -180,13 +191,9 @@ describe("DashboardScreen", () => {
   it("shows the cards now and where the money went this month", async () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi()} />);
-    // карточка — остаток на вечер вчера для сравнения с планом, таблица — сейчас
-    expect(await screen.findByText("На картах 39 000 000")).toBeTruthy();
-    expect(screen.getByText("утром, по плану 41 500 000")).toBeTruthy();
-    expect(
-      screen.getByText("⚠️ меньше плана на 2 500 000").className,
-    ).toContain("text-danger");
-    const cards = screen.getByRole("region", { name: "Остатки на картах" });
+    const cards = await screen.findByRole("region", {
+      name: "Остатки на картах",
+    });
     expect(within(cards).getByText("5 250 000")).toBeTruthy();
     expect(
       within(cards).getByText("⚠️ VISA 6666 в банке 2 450 ₽"),
@@ -216,7 +223,6 @@ describe("DashboardScreen", () => {
       left_today: null,
       spent_today: null,
       balance: null,
-      planned_balance: null,
       runway: null,
     });
     const user = userEvent.setup();
@@ -386,9 +392,11 @@ describe("DashboardScreen", () => {
     const user = userEvent.setup();
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
     expect(await screen.findByText("⚠️ Лимита нет")).toBeTruthy();
-    expect(screen.getByText("не хватает 1 100 000")).toBeTruthy();
-    expect(screen.getByText("до плана на конец месяца")).toBeTruthy();
+    expect(
+      screen.getByText("до аванса 15-го не хватает 1 100 000"),
+    ).toBeTruthy();
     expect(screen.getByText("потрачено сегодня 120 000")).toBeTruthy();
+    expect(screen.queryByText("до плана на конец месяца")).toBeNull();
     await show(user, "Траты");
     expect(screen.getByText("лимита нет")).toBeTruthy(); // в графике вместо «можно»
   });
