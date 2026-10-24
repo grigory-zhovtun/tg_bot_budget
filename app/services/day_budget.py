@@ -32,7 +32,7 @@ from app.services.analytics_service import (
 )
 from app.services.calendar import CalendarRecord
 from app.services.forecast import currency_forecast
-from app.services.receipts import NOTHING, Receipt, match_receipts, remaining
+from app.services.receipts import NOTHING, Receipt, closed, match_receipts, remaining
 from app.services.runway import Runway, uzs_runway
 
 COLUMN_O = 14  # блок прогноза: O название, P день, Q сумма, R валюта, S в сумах
@@ -78,9 +78,13 @@ class DaySpend:
 @dataclass(frozen=True)
 class DayBudget:
     today: date
-    limit: float  # меньше нуля — до плана на конец месяца уже не хватает
+    limit: (
+        float  # в день до зарплаты: (сумы − платежи) / дней; меньше нуля — не хватает
+    )
     plan_per_day: float
-    days_left: int  # вместе с сегодняшним
+    days_left: (
+        int  # дней лимита: до дня перед зарплатой, до конца месяца — с сегодняшним
+    )
     balance: float  # на всех картах на вечер вчера, в сумах
     planned_balance: float  # сколько должно было быть по плану на вечер вчера
     yesterday_spent: float
@@ -97,6 +101,25 @@ class DayBudget:
     runway: Runway | None = None  # прогноз по сумам: когда кончатся, сколько обменять
     history: tuple[DaySpend, ...] = ()  # с 1-го числа по сегодняшний день
     ahead: tuple[ForecastItem, ...] = ()  # не пришедшие строки списка: что впереди
+    sums: float = 0.0  # сумы на вечер вчера: строки fact в UZS — карты и наличные
+    bills: float = 0.0  # платежи в сумах до дня перед зарплатой
+    payday: date | None = (
+        None  # зарплата в сумах, до которой лимит; None — конец месяца
+    )
+    payday_name: str = ""  # её строка списка: «Аванс», «ЗП»
+    plan_gap: float | None = None  # траты дня с 1-го по вчера минус план; None — 1-е
+
+
+@dataclass(frozen=True)
+class Allowance:
+    """Лимит дня по деньгам: сумы минус платежи до зарплаты на дни до неё."""
+
+    limit: float
+    sums: float
+    bills: float
+    payday: date | None
+    payday_name: str
+    days: int
 
 
 def _number(value: Any) -> float | None:
@@ -181,6 +204,75 @@ def _balance(frame: pd.DataFrame, through: date, column: str = "amount_uzs") -> 
     return float(flow[frame["day"] <= through].sum())
 
 
+def _on(first: date, day: int) -> date:
+    """День месяца first; 31-е в коротком месяце — последний день."""
+    return first.replace(day=min(day, calendar.monthrange(first.year, first.month)[1]))
+
+
+def _next_month(first: date) -> date:
+    return (first + timedelta(days=32)).replace(day=1)
+
+
+def _sums(frame: pd.DataFrame, through: date) -> float:
+    """Сумы на вечер дня: все строки fact в UZS — карты и наличные."""
+    return _balance(frame[frame["currency"] == "UZS"], through, "amount")
+
+
+def _payday(
+    items: tuple[ForecastItem, ...], receipts: Mapping[int, Receipt], day: date
+) -> tuple[date | None, str]:
+    """Ближайшая зарплата в сумах позже day: открытая к утру строка списка с плюсом в
+    UZS; в месяце нет — первая такая строка в следующем месяце; строк нет — (None, "").
+    Зарплата сегодня или опоздавшая — не в счёт, пока деньги не на картах."""
+    salaries = sorted(
+        (item for item in items if item.amount > 0 and item.currency == "UZS"),
+        key=lambda item: (item.day, item.row),
+    )
+    if not salaries:
+        return None, ""
+    first = day.replace(day=1)
+    for item in salaries:
+        due = _on(first, item.day)
+        if due > day and not closed(item, receipts.get(item.row, NOTHING)):
+            return due, item.name
+    return _on(_next_month(first), salaries[0].day), salaries[0].name
+
+
+def _bills(
+    items: tuple[ForecastItem, ...],
+    receipts: Mapping[int, Receipt],
+    series: Sequence[Any],
+    day: date,
+    until: date,
+) -> float:
+    """Платежи в сумах с day по день перед until: открытые строки списка с минусом в
+    UZS (и опоздавшие), в части срока в следующем месяце — эти строки целиком, и
+    подписки в UZS, не отменённые и ещё не списанные в своём месяце до day."""
+    first = day.replace(day=1)
+    later = _next_month(first)
+    total = 0.0
+    for item in items:
+        if item.amount >= 0 or item.currency != "UZS":
+            continue
+        receipt = receipts.get(item.row, NOTHING)
+        if _on(first, item.day) < until and not closed(item, receipt):
+            total -= remaining(item, receipt)
+        if until > later and _on(later, item.day) < until:
+            total -= item.amount
+    for one in series:
+        if one.last.currency != "UZS" or one.lapsed(day):
+            continue
+        for month in (first, later):
+            due = one.expected_on(month)
+            charged = any(
+                (c.day.year, c.day.month) == (due.year, due.month) and c.day < day
+                for c in one.charges
+            )
+            if day <= due < until and not charged:
+                total += one.last.amount
+    return total
+
+
 def _spent_on(frame: pd.DataFrame, day: date, paid: frozenset[int]) -> float:
     """Траты дня без платежей из списка: квартплата не съедает лимит своего дня."""
     spent = expenses(frame)
@@ -210,11 +302,15 @@ def day_budget(
 ) -> DayBudget | None:
     """Лимит на сегодня по листу fact и вкладке месяца; None — во вкладке нет списка.
 
-    Строки списка — по сверке с fact (services.receipts): к утру дня — для лимита и
-    заморозки; на сейчас — для «Впереди» и трат дня. Прогноз по сумам — линия «по
-    темпу» модели прогноза (services.forecast) с записями календаря records, как во
-    вкладке «Календарь».
+    Лимит — по деньгам до зарплаты (Allowance): сумы на вечер вчера минус платежи до
+    дня перед ближайшей зарплатой в сумах, на дни до неё. Строки списка — по сверке с
+    fact (services.receipts): к утру дня — для лимита и заморозки; на сейчас — для
+    «Впереди» и трат дня. Прогноз по сумам — линия «по темпу» модели прогноза
+    (services.forecast) с записями календаря records, как во вкладке «Календарь».
     """
+    # recurring сам берёт отсюда MONTHS_PREPOSITIONAL и short
+    from app.services.recurring import find_series, outside_list
+
     forecast = read_forecast(rows)
     if forecast is None:
         return None
@@ -228,25 +324,27 @@ def day_budget(
     payments = sum(item.uzs for item in items if item.uzs < 0)
     per_day = (sum(line.plan for line in spend) + payments) / days
     plan_end = opening + sum(item.uzs for item in items) - per_day * days
-    target = max(plan_end, opening + forecast.savings_goal)
+    series = outside_list(find_series(frame, today), items)
+    month_end = first.replace(day=days)
 
-    def ahead_on(day: date) -> tuple[ForecastItem, ...]:
-        """Строки списка, не пришедшие к утру дня day."""
+    def allowance_on(day: date) -> Allowance:
+        """Лимит дня day: сумы на вечер накануне, платежи и дни до зарплаты."""
         receipts = match_receipts(frame, items, first, day - timedelta(days=1))
-        return _ahead(items, receipts)
-
-    def limit_on(day: date) -> float:
-        ahead = sum(item.uzs for item in ahead_on(day))
-        left = _balance(frame, day - timedelta(days=1)) + ahead - target
-        return left / (days - day.day + 1)
+        payday, name = _payday(items, receipts, day)
+        until = payday or month_end + timedelta(days=1)
+        sums = _sums(frame, day - timedelta(days=1))
+        bills = _bills(items, receipts, series, day, until)
+        spread = (until - day).days
+        return Allowance((sums - bills) / spread, sums, bills, payday, name, spread)
 
     passed = yesterday.day if yesterday >= first else 0
+    now_allowance = allowance_on(today)
     planned = (
         opening
         + sum(item.uzs for item in items if item.day <= passed)
         - per_day * passed
     )
-    morning = ahead_on(today)
+    morning = _ahead(items, match_receipts(frame, items, first, yesterday))
     now = match_receipts(frame, items, first, today)
     paid = frozenset(index for receipt in now.values() for index in receipt.operations)
 
@@ -273,15 +371,20 @@ def day_budget(
         reverse=True,
     )
     left_now = _ahead(items, now)
+    history = tuple(
+        DaySpend(day, _spent_on(frame, day, paid), allowance_on(day).limit)
+        for day in (first + timedelta(days=k) for k in range(today.day))
+    )
+    done = sum(day.spent for day in history if day.day < today)
     return DayBudget(
         today=today,
-        limit=limit_on(today),
+        limit=now_allowance.limit,
         plan_per_day=per_day,
-        days_left=days - today.day + 1,
+        days_left=now_allowance.days,
         balance=_balance(frame, yesterday),
         planned_balance=planned,
         yesterday_spent=_spent_on(frame, yesterday, paid),
-        yesterday_limit=limit_on(yesterday) if passed else None,
+        yesterday_limit=history[-2].limit if passed else None,
         spent_today=_spent_on(frame, today, paid),
         growth=plan_end - opening,
         goal=forecast.savings_goal,
@@ -296,11 +399,13 @@ def day_budget(
             today,
             rates,
         ),
-        history=tuple(
-            DaySpend(day, _spent_on(frame, day, paid), limit_on(day))
-            for day in (first + timedelta(days=k) for k in range(today.day))
-        ),
+        history=history,
         ahead=left_now,
+        sums=now_allowance.sums,
+        bills=now_allowance.bills,
+        payday=now_allowance.payday,
+        payday_name=now_allowance.payday_name,
+        plan_gap=done - per_day * passed if passed else None,
     )
 
 
