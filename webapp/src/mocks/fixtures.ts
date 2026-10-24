@@ -59,9 +59,12 @@ export const dashboardFixture: Dashboard = {
   spent_today: 120_000,
   left_today: 380_000,
   plan_per_day: 450_000,
-  days_left: 22,
+  days_left: 5,
   balance: 39_000_000,
-  planned_balance: 41_500_000,
+  sums: 2_800_000,
+  bills: 300_000,
+  until: "до аванса 15-го",
+  payday_on: "15-го",
   frozen: { amount: 1000, currency: "USD", uzs: 12_000_000, change: -50 },
   groups: [
     {

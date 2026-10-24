@@ -251,7 +251,12 @@ class DashboardOut(ApiModel):
     plan_per_day: float | None = None
     days_left: int | None = None
     balance: float | None = None
+    # открытые до обновления версии приложения прячут по null «На картах … по плану»
     planned_balance: float | None = None
+    sums: float | None = None  # сумы на вечер вчера: из них лимит до зарплаты
+    bills: float | None = None  # платежи в сумах до дня перед зарплатой
+    until: str | None = None  # «до зарплаты 30-го», «до аванса 15 ноября»
+    payday_on: str | None = None  # «30-го», «15 ноября», «конца месяца»
     frozen: FrozenOut | None = None
     groups: list[GroupPlanOut] = []
     daily: list[DayPointOut] = []  # для открытых до обновления версий приложения

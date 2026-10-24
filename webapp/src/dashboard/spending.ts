@@ -1,4 +1,6 @@
 import type { DaySpend } from "../api";
+import { money } from "../format";
+import { days } from "../plan/months";
 
 /** Прошедший день сверх своего лимита или в нём, сегодня или день впереди. */
 export type BarState = "over" | "ok" | "today" | "ahead";
@@ -27,6 +29,7 @@ export const CUT_RATIO = 2;
 const BAR_SHARE = 0.66;
 
 const round = (value: number) => Math.round(value * 10) / 10; // SVG хватит десятых
+const NBSP = "\u00a0"; // «на 800 000» и «за 9 дней» не разрываются
 
 function dayOf(isoDay: string): number {
   return Number(isoDay.slice(8, 10));
@@ -117,4 +120,26 @@ export function spendingSummary(
     spent: done.reduce((sum, day) => sum + day.spent, 0),
     plan: planPerDay * done.length,
   };
+}
+
+/** Итог прошедших дней одной строкой — «⚠️ Сверх плана на X за N дней», «✓ Запас
+ * …» или «✓ Ровно по плану …»: у графика «Траты» и в «Сегодня»; в первый день — null. */
+export function paceVerdict(
+  spending: DaySpend[],
+  today: string,
+  planPerDay: number | null,
+): { text: string; over: boolean } | null {
+  const summary = spendingSummary(spending, today, planPerDay);
+  if (!summary) return null;
+  const over = Math.round(summary.spent - summary.plan);
+  const period = `за${NBSP}${days(summary.days).replace(" ", NBSP)}`;
+  if (over > 0) {
+    return {
+      text: `⚠️ Сверх плана на${NBSP}${money(over)} ${period}`,
+      over: true,
+    };
+  }
+  if (over < 0)
+    return { text: `✓ Запас ${money(-over)} ${period}`, over: false };
+  return { text: `✓ Ровно по плану ${period}`, over: false };
 }

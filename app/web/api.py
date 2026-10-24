@@ -40,6 +40,7 @@ from app.services.analytics_service import TRANSFERS_GROUP, SavingsTab, money
 from app.services.calendar import CalendarRecord, new_id, read_calendar, record_row
 from app.services.cards import CardBalance
 from app.services.dashboard import Dashboard
+from app.services.day_budget import payday_on, until_text
 from app.services.forecast import DayArticle, Dip, Evening, MonthForecast, PastDay
 from app.services.piggy import (
     CLOSED,
@@ -679,12 +680,15 @@ def dashboard_out(
         today=today,
         limit=budget.limit,
         spent_today=budget.spent_today,
-        # как /today: без лимита (отстаём от плана) всё потраченное — сверх него
+        # как /today: без лимита (сумов до зарплаты не хватает) всё потраченное — сверх
         left_today=max(budget.limit, 0) - budget.spent_today,
         plan_per_day=budget.plan_per_day,
         days_left=budget.days_left,
         balance=budget.balance,
-        planned_balance=budget.planned_balance,
+        sums=budget.sums,
+        bills=budget.bills,
+        until=until_text(budget),
+        payday_on=payday_on(budget),
         frozen=frozen,
         groups=groups,
         daily=[
