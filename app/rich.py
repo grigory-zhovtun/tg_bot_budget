@@ -1,14 +1,20 @@
-"""Расширенные сообщения Telegram (Bot API 10.1+): крупные заголовки и таблицы.
+"""Расширенные сообщения Telegram (Bot API 10.1+): крупные строки и таблицы.
 
 Сводка собирается блоками rich HTML. Тому, кто их не примет, уходит то же сообщение
-обычным текстом (Report.text) — его собирают прежние форматтеры.
+обычным текстом (Report.text) — его собирают прежние форматтеры. Крупные строки —
+моноширинными блоками: заголовки h1–h6 Telegram рисует шрифтом с засечками, а их
+владелец не читает (выбрал блок, 24.10.2026).
 """
 
 import html
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 NBSP = " "  # внутри числа и перед единицей: число не разрывается переносом
+# Блок сам не переносит строки: длиннее — переносим по словам; 28 знаков влезают в
+# пузырь телефона и при шрифте Telegram крупнее обычного
+PRE_WIDTH = 28
 RULE = "<hr/>"
 SYMBOLS = {"USD": "$", "RUB": "₽"}
 
@@ -60,8 +66,38 @@ def percent(share: float) -> str:
     return f"{share * 100:.0f}{NBSP}%"
 
 
+def _cells(text: str) -> int:
+    """Ширина строки в знаках моноширинного шрифта: эмодзи и широкие знаки — по два."""
+    width = 0
+    for char in text:
+        if char == "\ufe0f":  # «⚠️»: знак становится эмодзи — шире
+            width += 1
+        elif ord(char) > 0xFFFF or unicodedata.east_asian_width(char) in "WF":
+            width += 2
+        else:
+            width += 1
+    return width
+
+
+def _wrap(text: str, width: int = PRE_WIDTH) -> str:
+    """Переносы по словам; число не рвётся — в нём неразрывные пробелы."""
+    lines: list[str] = []
+    line = ""
+    for word in text.split(" "):
+        joined = f"{line} {word}" if line else word
+        if line and _cells(joined) > width:
+            lines.append(line)
+            line = word
+        else:
+            line = joined
+    lines.append(line)
+    return "\n".join(lines)
+
+
 def heading(text: str, level: int = 3) -> str:
-    return f"<h{level}>{_escape(text)}</h{level}>"
+    """Крупная строка — моноширинным блоком (см. начало модуля); level — уровень по
+    разметке вызовов, на вид блока не влияет."""
+    return f"<pre>{_escape(_wrap(text))}</pre>"
 
 
 def para(*lines: str) -> str:

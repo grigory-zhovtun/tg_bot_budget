@@ -255,8 +255,6 @@ def build_application(
     app.add_handler(CommandHandler("plan", analytics.plan_command))
     app.add_handler(CommandHandler("today", analytics.today_command))
     app.add_handler(CommandHandler("subs", analytics.subs_command))
-    # временная проверка шрифтов сводки — не в меню команд
-    app.add_handler(CommandHandler("fonts", analytics.fonts_command))
     app.add_handler(CommandHandler("icons", icon_packs.icons_command))
     # Кнопки импорта, выравнивания, /fix и под сводкой — раньше общего обработчика
     app.add_handler(CallbackQueryHandler(balances.align_button, pattern=r"^align:"))
