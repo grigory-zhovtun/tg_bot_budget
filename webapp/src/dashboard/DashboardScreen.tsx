@@ -22,12 +22,18 @@ function Skeleton() {
   );
 }
 
+/** «15-го» не рвётся по дефису: неразрывный дефис. */
+function glued(text: string): string {
+  return text.replace(/(\d)-/g, "$1\u2011");
+}
+
 /** «на сумовых картах X, платежи до 15-го Y» — из чего лимит до зарплаты. */
 function sumsLine(data: Dashboard): string | null {
   if (data.sums === null) return null;
   const line = `на сумовых картах ${money(data.sums)}`;
   if (data.bills === null || Math.round(data.bills) <= 0) return line;
-  return `${line}, платежи до ${data.payday_on ?? "конца месяца"} ${money(data.bills)}`;
+  const until = glued(data.payday_on ?? "конца месяца");
+  return `${line}, платежи до ${until} ${money(data.bills)}`;
 }
 
 /** Сколько можно сегодня — по деньгам до зарплаты, как утром в боте: главная цифра,
@@ -40,7 +46,7 @@ function Today({ data }: { data: Dashboard }) {
   ) {
     return null;
   }
-  const until = data.until ?? "до конца месяца";
+  const until = glued(data.until ?? "до конца месяца");
   const sums = sumsLine(data);
   const pace = paceVerdict(data.spending, data.today, data.plan_per_day);
   const plan = pace && (

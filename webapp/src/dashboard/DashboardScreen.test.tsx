@@ -27,12 +27,12 @@ describe("DashboardScreen", () => {
     );
     expect(within(today).getByText("можно потратить сегодня")).toBeTruthy();
     expect(
-      within(today).getByText("лимит 500 000 в день до аванса 15-го"),
+      within(today).getByText("лимит 500 000 в день до аванса 15\u2011го"),
     ).toBeTruthy();
     expect(within(today).getByText("потрачено сегодня 120 000")).toBeTruthy();
     expect(
       within(today).getByText(
-        "на сумовых картах 2 800 000, платежи до 15-го 300 000",
+        "на сумовых картах 2 800 000, платежи до 15\u2011го 300 000",
       ),
     ).toBeTruthy();
     // план — одной строкой, той же, что у графика «Траты»
@@ -103,7 +103,7 @@ describe("DashboardScreen", () => {
     expect(within(today).getByText("−20 000 сум")).toBeTruthy();
     expect(within(today).getByText("⚠️ сверх лимита дня")).toBeTruthy();
     expect(
-      within(today).getByText("лимит 500 000 в день до аванса 15-го"),
+      within(today).getByText("лимит 500 000 в день до аванса 15\u2011го"),
     ).toBeTruthy();
     expect(within(today).getByText("потрачено сегодня 520 000")).toBeTruthy();
   });
@@ -393,7 +393,7 @@ describe("DashboardScreen", () => {
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
     expect(await screen.findByText("⚠️ Лимита нет")).toBeTruthy();
     expect(
-      screen.getByText("до аванса 15-го не хватает 1 100 000"),
+      screen.getByText("до аванса 15\u2011го не хватает 1 100 000"),
     ).toBeTruthy();
     expect(screen.getByText("потрачено сегодня 120 000")).toBeTruthy();
     expect(screen.queryByText("до плана на конец месяца")).toBeNull();
