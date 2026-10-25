@@ -48,7 +48,11 @@ def test_gate_runs_before_all_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
         "today",
         "icons",
         "subs",
+        "keyboards",
+        "app",
     }
+    assert ("keyboards", "Клавиатуры: группы и карты ⌨️") in main.COMMANDS
+    assert ("app", "Приложение 📱") in main.COMMANDS
 
 
 def test_daily_report_is_scheduled_in_owner_timezone(

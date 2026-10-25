@@ -166,6 +166,29 @@ def categories_menu(
     return InlineKeyboardMarkup(rows)
 
 
+def keyboards_markup(groups: bool, cards: bool) -> InlineKeyboardMarkup:
+    """Кнопки /keyboards называют, что сделает нажатие: включить или выключить."""
+
+    def toggle(on: bool, name: str, key: str) -> InlineKeyboardButton:
+        if on:
+            return action(f"Выключить {name}", f"kb:{key}:off")
+        return action(f"Включить {name}", f"kb:{key}:on", KeyboardButtonStyle.SUCCESS)
+
+    return InlineKeyboardMarkup(
+        [[toggle(groups, "группы", "groups")], [toggle(cards, "карты", "cards")]]
+    )
+
+
+def app_markup(url: str) -> InlineKeyboardMarkup:
+    """Кнопка Mini App под сообщением: вход по подписи Telegram (initData)."""
+    button = InlineKeyboardButton(
+        "📱 Открыть приложение",
+        web_app=WebAppInfo(url),
+        style=KeyboardButtonStyle.PRIMARY,
+    )
+    return InlineKeyboardMarkup([[button]])
+
+
 def generate_sources_keyboard(
     sources: list[str],
     current_source: str | None = None,

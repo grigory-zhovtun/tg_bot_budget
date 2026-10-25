@@ -36,6 +36,7 @@ from app.handlers import (
     month,
     piggy,
     receipts,
+    settings,
     statement_import,
     transactions,
     undo,
@@ -51,6 +52,7 @@ logger = logging.getLogger(__name__)
 
 COMMANDS = [
     ("start", "Начать работу 🚀"),
+    ("app", "Приложение 📱"),
     ("analytics", "Аналитика за 3 дня 📊"),
     ("plan", "План-факт месяца 📋"),
     ("today", "Лимит на сегодня 💸"),
@@ -58,6 +60,7 @@ COMMANDS = [
     ("advice", "Финансовый совет 🧠"),
     ("fix", "Исправить категорию последней записи ✏️"),
     ("undo", "Отменить последнюю запись ↩️"),
+    ("keyboards", "Клавиатуры: группы и карты ⌨️"),
     ("reboot", "Обновить настройки 🔄"),
     ("icons", "Картинки на кнопках 🖼"),
 ]
@@ -261,12 +264,15 @@ def build_application(
     app.add_handler(CommandHandler("today", analytics.today_command))
     app.add_handler(CommandHandler("subs", analytics.subs_command))
     app.add_handler(CommandHandler("icons", icon_packs.icons_command))
+    app.add_handler(CommandHandler("keyboards", settings.keyboards_command))
+    app.add_handler(CommandHandler("app", settings.app_command))
     # Кнопки импорта, выравнивания, /fix и под сводкой — раньше общего обработчика
     app.add_handler(CallbackQueryHandler(balances.align_button, pattern=r"^align:"))
     app.add_handler(CallbackQueryHandler(fix.fix_button, pattern=r"^fix:"))
     app.add_handler(CallbackQueryHandler(last_write.button, pattern=r"^(last|card):"))
     app.add_handler(CallbackQueryHandler(statement_import.button, pattern=r"^import:"))
     app.add_handler(CallbackQueryHandler(piggy.piggy_button, pattern=r"^piggy:"))
+    app.add_handler(CallbackQueryHandler(settings.keyboards_button, pattern=r"^kb:"))
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, messages.text_handler)
