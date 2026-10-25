@@ -6,6 +6,10 @@
 удаляются «не удалять №» (сводки недели, снятие клавиатуры карт) и сообщение, на
 котором держится клавиатура карт: удалить его — значит убрать клавиатуру с экрана.
 Удалить сообщение бот может только в первые 48 часов — уборка идёт каждый день.
+
+Номера сообщений у бота общие для всех его личных чатов (растут со временем), так
+что в диапазоне одного чата есть и номера других: их Telegram пропускает, а то, что
+другие чаты хранят, уборка не трогает и в этом чате — на всякий случай.
 """
 
 import logging
@@ -96,6 +100,19 @@ async def _delete(bot: Any, chat_id: int, numbers: list[int]) -> None:
                     logger.debug("Chat %s: message %s stays: %s", chat_id, number, one)
 
 
+def _kept_elsewhere(application: Any, chat_id: int) -> set[int]:
+    """Что хранят другие чаты: «не удалять №» и сообщения с клавиатурой карт."""
+    kept: set[int] = set()
+    for other, state in application.bot_data.get("chats", {}).items():
+        if other == chat_id:
+            continue
+        kept.update(state.keep)
+        anchor = application.user_data.get(other, {}).get(ANCHOR)
+        if state.cards and anchor is not None:
+            kept.add(anchor)
+    return kept
+
+
 async def clean(application: Any, chat_id: int, today: date) -> None:
     """Убрать в чате вчерашнее и более раннее с прошлой уборки."""
     bot_data = application.bot_data
@@ -108,7 +125,7 @@ async def clean(application: Any, chat_id: int, today: date) -> None:
         await update_state(bot_data, chat_id, start=last + 1)
         return
     user_data = application.user_data.get(chat_id, {})
-    spared = set(state.keep)
+    spared = set(state.keep) | _kept_elsewhere(application, chat_id)
     if state.cards:
         anchor = user_data.get(ANCHOR)
         if anchor is None or anchor <= last:
@@ -167,6 +184,8 @@ async def first_run(context: ContextTypes.DEFAULT_TYPE) -> None:
     report = Report(
         "\n".join([NOTICE_TITLE, *NOTICE]), heading(NOTICE_TITLE) + para(*NOTICE)
     )
+    told: list[int] = []
+    last = 0
     for chat_id in sorted(config.ALLOWED_USER_IDS):
         if chat_id in bot_data.get("chats", {}):
             continue
@@ -179,4 +198,8 @@ async def first_run(context: ContextTypes.DEFAULT_TYPE) -> None:
                 "Could not tell chat %s about the hidden keyboards", chat_id
             )
             continue
-        await update_state(bot_data, chat_id, start=sent.messages[-1].message_id + 1)
+        told.append(chat_id)
+        last = max(last, sent.messages[-1].message_id)
+    # номера общие для всех чатов: уборка каждого начинается после всех сообщений
+    for chat_id in told:
+        await update_state(bot_data, chat_id, start=last + 1)

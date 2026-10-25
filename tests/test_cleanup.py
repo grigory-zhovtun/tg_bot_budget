@@ -184,6 +184,20 @@ async def test_a_refused_batch_goes_one_by_one_and_the_next_chat_is_swept() -> N
     assert app.bot_data["chats"][2].start == 63
 
 
+async def test_messages_kept_in_another_chat_are_spared_too() -> None:
+    # номера сообщений у бота общие для всех личных чатов: чужая сводка недели,
+    # «⌨️ Карты скрыты» или клавиатура карт могут оказаться в диапазоне этого чата
+    states = {
+        1: ChatState(start=100),
+        2: ChatState(cards=True, start=200, keep=(110,)),
+    }
+    app = application(states, logged((1, 130, at(25, 21))))
+    app.user_data[2] = {ANCHOR: 120}
+    await cleanup.clean(app, 1, TODAY)
+    assert 110 not in deleted(app) and 120 not in deleted(app)
+    assert 111 in deleted(app)
+
+
 async def test_the_weekly_digest_is_kept_through_the_sweep() -> None:
     app = application({1: ChatState(start=100)}, logged((1, 152, at(25, 22))))
     await cleanup.keep(app, 1, [150])
@@ -228,6 +242,26 @@ async def test_first_run_hides_the_old_keyboard_once() -> None:
 
     await cleanup.first_run(SimpleNamespace(application=app, bot=app.bot))
     assert len(app.bot.send_message.await_args_list) == 1
+
+
+async def test_first_run_starts_every_new_chat_after_all_the_notes() -> None:
+    app = application({})
+    sent: list[SimpleNamespace] = []
+
+    def send(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        sent.append(sent_message())
+        return sent[-1]
+
+    app.bot.send_message.side_effect = send
+    await cleanup.first_run(SimpleNamespace(application=app, bot=app.bot))
+    assert [call.args[0] for call in app.bot.send_message.await_args_list] == [1, 2]
+    # номера общие для всех чатов: уборка ни одного чата не начнётся раньше
+    # чьего-то первого сообщения — иначе оно попало бы в чужой диапазон
+    after = sent[-1].message_id + 1
+    assert app.bot_data["chats"] == {
+        1: ChatState(start=after),
+        2: ChatState(start=after),
+    }
 
 
 async def test_first_run_waits_for_the_sheet() -> None:
