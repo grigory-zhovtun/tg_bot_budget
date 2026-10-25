@@ -254,7 +254,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         async with _downloaded(photo_file, ".jpg") as path:
             photo = path.read_bytes()
 
-    # SMS и скрин остаются в чате: статус — реакцией, ожидание — «Думаю…»
+    # Пока разбор — 👀 и «Думаю…»; записано всё — сообщение уходит из чата, иначе
+    # остаётся с реакцией: 👍 — записано не всё, 🤔 — ничего
     message = update.message
     await live.react(message, ReactionEmoji.EYES)
     try:
@@ -277,7 +278,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if photo is not None and screen["kind"] == "balances" and screen["balances"]:
             # главный экран банка: остатки карт, операции на нём не записываем
             await balances.report_screen_balances(update, context, screen["balances"])
-            await live.react(message, ReactionEmoji.THUMBS_UP)
+            await _delete_quietly(message)  # остатки сверены — скрин не нужен
             return
         if photo is not None:
             # Скриншот операций: нижняя транзакция → первая запись
@@ -290,10 +291,17 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result = await save_rows(
             context, update.effective_chat, rows, skipped, fingerprint
         )
-        await live.react(
-            message,
-            ReactionEmoji.THUMBS_UP if result.written else ReactionEmoji.THINKING_FACE,
-        )
+        if result.written == len(rows) > 0 and not skipped:
+            await _delete_quietly(message)  # что записано — видно в карточке
+        else:
+            await live.react(
+                message,
+                (
+                    ReactionEmoji.THUMBS_UP
+                    if result.written
+                    else ReactionEmoji.THINKING_FACE
+                ),
+            )
 
     except Exception as e:
         logger.exception("AI parsing failed")
@@ -307,7 +315,8 @@ async def _save_sms(
     prepared: sms_chat.PreparedSms,
     fingerprint: str | None,
 ) -> None:
-    """Запись сообщения из SMS: сводка с пометками и реакция на сообщение."""
+    """Запись сообщения из SMS: сводка с пометками; SMS уходит из чата, если записано
+    всё (или в нём были только коды и повторы), иначе остаётся с реакцией."""
     result = await save_rows(
         context,
         update.effective_chat,
@@ -321,6 +330,9 @@ async def _save_sms(
     ai_service = context.bot_data.get("ai_service")
     if result.written and any(prepared.flags) and ai_service is not None:
         ai_service.forget_history()  # новые магазины и суммы — в историю сразу
+    if result.written == len(prepared.rows) and not prepared.skipped:
+        await _delete_quietly(update.message)  # что записано — видно в карточке
+        return
     done = result.written or prepared.quiet
     await live.react(
         update.message,

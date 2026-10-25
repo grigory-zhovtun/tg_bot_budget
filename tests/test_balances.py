@@ -241,3 +241,4 @@ async def test_bank_main_screen_photo_goes_to_the_balance_check(
     reported.assert_awaited_once()
     assert reported.await_args.args[2] == SCREEN
     assert sheets.rows == []  # операции с экрана остатков не записываются
+    update.message.delete.assert_awaited_once()  # скрин разобран — уходит из чата
