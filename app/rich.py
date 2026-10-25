@@ -2,19 +2,19 @@
 
 Сводка собирается блоками rich HTML. Тому, кто их не примет, уходит то же сообщение
 обычным текстом (Report.text) — его собирают прежние форматтеры. Крупные строки —
-моноширинными блоками: заголовки h1–h6 Telegram рисует шрифтом с засечками, а их
-владелец не читает (выбрал блок, 24.10.2026).
+заголовками h1–h6; Telegram рисует их шрифтом с засечками, и цифры в нём владелец не
+читает, поэтому цифры в заголовках — моноширинные «математические» знаки Юникода
+(𝟶–𝟿): в шрифте заголовка их нет, телефон берёт шрифт без засечек (вариант 8 из
+/fonts — выбор владельца 25.10.2026; до этого строки шли моноширинным блоком <pre>,
+а над ним Telegram для Mac рисует полоску «copy»).
 """
 
 import html
-import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 
 NBSP = " "  # внутри числа и перед единицей: число не разрывается переносом
-# Блок сам не переносит строки: длиннее — переносим по словам; 28 знаков влезают в
-# пузырь телефона и при шрифте Telegram крупнее обычного
-PRE_WIDTH = 28
+MONO_ZERO = 0x1D7F6  # «𝟶» — MATHEMATICAL MONOSPACE DIGIT ZERO, дальше 𝟷…𝟿 подряд
 RULE = "<hr/>"
 SYMBOLS = {"USD": "$", "RUB": "₽"}
 
@@ -66,38 +66,17 @@ def percent(share: float) -> str:
     return f"{share * 100:.0f}{NBSP}%"
 
 
-def _cells(text: str) -> int:
-    """Ширина строки в знаках моноширинного шрифта: эмодзи и широкие знаки — по два."""
-    width = 0
-    for char in text:
-        if char == "\ufe0f":  # «⚠️»: знак становится эмодзи — шире
-            width += 1
-        elif ord(char) > 0xFFFF or unicodedata.east_asian_width(char) in "WF":
-            width += 2
-        else:
-            width += 1
-    return width
-
-
-def _wrap(text: str, width: int = PRE_WIDTH) -> str:
-    """Переносы по словам; число не рвётся — в нём неразрывные пробелы."""
-    lines: list[str] = []
-    line = ""
-    for word in text.split(" "):
-        joined = f"{line} {word}" if line else word
-        if line and _cells(joined) > width:
-            lines.append(line)
-            line = word
-        else:
-            line = joined
-    lines.append(line)
-    return "\n".join(lines)
+def mono_digits(text: str) -> str:
+    """Цифры 0–9 → моноширинные знаки Юникода (𝟶–𝟿): их телефон рисует без засечек."""
+    return "".join(
+        chr(MONO_ZERO + ord(char) - ord("0")) if "0" <= char <= "9" else char
+        for char in text
+    )
 
 
 def heading(text: str, level: int = 3) -> str:
-    """Крупная строка — моноширинным блоком (см. начало модуля); level — уровень по
-    разметке вызовов, на вид блока не влияет."""
-    return f"<pre>{_escape(_wrap(text))}</pre>"
+    """Крупная строка заголовком h1–h6, цифры — моноширинные (см. начало модуля)."""
+    return f"<h{level}>{_escape(mono_digits(text))}</h{level}>"
 
 
 def para(*lines: str) -> str:

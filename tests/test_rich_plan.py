@@ -82,7 +82,7 @@ def test_weekly_report_keeps_the_text_and_adds_the_blocks() -> None:
     service = AnalyticsService(Sheets({"fact": FACT, "Oct 26": FALL}))
     report = service.weekly_digest(date(2026, 10, 6))
     assert report.text.splitlines()[0] == "🗓 Неделя 30.09–06.10"
-    assert report.html.startswith(para("🗓 Неделя 30 сентября – 6 октября") + "<pre>")
+    assert report.html.startswith(para("🗓 Неделя 30 сентября – 6 октября") + "<h")
     assert report.html.count(RULE) == 2
     assert "".join(rich_plan_report(FALL, date(2026, 10, 6))) in report.html
     reminder = "📸 Пришлите скрины главных экранов банков — сверю остатки по картам."
