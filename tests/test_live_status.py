@@ -25,12 +25,12 @@ def reactions(update: SimpleNamespace) -> list[str]:
     return [call.args[0] for call in update.message.set_reaction.await_args_list]
 
 
-async def test_sms_gets_eyes_then_thumbs_up_and_stays_in_the_chat() -> None:
+async def test_sms_gets_eyes_then_leaves_the_chat_once_written() -> None:
     update, context, sheets = make_chat(SMS, {}, FakeAI([COFFEE]))
     await messages.text_handler(update, context)
     assert len(sheets.rows) == 1
-    assert reactions(update) == ["👀", "👍"]
-    update.message.delete.assert_not_awaited()  # SMS остаётся с реакцией
+    assert reactions(update) == ["👀"]
+    update.message.delete.assert_awaited_once()  # что записано — видно в карточке
     draft = context.bot.send_message_draft.await_args
     assert draft.args[0] == 1 and draft.args[2] == ""  # «Думаю…»
     sent = [call.args[0] for call in update.effective_chat.send_message.await_args_list]
@@ -42,6 +42,22 @@ async def test_nothing_recognised_gets_a_thinking_face() -> None:
     await messages.text_handler(update, context)
     assert sheets.rows == []
     assert reactions(update) == ["👀", "🤔"]
+    update.message.delete.assert_not_awaited()  # SMS остаётся — видно, что не так
+
+
+async def test_screenshot_written_in_full_leaves_the_chat() -> None:
+    update, context, sheets = make_chat("", {}, FakeAI([COFFEE]))
+    photo_file = SimpleNamespace(
+        download_to_drive=AsyncMock(side_effect=lambda p: p.write_bytes(b"\xff\xd8"))
+    )
+    update.message.photo = [
+        SimpleNamespace(
+            file_unique_id="screen-2", get_file=AsyncMock(return_value=photo_file)
+        )
+    ]
+    await messages.text_handler(update, context)
+    assert len(sheets.rows) == 1
+    update.message.delete.assert_awaited_once()
 
 
 async def test_old_clients_get_the_magnifier_instead_of_the_draft() -> None:

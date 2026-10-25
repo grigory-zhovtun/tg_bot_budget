@@ -3,7 +3,13 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from app.handlers.common import premium_icons, sources_keyboard, track_message
+from app.chat_state import state_of
+from app.handlers.common import (
+    ANCHOR,
+    premium_icons,
+    sources_keyboard,
+    track_message,
+)
 from app.utils.keyboards import (
     amount_prompt,
     category_prompt,
@@ -13,6 +19,8 @@ from app.utils.keyboards import (
 )
 
 logger = logging.getLogger(__name__)
+
+NO_CARD = "⚠️ Карта не выбрана: пришлите SMS по карте или включите карты — /keyboards"
 
 
 async def transaction_button_handler(
@@ -36,10 +44,15 @@ async def transaction_button_handler(
         context.user_data["category"] = category
         if not source:
             if query.message:
-                msg = await query.message.reply_text(
-                    text="⚠️ Выберите источник",
-                    reply_markup=sources_keyboard(context, query.message.chat_id),
-                )
+                chat_id = query.message.chat_id
+                if state_of(context.bot_data, chat_id).cards:
+                    msg = await query.message.reply_text(
+                        text="⚠️ Выберите источник",
+                        reply_markup=sources_keyboard(context, chat_id),
+                    )
+                    context.user_data[ANCHOR] = msg.message_id
+                else:  # клавиатуры карт нет — выбрать не из чего
+                    msg = await query.message.reply_text(text=NO_CARD)
                 track_message(context, msg)
             return
         await query.edit_message_text(

@@ -19,7 +19,15 @@ UNDO_LOCK = "undo_lock"  # bot_data: одна отмена за раз — ча�
 
 
 async def undo_last(context: ContextTypes.DEFAULT_TYPE) -> str:
-    """Удалить строки последней записи, если в таблице их не меняли; текст ответа.
+    """Удалить строки последней записи, если в таблице их не меняли; текст ответа."""
+    text, _ = await undo_rows(context)
+    return text
+
+
+async def undo_rows(context: ContextTypes.DEFAULT_TYPE) -> tuple[str, bool]:
+    """Удалить строки последней записи, если в таблице их не меняли.
+
+    Возвращает текст ответа и удалены ли строки.
 
     Проверка и удаление — два запроса к таблице, а удаление сдвигает строки ниже.
     Поэтому отмены идут по одной (чат обрабатывает сообщения по очереди, Mini App —
@@ -29,7 +37,7 @@ async def undo_last(context: ContextTypes.DEFAULT_TYPE) -> str:
     async with lock:
         last = context.user_data.pop(LAST_WRITE, None)
         if not last:
-            return "Нечего отменять: после запуска бота записей не было."
+            return "Нечего отменять: после запуска бота записей не было.", False
         first, end = last["first"], last["last"]
         span = f"строка {first}" if first == end else f"строки {first}–{end}"
         gs_service: GoogleSheetsService = context.bot_data["gs_service"]
@@ -40,17 +48,18 @@ async def undo_last(context: ContextTypes.DEFAULT_TYPE) -> str:
         except Exception as error:
             logger.exception("Undo failed")
             context.user_data[LAST_WRITE] = last  # можно повторить
-            return f"Не удалось отменить: {user_message(error)}"
+            return f"Не удалось отменить: {user_message(error)}", False
 
     if not deleted:
-        return f"В таблице {span} уже изменились — удалите их вручную, если нужно."
+        changed = f"В таблице {span} уже изменились — удалите их вручную, если нужно."
+        return changed, False
     mark_dirty(context.bot_data)
     seen = context.user_data.get(SEEN_INPUTS, {})
     for fingerprint in [last.get("fingerprint"), *last.get("prints", [])]:
         if fingerprint:  # те же SMS после отмены можно прислать снова
             seen.pop(fingerprint, None)
     logger.info("Undo: deleted %s", span)
-    return f"↩️ Удалил из таблицы: {span}."
+    return f"↩️ Удалил из таблицы: {span}.", True
 
 
 async def undo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

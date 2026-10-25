@@ -31,6 +31,7 @@ async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
             gs_service.get_categories_and_sources
         )
         icons = await asyncio.to_thread(gs_service.get_icons)
+        chats = await asyncio.to_thread(gs_service.get_chat_states)
     except Exception as e:
         logger.exception("Reboot failed")
         await update.message.reply_text(f"Ошибка при обновлении: {user_message(e)}")
@@ -40,6 +41,8 @@ async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data["subcategories"] = subcategories
     context.bot_data["sources"] = sources
     context.bot_data["icons"] = icons
+    context.bot_data["chats"] = chats  # клавиатуры могли включить прямо в таблице
+    context.bot_data["chats_loaded"] = True
     if context.bot_data.get("emoji_packs"):
         # иконки в system!D могли поменяться — подбираем картинки заново
         await load_custom_icons(

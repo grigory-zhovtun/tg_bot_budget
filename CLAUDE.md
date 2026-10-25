@@ -34,6 +34,8 @@ app/
 ├── domain.py            # Sheet rules: sign of the amount, currency conversion, category/source/date validation
 ├── errors.py            # Safe one-line error texts for the chat, application error handler
 ├── custom_icons.py      # Custom emoji pictures for buttons: pack_map/match by the plain emoji (system!D, group names)
+├── chat_state.py        # ChatState per chat (keyboards on/off, «уборка с №», «не удалять №») in system!Q:U; update_state/keep_messages under one lock
+├── message_log.py       # MessageLog: last message number of each local day per chat; LoggingRequest logs every sent message from Telegram's answers
 ├── statements.py        # Kapitalbank PDF statements: parsing, own-transfer pairs, categories, reconcile with fact
 ├── web/
 │   ├── server.py        # Starlette: POST /telegram (webhook → PTB update_queue), GET /health, security headers, PTB lifespan
@@ -41,7 +43,9 @@ app/
 │   ├── api.py           # /api/bootstrap, /api/expenses (entry_row → save_rows, idempotent by entry_id), /api/expenses/undo, /api/dashboard, /api/forecast, /api/calendar (POST, PUT/DELETE by ID), /api/savings, /api/piggy (POST; PUT by ID; /save, /{id}/close|moves|exclude)
 │   └── schemas.py       # Pydantic models of the API
 ├── handlers/
-│   ├── common.py        # /start, keyboard helpers, message tracking
+│   ├── common.py        # /start, show_main_menu (summary and buttons by the chat's keyboards: card:… on the summary when both are off), keyboard helpers, message tracking, ANCHOR — the message holding the cards keyboard
+│   ├── settings.py      # /keyboards (kb:groups|cards:on|off → system!Q:U, shown at once; «⌨️ Карты скрыты» kept) and /app (web_app button)
+│   ├── cleanup.py       # observe (incoming messages → MessageLog), sweep at the morning job (yesterday since «уборка с №», batches of 100, keeps digests/removals/ANCHOR), first_run («⌨️ Клавиатуры скрыты» once)
 │   ├── admin.py         # /reboot (reload categories from sheets)
 │   ├── messages.py      # Text/photo/document handling, manual entry, AI parsing flow
 │   ├── statement_import.py # Statement preview (JobQueue debounce), confirm buttons, apply_plan
@@ -49,8 +53,8 @@ app/
 │   ├── undo.py          # /undo: delete the last write after checking the rows are unchanged
 │   ├── fix.py           # /fix: new group/subgroup for a row of the last write (B:D, checked like /undo)
 │   ├── icons.py         # /icons: custom emoji message → whole pack (get_custom_emoji_stickers/get_sticker_set) → system!J; load_custom_icons on start
-│   ├── live.py          # Reactions on the user's SMS (👀/👍/🤔) and «Думаю…» via send_message_draft (fallback 🔍)
-│   ├── last_write.py    # Buttons under a write summary: last:fix (start_fix), last:undo → confirm → undo_last
+│   ├── live.py          # Reactions on the user's SMS (👀 while reading; 👍 written in part, 🤔 nothing — a fully written one is deleted) and «Думаю…» via send_message_draft (fallback 🔍)
+│   ├── last_write.py    # Write buttons: last:… in the menu under the summary (text edits), card:… on the summary itself (markup edits; «Да» → undo_rows, the summary deleted)
 │   ├── month.py         # Daily job: month plan tab exists (copy of the last one), owner notified
 │   ├── piggy.py         # «🐷» in the chat: income_prompt (the percent of the income, «Отложил всё» → «set aside now», «Отложил часть…» → app `?open=save`), spend_note («🐷 Из копилки…», «Не из копилки»); journal row and note helpers shared with api.py
 │   ├── receipts.py      # Job every few minutes after writes: «Пришло к утру» and the subscriptions until the salary next to the tab's limit formula (sync_receipts → Q of the «Лимит на сегодня» row), then the piggy banks (sync_piggy)
@@ -79,9 +83,11 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
 
 ## Key Data Flows
 
-**Manual Entry**: /start → source → category → subcategory → "amount comment" (`+` prefix = incoming money) → `domain.manual_row` → `fact`
+**Manual Entry** (groups on in /keyboards): /start → source → category → subcategory → "amount comment" (`+` prefix = incoming money) → `domain.manual_row` → `fact`
 
-**Mini App entry**: «📱 Приложение» (cards keyboard, URL with a signed launch token) or the home-screen icon (initData) → `GET /api/bootstrap` → tiles and keypad → `POST /api/expenses` → `domain.entry_row` → `messages.save_rows` (the same summary and buttons as a chat entry; `app:<entry_id>` in `seen_inputs`) Home-screen shortcuts always go through the Main Mini App (`t.me/<bot>?startapp=home` → `offerHomeScreen`), never through the 30-day launch link.
+**Clean chat**: settings per chat in `system!Q:U` (`ChatState`, read on start and by /reboot) → `show_main_menu` builds the summary by them; a fully written input is deleted (`messages._save_sms`, the Gemini path); the morning job → brief (`cleanup.brief_markup`: cards keyboard or app button) → `cleanup.sweep` → per chat `MessageLog.last_before(today)` → delete `[start, last]` minus keep/ANCHOR → `start = last + 1`
+
+**Mini App entry**: «📱 Приложение» (cards keyboard, URL with a signed launch token; with the cards off — the button under the morning message and /app, initData) or the home-screen icon (initData) → `GET /api/bootstrap` → tiles and keypad → `POST /api/expenses` → `domain.entry_row` → `messages.save_rows` (the same summary and buttons as a chat entry; `app:<entry_id>` in `seen_inputs`) Home-screen shortcuts always go through the Main Mini App (`t.me/<bot>?startapp=home` → `offerHomeScreen`), never through the 30-day launch link.
 
 **Mini App dashboard**: `GET /api/dashboard` → `AnalyticsService.dashboard()` → `build_dashboard` (the same `day_budget` as `/today`, `plan_lines` by group, `read_daily` — the month tab's daily table, `find_series` with this month's state, `spent_groups` and `untracked` — this month's fact rows, `categories` — them joined with the tab's plan by group and subcategory, `card_balances` — the fact balance block from the same read of `fact`, no extra request) → `api.dashboard_out`
 
@@ -111,7 +117,7 @@ tests/                   # pytest, fakes for Sheets/Gemini/Telegram; no network
   - Amount sign: expenses and income (`💰 ДОХОДЫ`) positive; incoming money that is not income (transfer to the card, refund) negative.
   - Balance formula: `google_sheets.BALANCE_FORMULA` uses `INDEX(...;ROW())`, no row numbers.
   - Balance block `I2:Q…`: I = source name, J = balance by the sheet, N = bank balance («Проверка», from SMS or a screenshot), O = N − J, P = −O, Q = «Сверено» (when N was written). The bot finds the row by source name.
-- **`system` sheet**: Column A: Categories, Column B: Subcategories, Column F: Sources (last 3 chars = currency code), G: statements loaded up to this day (written by the bot), H:I currency rates to UZS.
+- **`system` sheet**: Column A: Categories, Column B: Subcategories, Column F: Sources (last 3 chars = currency code), G: statements loaded up to this day (written by the bot), H:I currency rates to UZS, J: emoji packs (`/icons`), Q:U: one row per chat — ID, groups «да»/«нет», cards «да»/«нет», «уборка с №», «не удалять №» (written by the bot as text).
 - **`Календарь` sheet** (created by the bot with the first record): A ID (6 chars `a–z0–9`, a letter first), B date (`ДД.ММ.ГГГГ` text — the day of a one-off or the first day of a repeat), C repeat (`нет`, `каждый день`, `по дням недели`, `раз в месяц`), D days (`пн ср`), E group, F subcategory, G currency, H sum (> 0), I name, J who. Written RAW; can be edited by hand — the bot re-reads it at least once a minute (Mini App screens — within two minutes, at once on «Обновить» or a new launch), broken rows (and a row repeating an ID above it, e.g. a copied row) are skipped with a warning in the log.
 - **`Копилки` sheet** (created with the first piggy, 17 columns; an older 14-column sheet is widened before the first write of O or Q1): A ID, B name, C target (empty — no target), D currency, E deadline (`ДД.ММ.ГГГГ`, empty — none), F repeat (`один раз`, `каждый год`), G group, H subcategory, I «Отложено» (formula: the journal's plus rows of the ID), J «Потрачено» (bot), K «Осталось» (formula I − J), L «В этом месяце» (bot), M who, N `закрыта`, O «Порядок» (importance number from 1; empty — after the numbered, by deadline). P1 «Откладываем с поступлений, %» and Q1 — the percent of every income (0–100; empty — `SAVE_SHARE`, not a number — `SAVE_SHARE` and «не читается»). Rows are found by ID; broken rows are shown as «Проверьте строку N»
 - **`Журнал копилок` sheet**: A date, B ID, C name, D sum (plus — saved, minus — taken), E currency, F what (`отложил`, `потратил`, `потрачено в окне`, `списал остаток`, `закрыта`, `исправление`, `не из копилки`), G who, H key (a fact row for «не из копилки», `окно:ДД.ММ.ГГГГ` for a closed window)

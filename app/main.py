@@ -23,11 +23,13 @@ from telegram.ext import (
 
 from app import config
 from app.auth import make_gatekeeper
+from app.chat_state import ChatState
 from app.errors import on_error
 from app.handlers import (
     admin,
     analytics,
     balances,
+    cleanup,
     common,
     fix,
     last_write,
@@ -35,11 +37,13 @@ from app.handlers import (
     month,
     piggy,
     receipts,
+    settings,
     statement_import,
     transactions,
     undo,
 )
 from app.handlers import icons as icon_packs
+from app.message_log import LoggingRequest, MessageLog
 from app.services.ai_service import GeminiService
 from app.services.analytics_service import AnalyticsService
 from app.services.google_sheets import GoogleSheetsService
@@ -50,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 COMMANDS = [
     ("start", "Начать работу 🚀"),
+    ("app", "Приложение 📱"),
     ("analytics", "Аналитика за 3 дня 📊"),
     ("plan", "План-факт месяца 📋"),
     ("today", "Лимит на сегодня 💸"),
@@ -57,6 +62,7 @@ COMMANDS = [
     ("advice", "Финансовый совет 🧠"),
     ("fix", "Исправить категорию последней записи ✏️"),
     ("undo", "Отменить последнюю запись ↩️"),
+    ("keyboards", "Клавиатуры: группы и карты ⌨️"),
     ("reboot", "Обновить настройки 🔄"),
     ("icons", "Картинки на кнопках 🖼"),
 ]
@@ -81,6 +87,8 @@ async def _post_init(application: Application) -> None:
     # а бот всё это время не отвечал бы
     application.job_queue.run_once(_self_check, 1, name="gemini_self_check")
     application.job_queue.run_once(_load_emoji_packs, 2, name="emoji_packs")
+    # «⌨️ Клавиатуры скрыты» тем, кому ещё не писали; убирает старую клавиатуру
+    application.job_queue.run_once(cleanup.first_run, 5, name="first_run")
 
 
 async def _self_check(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -163,9 +171,12 @@ def _schedule_month_tab(app: Application) -> None:
 async def _weekly_digest(context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = month.owner_chat_id()
     if chat_id is not None:
-        await analytics.send_weekly_digest(
+        sent = await analytics.send_weekly_digest(
             context.bot, chat_id, context.bot_data["analytics_service"]
         )
+        if sent is not None:  # сводка недели утренней уборкой не удаляется
+            ids = [message.message_id for message in sent.messages]
+            await cleanup.keep(context.application, chat_id, ids)
 
 
 def _schedule_weekly_digest(app: Application) -> None:
@@ -185,23 +196,43 @@ def _schedule_weekly_digest(app: Application) -> None:
 
 
 async def _morning_brief(context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Сводка владельцу (с клавиатурой карт или кнопкой приложения), потом уборка."""
+    application = context.application
     chat_id = month.owner_chat_id()
     if chat_id is not None:
-        await analytics.send_morning_brief(
-            context.bot, chat_id, context.bot_data["analytics_service"]
+        sent = await analytics.send_morning_brief(
+            context.bot,
+            chat_id,
+            context.bot_data["analytics_service"],
+            reply_markup=cleanup.brief_markup(application, chat_id),
         )
+        cleanup.anchor_brief(application, chat_id, sent)
+    await cleanup.sweep(application)
+
+
+async def _chat_cleanup(context: ContextTypes.DEFAULT_TYPE) -> None:
+    await cleanup.sweep(context.application)
 
 
 def _schedule_morning_brief(app: Application) -> None:
-    """Утреннее сообщение с лимитом на день; MORNING_TIME=off — выключить."""
+    """Утреннее сообщение с лимитом и уборка чатов; MORNING_TIME=off — без сводки,
+    уборка всё равно в 8:00."""
+    try:
+        zone = ZoneInfo(config.ANALYTICS_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        logger.warning("Unknown ANALYTICS_TIMEZONE, the morning jobs use UTC")
+        zone = ZoneInfo("UTC")
+    eight = dtime(8, 0, tzinfo=zone)
     if config.MORNING_TIME.strip().lower() == "off":
         logger.info("Morning brief disabled")
+        app.job_queue.run_daily(_chat_cleanup, time=eight, name="chat_cleanup")
         return
     try:
         hour, minute = map(int, config.MORNING_TIME.split(":"))
-        when = dtime(hour, minute, tzinfo=ZoneInfo(config.ANALYTICS_TIMEZONE))
-    except (ValueError, ZoneInfoNotFoundError):
+        when = dtime(hour, minute, tzinfo=zone)
+    except ValueError:
         logger.exception("Bad MORNING_TIME, morning brief disabled")
+        app.job_queue.run_daily(_chat_cleanup, time=eight, name="chat_cleanup")
         return
     app.job_queue.run_daily(_morning_brief, time=when, name="morning_brief")
     logger.info(
@@ -219,9 +250,17 @@ def build_application(
     icons: dict[str, str] | None = None,
     last_source: str | None = None,
     webhook: bool = False,
+    chat_states: dict[int, ChatState] | None = None,
 ) -> Application:
     """Собрать приложение без сетевых вызовов: зависимости, доступ, обработчики."""
-    builder = ApplicationBuilder().token(config.TELEGRAM_TOKEN).post_init(_post_init)
+    # номер и время каждого отправленного сообщения — в журнал для утренней уборки
+    log = MessageLog(config.ANALYTICS_TIMEZONE)
+    builder = (
+        ApplicationBuilder()
+        .token(config.TELEGRAM_TOKEN)
+        .request(LoggingRequest(log, connection_pool_size=256))
+        .post_init(_post_init)
+    )
     if webhook:
         builder = builder.updater(None)  # обновления приходят на /telegram сервиса
     app = builder.build()
@@ -234,6 +273,10 @@ def build_application(
         last_source=last_source,
         ai_service=GeminiService(gs_service),
         analytics_service=AnalyticsService(gs_service),
+        # клавиатуры и уборка из system!Q:U; не прочитались — все выключены
+        chats=dict(chat_states or {}),
+        chats_loaded=chat_states is not None,
+        message_log=log,
     )
 
     # Access control: runs before every other handler (group -1)
@@ -243,6 +286,7 @@ def build_application(
         logger.warning(
             "ALLOWED_USER_IDS and ANALYTICS_CHAT_ID are empty: the bot answers nobody"
         )
+    app.add_handler(TypeHandler(Update, cleanup.observe), -3)
     app.add_handler(TypeHandler(Update, _track_premium), -2)
     app.add_handler(TypeHandler(Update, make_gatekeeper(config.ALLOWED_USER_IDS)), -1)
 
@@ -256,12 +300,15 @@ def build_application(
     app.add_handler(CommandHandler("today", analytics.today_command))
     app.add_handler(CommandHandler("subs", analytics.subs_command))
     app.add_handler(CommandHandler("icons", icon_packs.icons_command))
+    app.add_handler(CommandHandler("keyboards", settings.keyboards_command))
+    app.add_handler(CommandHandler("app", settings.app_command))
     # Кнопки импорта, выравнивания, /fix и под сводкой — раньше общего обработчика
     app.add_handler(CallbackQueryHandler(balances.align_button, pattern=r"^align:"))
     app.add_handler(CallbackQueryHandler(fix.fix_button, pattern=r"^fix:"))
-    app.add_handler(CallbackQueryHandler(last_write.button, pattern=r"^last:"))
+    app.add_handler(CallbackQueryHandler(last_write.button, pattern=r"^(last|card):"))
     app.add_handler(CallbackQueryHandler(statement_import.button, pattern=r"^import:"))
     app.add_handler(CallbackQueryHandler(piggy.piggy_button, pattern=r"^piggy:"))
+    app.add_handler(CallbackQueryHandler(settings.keyboards_button, pattern=r"^kb:"))
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
     app.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, messages.text_handler)
@@ -351,10 +398,22 @@ def main() -> None:
         # не критично: кнопки без иконок, карту спросим у пользователя
         logger.exception("Could not read icons or the last card")
         icons, last_source = {}, None
+    try:
+        chat_states: dict[int, ChatState] | None = gs_service.get_chat_states()
+    except Exception:
+        logger.exception("Could not read the chat settings, keyboards stay off")
+        chat_states = None
 
     web = web_mode()
     app = build_application(
-        gs_service, categories, subcategories, sources, icons, last_source, webhook=web
+        gs_service,
+        categories,
+        subcategories,
+        sources,
+        icons,
+        last_source,
+        webhook=web,
+        chat_states=chat_states,
     )
     logger.info(
         "Loaded %d sources, %d categories and %d icons.",

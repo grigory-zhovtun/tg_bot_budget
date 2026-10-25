@@ -4,6 +4,7 @@ import asyncio
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from telegram import ReplyKeyboardMarkup
@@ -102,7 +103,8 @@ async def test_known_merchant_is_written_without_ai() -> None:
     assert (ai.calls, ai.asked, ai.forgotten) == (0, [], 0)
     assert sheets.cells == {"fact!N2": 5000000.0}
     assert summary(update).startswith("✅ 48 000 UZS • 🍔 ЕДА (кафе) • VISA 9090 UZS |")
-    assert reactions(update) == ["👀", "👍"]
+    assert reactions(update) == ["👀"]
+    update.message.delete.assert_awaited_once()  # записано всё — SMS уходит из чата
 
 
 async def test_new_merchant_gets_one_ai_question_and_the_check() -> None:
@@ -177,7 +179,8 @@ async def test_only_codes_are_skipped_quietly() -> None:
     await messages.text_handler(update, context)
     assert sheets.rows == []
     assert summary(update) == "⏭ Пропустил: код подтверждения"
-    assert reactions(update) == ["👀", "👍"]
+    assert reactions(update) == ["👀"]
+    update.message.delete.assert_awaited_once()
 
 
 async def test_unknown_card_is_reported() -> None:
@@ -189,6 +192,24 @@ async def test_unknown_card_is_reported() -> None:
         "⚠️ Не записал: OOO SHAVI CAFE — карта *1234 не найдена в листе system"
     )
     assert reactions(update) == ["👀", "🤔"]
+    update.message.delete.assert_not_awaited()
+
+
+async def test_sms_written_in_part_stays_with_a_thumb() -> None:
+    text = f"{QR}\n{PURCHASE.replace('*9090', '*1234')}"
+    update, context, sheets = make_chat(text, {}, RulesAI())
+    await messages.text_handler(update, context)
+    assert len(sheets.rows) == 1
+    assert reactions(update) == ["👀", "👍"]  # видно, что записано не всё
+    update.message.delete.assert_not_awaited()
+
+
+async def test_sms_the_sheet_did_not_take_stays_with_a_thinking_face() -> None:
+    update, context, sheets = make_chat(QR, {}, RulesAI())
+    sheets.append_transactions = Mock(side_effect=ConnectionError("quota"))
+    await messages.text_handler(update, context)
+    assert reactions(update) == ["👀", "🤔"]
+    update.message.delete.assert_not_awaited()
 
 
 async def test_rules_failure_falls_back_to_ai(monkeypatch: pytest.MonkeyPatch) -> None:

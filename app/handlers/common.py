@@ -16,6 +16,7 @@ from telegram import (
 from telegram.ext import ContextTypes
 
 from app import config
+from app.chat_state import state_of
 from app.custom_icons import EMPTY, CustomIcons
 from app.handlers.analytics import send_report
 from app.rich import Report, note_report
@@ -24,6 +25,8 @@ from app.utils.keyboards import (
     category_prompt,
     generate_categories_keyboard,
     generate_sources_keyboard,
+    menu_prompt,
+    record_actions,
 )
 from app.web.auth import launch_token
 
@@ -33,6 +36,13 @@ logger = logging.getLogger(__name__)
 LAST_WRITE = "last_write"
 SEEN_INPUTS = "seen_inputs"
 CHOOSE_SOURCE = "Выберите карту:"
+# user_data: номер сообщения, на котором держится клавиатура карт (утренняя уборка
+# его не удаляет: клавиатура исчезает с экрана вместе с ним)
+ANCHOR = "keyboard_anchor"
+WELCOME = (
+    "Пришлите SMS банка, скриншот или выписку — запишу.",
+    "Клавиатуры — /keyboards, приложение — /app.",
+)
 SEEN_TTL = 7 * 24 * 3600
 MIN_SMS_LENGTH = 20  # короче — это ручной ввод вроде «48000 латте», повтор законен
 
@@ -111,13 +121,18 @@ async def show_main_menu(
     check: int = 0,
     menu: tuple[str, InlineKeyboardMarkup] | None = None,
 ) -> Message | None:
-    """Сводка (или выбранная карта) с клавиатурой карт, под ней — группы.
+    """Сводка (или выбранная карта) и кнопки под ней — по настройкам чата (/keyboards).
 
-    chat — куда отправить: чат сообщения пользователя или, для Mini App, его личный
-    чат с ботом. check — сколько строк ждут проверки («🔎 Проверить»), menu — своё
-    сообщение вместо групп (проверка единственной строки). Возвращает сообщение
-    с группами: проверка потом обновляет его кнопки.
+    Клавиатуры групп и карт выключены — «Исправить» и «Отменить» прямо на сводке,
+    отдельно приходит только вопрос о строке с пометкой (menu). Включены карты —
+    клавиатура карт на сводке, кнопки записи — сообщением под ней; включены группы —
+    в этом сообщении и группы. chat — куда отправить: чат сообщения пользователя
+    или, для Mini App, его личный чат с ботом. check — сколько строк ждут проверки
+    («🔎 Проверить»), menu — своё сообщение вместо групп (проверка единственной
+    строки). Возвращает сообщение с кнопками записи: проверка потом обновляет их.
     """
+    keys = state_of(context.bot_data, chat.id)
+    on_card = not (keys.groups or keys.cards)
     current_source = context.user_data.get("source")
 
     if isinstance(success_message, Report):
@@ -127,30 +142,36 @@ async def show_main_menu(
             success_message
             or (f"💳 {current_source}" if current_source else CHOOSE_SOURCE)
         )
+    if keys.cards:
+        markup: Any = sources_keyboard(context, chat.id, current_source)
+    elif on_card and actions:  # вопрос о строке — отдельно, «🔎» на сводке не нужен
+        markup = InlineKeyboardMarkup(record_actions(0 if menu else check, True))
+    else:
+        markup = None
     sent = await send_report(
-        context.bot,
-        chat.id,
-        report,
-        reply_markup=sources_keyboard(context, chat.id, current_source),
-        send=chat.send_message,
+        context.bot, chat.id, report, reply_markup=markup, send=chat.send_message
     )
     for message in sent.messages:
         track_message(context, message)
+    card = sent.messages[-1]
+    if keys.cards:
+        context.user_data[ANCHOR] = card.message_id
 
-    if not current_source:
-        return None
-    prompt, markup = menu or (
-        category_prompt(current_source),
+    if menu is None and (on_card or not current_source or not (keys.groups or actions)):
+        return card if on_card and actions else None
+    prompt, buttons = menu or (
+        menu_prompt(current_source, keys.groups),
         categories_menu(
             context.bot_data.get("categories", []),
             with_actions=actions,
             custom=premium_icons(context),
             check=check,
+            groups=keys.groups,
         ),
     )
-    msg2 = await chat.send_message(prompt, reply_markup=markup)
+    msg2 = await chat.send_message(prompt, reply_markup=buttons)
     track_message(context, msg2)
-    return msg2
+    return card if on_card else msg2
 
 
 def get_currency_from_source(source_name: str) -> str:
@@ -181,16 +202,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     await clear_tracked_messages(context, chat_id)
 
-    # Show keyboards
-    msg1 = await update.message.reply_text(
-        f"👋 {user.first_name}",
-        reply_markup=sources_keyboard(
-            context, update.effective_chat.id, current_source
-        ),
-    )
+    # Клавиатуры — те, что включены в /keyboards; без них — где их включить
+    keys = state_of(context.bot_data, chat_id)
+    if keys.cards:
+        msg1 = await update.message.reply_text(
+            f"👋 {user.first_name}",
+            reply_markup=sources_keyboard(context, chat_id, current_source),
+        )
+        context.user_data[ANCHOR] = msg1.message_id
+    else:
+        msg1 = await update.message.reply_text(
+            "\n".join([f"👋 {user.first_name}", *WELCOME])
+        )
     track_message(context, msg1)
 
-    if current_source:
+    if current_source and keys.groups:
         msg2 = await update.message.reply_text(
             category_prompt(current_source),
             reply_markup=generate_categories_keyboard(

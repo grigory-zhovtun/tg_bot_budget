@@ -111,6 +111,17 @@ async def test_ok_keeps_the_category_and_brings_the_menu_back() -> None:
     assert context.bot_data["gs_service"].calls == []
 
 
+async def test_check_under_the_card_leaves_only_the_verdict() -> None:
+    context = checking(ROWS[:1], {0: "🆕"})
+    context.user_data[LAST_WRITE]["on_card"] = True
+    fix.inline_check(context)
+    text, markup = await press(context, "fix:ok")
+    assert text == (
+        "👍 Оставил: 48 000 UZS • OOO SHAVI CAFE • 🍔 ЕДА (кафе) • VISA 9090 UZS"
+    )
+    assert markup is None  # кнопки записи — на самой карточке
+
+
 async def test_group_choice_fixes_the_row_and_brings_the_menu_back() -> None:
     context = checking(ROWS[2:], {0: "❓"})
     text, _ = fix.inline_check(context)
@@ -181,6 +192,20 @@ async def test_stop_leaves_the_rest_for_later() -> None:
     assert menu.inline_keyboard[0][0].text == "🔎 Проверить (1)"
     text, _ = await open_check(context)
     assert text.startswith("🔎 1 из 1. ❓")
+
+
+async def test_a_stopped_check_updates_the_buttons_on_the_card() -> None:
+    context = checking(ROWS, {0: "🆕", 2: "❓"})
+    context.user_data[LAST_WRITE]["on_card"] = True
+    await open_check(context)
+    await press(context, "fix:ok")
+    await press(context, "fix:x")
+    call = context.bot.edit_message_reply_markup.await_args
+    assert (call.kwargs["chat_id"], call.kwargs["message_id"]) == (1, 77)
+    assert callbacks(call.kwargs["reply_markup"]) == [
+        ["card:check"],
+        ["card:fix", "card:undo"],
+    ]
 
 
 async def test_nothing_left_to_check() -> None:
