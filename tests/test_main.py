@@ -10,6 +10,7 @@ import pytest
 from telegram.ext import CommandHandler, TypeHandler
 
 from app import config, main
+from app.chat_state import ChatState
 from app.web.auth import webhook_secret
 from tests.test_messages import CATEGORIES, SOURCES, SUBCATEGORIES, FakeSheets
 
@@ -204,6 +205,18 @@ def test_icons_and_last_card_reach_the_handlers(
     )
     assert app.bot_data["icons"] == {"кофе": "☕"}
     assert app.bot_data["last_source"] == "VISA 9090 UZS"
+
+
+def test_chat_states_reach_the_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset({42}))
+    states = {42: ChatState(groups=True)}
+    app = main.build_application(
+        FakeSheets(), CATEGORIES, SUBCATEGORIES, SOURCES, chat_states=states
+    )
+    assert app.bot_data["chats"] == states and app.bot_data["chats_loaded"]
+    # блок не прочитался — клавиатуры выключены, первое сообщение не шлём
+    app = main.build_application(FakeSheets(), CATEGORIES, SUBCATEGORIES, SOURCES)
+    assert app.bot_data["chats"] == {} and not app.bot_data["chats_loaded"]
 
 
 def test_webhook_mode_has_no_updater(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -17,6 +17,13 @@ from gspread.utils import ValueInputOption, ValueRenderOption
 from requests import Response
 
 from app import config
+from app.chat_state import (
+    CHAT_HEADER,
+    ChatState,
+    chat_row,
+    parse_chat_rows,
+    parse_number,
+)
 from app.domain import Rates, SheetRow, month_bounds, month_title, parse_month_title
 
 logger = logging.getLogger(__name__)
@@ -49,6 +56,8 @@ CHECKED_HEADER = "Сверено"
 CHECKED_BLOCK = "I2:Q30"
 # Наборы кастомных эмодзи для картинок на кнопках (system!J)
 PACKS_HEADER = "наборы эмодзи"
+# Настройки чата и начало уборки: system!Q:U, строка на пользователя
+CHATS_RANGE = "Q1:U40"
 TABLE_BALANCES = "I2:J30"
 # Лист system: F — источники, G рядом — по какой день загружены выписки
 MARKS_RANGE = "F1:G60"
@@ -373,6 +382,43 @@ class GoogleSheetsService:
         return self._with_retry(
             "Reading emoji packs",
             lambda: self._worksheet(config.SYSTEM_SHEET_NAME).get("J2:J"),
+        )
+
+    def get_chat_states(self) -> dict[int, ChatState]:
+        """Клавиатуры и уборка каждого чата: system!Q:U под заголовком."""
+        return parse_chat_rows(self._read_chats()[1:])
+
+    def set_chat_state(self, chat_id: int, state: ChatState) -> None:
+        """Строка чата в system!Q:U: та же по ID или первая пустая под заголовком."""
+        rows = self._read_chats()[1:]
+        ids = [parse_number(row[0]) if row else None for row in rows]
+        if chat_id in ids:
+            number = ids.index(chat_id) + 2
+        elif None in ids:
+            number = ids.index(None) + 2
+        else:
+            number = len(ids) + 2
+        sheet = config.SYSTEM_SHEET_NAME
+        self._with_retry(
+            "Writing the chat state",
+            lambda: self.sheet.values_batch_update(
+                {
+                    "valueInputOption": "RAW",
+                    "data": [
+                        {"range": f"{sheet}!Q1:U1", "values": [CHAT_HEADER]},
+                        {
+                            "range": f"{sheet}!Q{number}:U{number}",
+                            "values": [chat_row(chat_id, state)],
+                        },
+                    ],
+                }
+            ),
+        )
+
+    def _read_chats(self) -> list[list[Any]]:
+        return self._with_retry(
+            "Reading chat states",
+            lambda: self._worksheet(config.SYSTEM_SHEET_NAME).get(CHATS_RANGE),
         )
 
     def last_source(self, sources: list[str]) -> str | None:

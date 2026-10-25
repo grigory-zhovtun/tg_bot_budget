@@ -23,6 +23,7 @@ from telegram.ext import (
 
 from app import config
 from app.auth import make_gatekeeper
+from app.chat_state import ChatState
 from app.errors import on_error
 from app.handlers import (
     admin,
@@ -219,6 +220,7 @@ def build_application(
     icons: dict[str, str] | None = None,
     last_source: str | None = None,
     webhook: bool = False,
+    chat_states: dict[int, ChatState] | None = None,
 ) -> Application:
     """Собрать приложение без сетевых вызовов: зависимости, доступ, обработчики."""
     builder = ApplicationBuilder().token(config.TELEGRAM_TOKEN).post_init(_post_init)
@@ -234,6 +236,9 @@ def build_application(
         last_source=last_source,
         ai_service=GeminiService(gs_service),
         analytics_service=AnalyticsService(gs_service),
+        # клавиатуры и уборка из system!Q:U; не прочитались — все выключены
+        chats=dict(chat_states or {}),
+        chats_loaded=chat_states is not None,
     )
 
     # Access control: runs before every other handler (group -1)
@@ -351,10 +356,22 @@ def main() -> None:
         # не критично: кнопки без иконок, карту спросим у пользователя
         logger.exception("Could not read icons or the last card")
         icons, last_source = {}, None
+    try:
+        chat_states: dict[int, ChatState] | None = gs_service.get_chat_states()
+    except Exception:
+        logger.exception("Could not read the chat settings, keyboards stay off")
+        chat_states = None
 
     web = web_mode()
     app = build_application(
-        gs_service, categories, subcategories, sources, icons, last_source, webhook=web
+        gs_service,
+        categories,
+        subcategories,
+        sources,
+        icons,
+        last_source,
+        webhook=web,
+        chat_states=chat_states,
     )
     logger.info(
         "Loaded %d sources, %d categories and %d icons.",
