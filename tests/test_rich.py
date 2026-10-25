@@ -31,17 +31,19 @@ def test_numbers_keep_together() -> None:
     assert percent(0.437) == f"44{N}%"
 
 
-def test_big_lines_are_monospace_blocks() -> None:
-    # заголовки h1–h6 Telegram рисует с засечками — крупные строки идут блоком
-    assert heading(f"💸 1{N}203{N}253 сум", 1) == f"<pre>💸 1{N}203{N}253 сум</pre>"
-    # блок сам не переносит: длинную строку переносим по словам, число не рвём
-    over = f"⚠️ Сверх плана на 7{N}142{N}116 за 23 дня"
-    assert heading(over) == f"<pre>⚠️ Сверх плана на 7{N}142{N}116\nза 23 дня</pre>"
-    assert all(len(line) <= 28 for line in heading(over)[5:-6].split("\n"))
+def test_big_lines_are_headings_with_monospace_digits() -> None:
+    # шрифт заголовков Telegram — с засечками; цифры — моноширинные знаки Юникода
+    assert heading(f"💸 1{N}186{N}667 сум", 1) == f"<h1>💸 𝟷{N}𝟷𝟾𝟼{N}𝟼𝟼𝟽 сум</h1>"
+    # заголовок переносит строки сам — длинная строка целиком
+    over = f"⚠️ Сверх плана на 2{N}100{N}000 за 23 дня"
+    assert heading(over) == f"<h3>⚠️ Сверх плана на 𝟸{N}𝟷𝟶𝟶{N}𝟶𝟶𝟶 за 𝟸𝟹 дня</h3>"
+    assert heading(f"🧊 Заморожено 1{N}500,25 $", 2) == (
+        f"<h2>🧊 Заморожено 𝟷{N}𝟻𝟶𝟶,𝟸𝟻 $</h2>"
+    )
 
 
 def test_blocks_escape_sheet_text() -> None:
-    assert heading("Аренда & <офис>", 1) == "<pre>Аренда &amp; &lt;офис&gt;</pre>"
+    assert heading("Аренда & <офис>", 1) == "<h1>Аренда &amp; &lt;офис&gt;</h1>"
     assert para("a < b", "c") == "<p>a &lt; b<br>c</p>"
     assert table([["кафе & бар", f"1{N}000"]], "lr", ["статья", "факт"]) == (
         "<table bordered striped><tr><th>статья</th><th>факт</th></tr>"
