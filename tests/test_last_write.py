@@ -49,7 +49,8 @@ async def press(context: SimpleNamespace, data: str) -> SimpleNamespace:
             reply_text=AsyncMock(side_effect=lambda *a, **k: sent_message())
         ),
     )
-    await last_write.button(SimpleNamespace(callback_query=query), context)
+    update = SimpleNamespace(callback_query=query, effective_chat=SimpleNamespace(id=1))
+    await last_write.button(update, context)
     return query
 
 

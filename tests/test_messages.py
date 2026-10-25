@@ -9,6 +9,7 @@ import pytest
 from telegram import ReplyKeyboardMarkup
 
 from app import config
+from app.chat_state import ChatState
 from app.domain import Rates, entry_row, local_today
 from app.handlers import messages, undo
 from app.services.google_sheets import BALANCE_FORMULA, row_values
@@ -123,6 +124,8 @@ def make_chat(text: str, user_data: dict[str, Any], ai: FakeAI | None = None):
             "categories": CATEGORIES,
             "subcategories": SUBCATEGORIES,
             "sources": SOURCES,
+            # сценарии этого файла — с обеими клавиатурами; без них — test_clean_chat
+            "chats": {1: ChatState(groups=True, cards=True)},
         },
         user_data=user_data,
         bot=SimpleNamespace(

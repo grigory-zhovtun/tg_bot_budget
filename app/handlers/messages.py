@@ -15,6 +15,7 @@ from telegram.constants import ReactionEmoji
 from telegram.ext import ContextTypes
 
 from app import config
+from app.chat_state import state_of
 from app.domain import (
     INCOME_GROUP,
     Catalog,
@@ -32,6 +33,7 @@ from app.handlers import balances, fix, icons, live, statement_import
 from app.handlers import sms as sms_chat
 from app.handlers.analytics import send_report
 from app.handlers.common import (
+    ANCHOR,
     CHOOSE_SOURCE,
     LAST_WRITE,
     SEEN_INPUTS,
@@ -153,22 +155,29 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if clean_text in sources:
             context.user_data["source"] = clean_text
             await _delete_quietly(update.message)
+            chat = update.effective_chat
+            keys = state_of(context.bot_data, chat.id)
             # Клавиатура карт держится на сообщении, а пустой или «невидимый»
             # текст Telegram отвергает (Message_empty) — показываем выбранную карту
-            msg1 = await update.effective_chat.send_message(
+            msg1 = await chat.send_message(
                 f"💳 {clean_text}",
-                reply_markup=sources_keyboard(
-                    context, update.effective_chat.id, clean_text
+                reply_markup=(
+                    sources_keyboard(context, chat.id, clean_text)
+                    if keys.cards
+                    else None
                 ),
             )
             track_message(context, msg1)
-            msg2 = await update.effective_chat.send_message(
-                category_prompt(clean_text),
-                reply_markup=generate_categories_keyboard(
-                    context.bot_data.get("categories", []), premium_icons(context)
-                ),
-            )
-            track_message(context, msg2)
+            if keys.cards:
+                context.user_data[ANCHOR] = msg1.message_id
+            if keys.groups:
+                msg2 = await chat.send_message(
+                    category_prompt(clean_text),
+                    reply_markup=generate_categories_keyboard(
+                        context.bot_data.get("categories", []), premium_icons(context)
+                    ),
+                )
+                track_message(context, msg2)
             return
 
         # 2. Check for "Back"
@@ -177,7 +186,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.user_data.pop("subcategory", None)
             await _delete_quietly(update.message)
             current_source = context.user_data.get("source")
-            if current_source:
+            keys = state_of(context.bot_data, update.effective_chat.id)
+            if current_source and keys.groups:
                 msg = await update.effective_chat.send_message(
                     category_prompt(current_source),
                     reply_markup=generate_categories_keyboard(
@@ -185,12 +195,13 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     ),
                 )
                 track_message(context, msg)
-            else:
+            elif not current_source and keys.cards:
                 msg = await update.effective_chat.send_message(
                     CHOOSE_SOURCE,
                     reply_markup=sources_keyboard(context, update.effective_chat.id),
                 )
                 track_message(context, msg)
+                context.user_data[ANCHOR] = msg.message_id
             return
 
     # 3. Manual entry: source + category + subcategory are chosen, text is "amount comment"
@@ -509,6 +520,7 @@ async def save_rows(
     каждой строки (повтор этой SMS не запишется), notes — строки «⏭» в конце сводки.
     """
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
+    keys = state_of(context.bot_data, chat.id)
     lines: list[str] = []
     failed: list[str] = []  # «❌ Не записал…» — в расширенном виде абзацем
     first: int | None = None
@@ -532,6 +544,9 @@ async def save_rows(
                 "prints": [p for p in prints if p],
                 # строки с пометкой, которые ещё не проверены: номер → 🆕 или ❓
                 "checks": {i: flag for i, flag in enumerate(flags) if flag},
+                # кнопки записи — на сводке (клавиатуры выключены) или в меню под ней
+                "on_card": not (keys.groups or keys.cards),
+                "groups": keys.groups,
             }
             mark_dirty(context.bot_data)  # «Пришло к утру» сверит задача receipts
             if fingerprint:

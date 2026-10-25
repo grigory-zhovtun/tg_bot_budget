@@ -20,6 +20,10 @@ APP_BUTTON = "📱 Приложение"
 # Кнопки под сводкой записи (обработчик app/handlers/last_write.py)
 LAST_FIX, LAST_UNDO, LAST_CHECK = "last:fix", "last:undo", "last:check"
 LAST_UNDO_YES, LAST_UNDO_NO = "last:undo:yes", "last:undo:no"
+# Те же кнопки на самой сводке — когда клавиатуры групп и карт выключены
+CARD = "card:"
+CARD_FIX, CARD_UNDO, CARD_CHECK = "card:fix", "card:undo", "card:check"
+CARD_UNDO_YES, CARD_UNDO_NO = "card:undo:yes", "card:undo:no"
 
 
 def with_icon(name: str, icons: dict[str, str] | None) -> str:
@@ -43,6 +47,13 @@ def _rows(
 
 def category_prompt(source: str) -> str:
     return f"💳 {source} — выберите категорию"
+
+
+def menu_prompt(source: str | None, groups: bool) -> str:
+    """Подпись меню под сводкой: с группами — «выберите категорию», без них — карта."""
+    if not source:
+        return "Категория:"
+    return category_prompt(source) if groups else f"💳 {source}"
 
 
 def subcategory_prompt(source: str, category: str) -> str:
@@ -94,32 +105,64 @@ def generate_categories_keyboard(
     return InlineKeyboardMarkup(_rows(buttons, 2))
 
 
+def record_actions(
+    check: int = 0, on_card: bool = False
+) -> list[list[InlineKeyboardButton]]:
+    """«✏️ Исправить запись» и «↩️ Отменить запись»; над ними «🔎 Проверить (N)».
+
+    check — сколько строк записи с пометкой 🆕/❓ ещё не проверено; on_card — кнопки
+    на самой сводке (card:…), иначе — в меню под ней (last:…).
+    """
+    fix, undo, look = (
+        (CARD_FIX, CARD_UNDO, CARD_CHECK)
+        if on_card
+        else (LAST_FIX, LAST_UNDO, LAST_CHECK)
+    )
+    rows = [
+        [
+            action("✏️ Исправить запись", fix, KeyboardButtonStyle.PRIMARY),
+            action("↩️ Отменить запись", undo, KeyboardButtonStyle.DANGER),
+        ]
+    ]
+    if check:
+        label = f"🔎 Проверить ({check})"
+        rows.insert(0, [action(label, look, KeyboardButtonStyle.PRIMARY)])
+    return rows
+
+
+def undo_confirm(on_card: bool = False) -> InlineKeyboardMarkup:
+    """Подтверждение отмены; на сводке вопроса нет — кнопка называет запись."""
+    if on_card:
+        yes, no, label = CARD_UNDO_YES, CARD_UNDO_NO, "🗑 Да, удалить запись"
+    else:
+        yes, no, label = LAST_UNDO_YES, LAST_UNDO_NO, "🗑 Да, удалить"
+    return InlineKeyboardMarkup(
+        [[action(label, yes, KeyboardButtonStyle.DANGER), action("Нет", no)]]
+    )
+
+
 def categories_menu(
     categories: list[str],
     with_actions: bool = False,
     custom: CustomIcons | None = None,
     check: int = 0,
+    groups: bool = True,
 ) -> InlineKeyboardMarkup:
     """Группы; сразу после записи сверху — «Исправить» и «Отменить» для неё.
 
-    check — сколько строк записи с пометкой 🆕/❓ ещё не проверено: над действиями
-    тогда стоит «🔎 Проверить (N)».
+    check — сколько строк записи ждут проверки («🔎 Проверить (N)» над действиями);
+    groups=False — без групп (выключены в /keyboards), только кнопки записи.
     """
-    rows = [
-        list(row)
-        for row in generate_categories_keyboard(categories, custom).inline_keyboard
-    ]
+    rows = (
+        [
+            list(row)
+            for row in generate_categories_keyboard(categories, custom).inline_keyboard
+        ]
+        if groups
+        else []
+    )
     if with_actions:
-        rows.insert(
-            0,
-            [
-                action("✏️ Исправить запись", LAST_FIX, KeyboardButtonStyle.PRIMARY),
-                action("↩️ Отменить запись", LAST_UNDO, KeyboardButtonStyle.DANGER),
-            ],
-        )
-        if check:
-            label = f"🔎 Проверить ({check})"
-            rows.insert(0, [action(label, LAST_CHECK, KeyboardButtonStyle.PRIMARY)])
+        rows = record_actions(check) + rows
     return InlineKeyboardMarkup(rows)
 
 

@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 from telegram.constants import KeyboardButtonStyle
 
+from app.chat_state import ChatState
 from app.handlers import transactions
 from app.utils import keyboards
 from tests.test_messages import SOURCES, SUBCATEGORIES
@@ -76,11 +77,22 @@ async def test_category_without_a_card_takes_the_card_of_the_last_record() -> No
 
 
 async def test_category_with_no_card_at_all_still_asks_for_one() -> None:
-    update, context = tap("cat_🍔 ЕДА", {}, sources=["VISA 9090 UZS"])
+    cards = {1: ChatState(cards=True)}
+    update, context = tap("cat_🍔 ЕДА", {}, sources=["VISA 9090 UZS"], chats=cards)
     await transactions.transaction_button_handler(update, context)
     assert update.callback_query.message.reply_text.await_args.kwargs["text"] == (
         "⚠️ Выберите источник"
     )
+
+
+async def test_no_card_without_the_cards_keyboard_says_how_to_get_one() -> None:
+    update, context = tap("cat_🍔 ЕДА", {}, sources=["VISA 9090 UZS"])
+    await transactions.transaction_button_handler(update, context)
+    call = update.callback_query.message.reply_text.await_args
+    assert call.kwargs["text"] == (
+        "⚠️ Карта не выбрана: пришлите SMS по карте или включите карты — /keyboards"
+    )
+    assert call.kwargs.get("reply_markup") is None
 
 
 async def test_subcategory_asks_for_the_amount_with_an_example() -> None:

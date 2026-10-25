@@ -44,8 +44,9 @@ from app.utils.keyboards import (
     LAST_UNDO,
     action,
     categories_menu,
-    category_prompt,
     group_button,
+    menu_prompt,
+    record_actions,
     subcategory_button,
 )
 
@@ -177,13 +178,18 @@ async def _edit(
 
 
 def _menu(context: ContextTypes.DEFAULT_TYPE) -> InlineKeyboardMarkup:
-    """Обычное меню групп под сводкой с кнопками последней записи."""
+    """Кнопки последней записи: на сводке или в меню под ней — с группами, если они
+    включены (так их показала запись)."""
     last = context.user_data.get(LAST_WRITE)
+    check = len(last.get("checks", {})) if last else 0
+    if last and last.get("on_card"):
+        return InlineKeyboardMarkup(record_actions(check, on_card=True))
     return categories_menu(
         context.bot_data.get("categories", []),
         last is not None,
         premium_icons(context),
-        check=len(last.get("checks", {})) if last else 0,
+        check=check,
+        groups=last.get("groups", True) if last else True,
     )
 
 
@@ -267,10 +273,15 @@ async def fix_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def _inline_done(
     query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, text: str
 ) -> None:
-    """Проверка в меню закончилась: под текстом снова обычное меню групп."""
+    """Проверка в меню закончилась: под текстом снова меню записи; если кнопки
+    записи на самой сводке — в сообщении проверки остаётся только итог."""
     context.user_data.pop(STATE, None)
+    last = context.user_data.get(LAST_WRITE)
+    if last and last.get("on_card"):
+        await _edit(query, text)
+        return
     source = context.user_data.get("source") or context.bot_data.get("last_source")
-    prompt = category_prompt(source) if source else "Категория:"
+    prompt = menu_prompt(source, last.get("groups", True) if last else True)
     await _edit(query, f"{text}\n{prompt}", _menu(context))
 
 

@@ -1,31 +1,39 @@
-"""Кнопки под сводкой записи: «✏️ Исправить», «↩️ Отменить» и «🔎 Проверить».
+"""Кнопки записи: «✏️ Исправить», «↩️ Отменить» и «🔎 Проверить».
 
-Кнопки стоят в сообщении с группами сразу под сводкой (клавиатура карт живёт на
-самой сводке). «Исправить» открывает тот же диалог, что /fix, отдельным
-сообщением; «Проверить» — строки SMS с пометкой по одной, тоже отдельным
-сообщением; «Отменить» сначала спрашивает в этом же сообщении — промахнуться по
-кнопке легче, чем набрать /undo.
+Клавиатуры групп и карт выключены (/keyboards) — кнопки стоят на самой сводке
+(card:…), иначе — в сообщении под ней (last:…), над группами, если они включены
+(клавиатура карт живёт на самой сводке). «Исправить» открывает тот же диалог, что
+/fix, отдельным сообщением; «Проверить» — строки SMS с пометкой по одной, тоже
+отдельным сообщением; «Отменить» сначала спрашивает — промахнуться по кнопке легче,
+чем набрать /undo: в меню — в этом же сообщении, на сводке — сменой кнопок, текст
+сводки остаётся.
 """
 
-from telegram import InlineKeyboardMarkup, Update
-from telegram.constants import KeyboardButtonStyle
+import logging
+
+from telegram import CallbackQuery, InlineKeyboardMarkup, Update
+from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
+from app.chat_state import state_of
 from app.domain import SheetRow, format_amount
 from app.handlers import fix
+from app.handlers.analytics import send_report
 from app.handlers.common import LAST_WRITE, premium_icons, track_message
-from app.handlers.undo import undo_last
+from app.handlers.undo import undo_rows
+from app.rich import note_report
 from app.utils.keyboards import (
-    LAST_CHECK,
-    LAST_FIX,
-    LAST_UNDO,
-    LAST_UNDO_NO,
-    LAST_UNDO_YES,
-    action,
+    CARD,
     categories_menu,
-    category_prompt,
+    menu_prompt,
+    record_actions,
+    undo_confirm,
     with_icon,
 )
+
+logger = logging.getLogger(__name__)
+
+GONE = "Последней записи уже нет"
 
 
 def describe_write(last: dict, icons: dict[str, str] | None) -> str:
@@ -40,50 +48,89 @@ def describe_write(last: dict, icons: dict[str, str] | None) -> str:
     return f"строки {last['first']}–{last['last']} ({len(rows)} шт.)"
 
 
+def _shown(markup: InlineKeyboardMarkup) -> InlineKeyboardMarkup | None:
+    """Пустые кнопки Telegram не нужны: без них кнопки снимаются."""
+    return markup if markup.inline_keyboard else None
+
+
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    step = query.data.split(":", 1)[1]  # fix, check, undo, undo:yes, undo:no
+    if step in ("fix", "check"):
+        await query.answer()
+        start = fix.start_fix if step == "fix" else fix.start_check
+        # диалог — новым сообщением, кнопки записи остаются
+        track_message(context, await start(query.message.reply_text, context))
+        return
+    if query.data.startswith(CARD):
+        await _card_button(update, query, context, step)
+        return
+
     await query.answer()
+    last = context.user_data.get(LAST_WRITE)
+    groups = (
+        last.get("groups", True)
+        if last
+        else state_of(context.bot_data, update.effective_chat.id).groups
+    )
     categories = context.bot_data.get("categories", [])
     source = context.user_data.get("source") or context.bot_data.get("last_source")
-    prompt = category_prompt(source) if source else "Категория:"
+    prompt = menu_prompt(source, groups)
     custom = premium_icons(context)
-
-    if query.data == LAST_FIX:
-        # диалог — новым сообщением, меню категорий под сводкой остаётся
-        track_message(context, await fix.start_fix(query.message.reply_text, context))
-        return
-    if query.data == LAST_CHECK:
-        track_message(context, await fix.start_check(query.message.reply_text, context))
-        return
-
-    last = context.user_data.get(LAST_WRITE)
     if not last:
         await query.edit_message_text(
-            f"Последней записи уже нет.\n{prompt}",
-            reply_markup=categories_menu(categories, custom=custom),
+            f"{GONE}.\n{prompt}",
+            reply_markup=_shown(
+                categories_menu(categories, custom=custom, groups=groups)
+            ),
         )
         return
-    if query.data == LAST_UNDO:
-        confirm = InlineKeyboardMarkup(
-            [
-                [
-                    action("🗑 Да, удалить", LAST_UNDO_YES, KeyboardButtonStyle.DANGER),
-                    action("Нет", LAST_UNDO_NO),
-                ]
-            ]
-        )
+    if step == "undo":
         icons = context.bot_data.get("icons")
         await query.edit_message_text(
-            f"↩️ Удалить {describe_write(last, icons)}?", reply_markup=confirm
+            f"↩️ Удалить {describe_write(last, icons)}?", reply_markup=undo_confirm()
         )
-    elif query.data == LAST_UNDO_NO:
+    elif step == "undo:no":
         pending = len(last.get("checks", {}))
-        await query.edit_message_text(
-            prompt, reply_markup=categories_menu(categories, True, custom, pending)
-        )
-    elif query.data == LAST_UNDO_YES:
-        result = await undo_last(context)
-        await query.edit_message_text(
-            f"{result}\n{prompt}",
-            reply_markup=categories_menu(categories, custom=custom),
-        )
+        menu = categories_menu(categories, True, custom, pending, groups=groups)
+        await query.edit_message_text(prompt, reply_markup=menu)
+    elif step == "undo:yes":
+        result, _ = await undo_rows(context)
+        menu = categories_menu(categories, custom=custom, groups=groups)
+        await query.edit_message_text(f"{result}\n{prompt}", reply_markup=_shown(menu))
+
+
+async def _card_button(
+    update: Update, query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, step: str
+) -> None:
+    """Кнопки на самой сводке: меняются только кнопки, текст сводки остаётся."""
+    last = context.user_data.get(LAST_WRITE)
+    if not last:  # бота перезапускали — отменять нечего, кнопки снимаем
+        await query.answer(GONE, show_alert=True)
+        await query.edit_message_reply_markup(reply_markup=None)
+        return
+    await query.answer()
+    actions = InlineKeyboardMarkup(
+        record_actions(len(last.get("checks", {})), on_card=True)
+    )
+    if step == "undo":
+        await query.edit_message_reply_markup(reply_markup=undo_confirm(True))
+        return
+    if step == "undo:no":
+        await query.edit_message_reply_markup(reply_markup=actions)
+        return
+    result, deleted = await undo_rows(context)
+    if deleted:  # строк больше нет — и сводки о них тоже
+        try:
+            await query.message.delete()
+        except TelegramError as error:  # уже убрана утром — не страшно
+            logger.debug("The card after undo was not deleted: %s", error)
+    else:  # не вышло: можно повторить — кнопки снова, нельзя — без кнопок
+        again = actions if context.user_data.get(LAST_WRITE) else None
+        await query.edit_message_reply_markup(reply_markup=again)
+    chat = update.effective_chat
+    sent = await send_report(
+        context.bot, chat.id, note_report(result), send=chat.send_message
+    )
+    for message in sent.messages:
+        track_message(context, message)

@@ -264,7 +264,7 @@ def build_application(
     # Кнопки импорта, выравнивания, /fix и под сводкой — раньше общего обработчика
     app.add_handler(CallbackQueryHandler(balances.align_button, pattern=r"^align:"))
     app.add_handler(CallbackQueryHandler(fix.fix_button, pattern=r"^fix:"))
-    app.add_handler(CallbackQueryHandler(last_write.button, pattern=r"^last:"))
+    app.add_handler(CallbackQueryHandler(last_write.button, pattern=r"^(last|card):"))
     app.add_handler(CallbackQueryHandler(statement_import.button, pattern=r"^import:"))
     app.add_handler(CallbackQueryHandler(piggy.piggy_button, pattern=r"^piggy:"))
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
