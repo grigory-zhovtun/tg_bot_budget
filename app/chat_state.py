@@ -9,7 +9,7 @@ import asyncio
 import dataclasses
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -75,13 +75,31 @@ def state_of(bot_data: dict[str, Any], chat_id: int) -> ChatState:
 async def update_state(
     bot_data: dict[str, Any], chat_id: int, **changes: Any
 ) -> ChatState | None:
-    """Поменять поля состояния и записать в таблицу; не записалось — None.
+    """Поменять поля состояния и записать в таблицу; не записалось — None."""
+    return await _save(
+        bot_data, chat_id, lambda state: dataclasses.replace(state, **changes)
+    )
 
-    Записи идут по одной: уборка и кнопки /keyboards не затрут поля друг друга.
-    """
+
+async def keep_messages(
+    bot_data: dict[str, Any], chat_id: int, ids: Sequence[int]
+) -> ChatState | None:
+    """Добавить номера в «не удалять №»: сводка недели, снятие клавиатуры карт."""
+    return await _save(
+        bot_data,
+        chat_id,
+        lambda state: dataclasses.replace(state, keep=(*state.keep, *ids)),
+    )
+
+
+async def _save(
+    bot_data: dict[str, Any], chat_id: int, change: Callable[[ChatState], ChatState]
+) -> ChatState | None:
+    """Новое состояние — в таблицу, потом в память; записи идут по одной: уборка и
+    кнопки /keyboards не затрут поля друг друга."""
     lock: asyncio.Lock = bot_data.setdefault(STATE_LOCK, asyncio.Lock())
     async with lock:
-        new = dataclasses.replace(state_of(bot_data, chat_id), **changes)
+        new = change(state_of(bot_data, chat_id))
         try:
             await asyncio.to_thread(bot_data["gs_service"].set_chat_state, chat_id, new)
         except Exception:

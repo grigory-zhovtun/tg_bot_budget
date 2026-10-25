@@ -10,7 +10,7 @@ from telegram import ReplyKeyboardRemove, Update
 from telegram.ext import ContextTypes
 
 from app import config
-from app.chat_state import ChatState, state_of, update_state
+from app.chat_state import ChatState, keep_messages, state_of, update_state
 from app.handlers.analytics import edit_report, send_report
 from app.handlers.common import (
     ANCHOR,
@@ -97,9 +97,7 @@ async def keyboards_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     elif key == "cards":
         hidden = await chat.send_message(HIDDEN, reply_markup=ReplyKeyboardRemove())
         context.user_data.pop(ANCHOR, None)
-        await update_state(
-            context.bot_data, chat.id, keep=(*new.keep, hidden.message_id)
-        )
+        await keep_messages(context.bot_data, chat.id, [hidden.message_id])
 
 
 async def app_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

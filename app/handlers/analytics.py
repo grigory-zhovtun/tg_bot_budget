@@ -280,17 +280,24 @@ async def plan_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await send_report(context.bot, update.effective_chat.id, report)
 
 
-async def send_morning_brief(bot: Bot, chat_id: int, analytics_service: Any) -> None:
-    """Утреннее сообщение с лимитом (JobQueue); 🎉, если вчера уложились. Ошибки — в лог."""
+async def send_morning_brief(
+    bot: Bot, chat_id: int, analytics_service: Any, reply_markup: Any = None
+) -> Sent | None:
+    """Утреннее сообщение с лимитом (JobQueue); 🎉, если вчера уложились.
+
+    reply_markup — клавиатура карт или кнопка приложения. Ошибки — в лог, None.
+    """
     try:
         report, party = await asyncio.to_thread(analytics_service.morning_message)
         effect = config.CELEBRATE_EFFECT_ID if party else None
-        sent = await send_report(bot, chat_id, report, effect)
+        sent = await send_report(bot, chat_id, report, effect, reply_markup)
         logger.info(
             "Morning brief sent as %s%s", sent.kind, " (party)" if effect else ""
         )
+        return sent
     except Exception:
         logger.exception("Failed to send the morning brief")
+        return None
 
 
 async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -321,11 +328,15 @@ async def subs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-async def send_weekly_digest(bot: Bot, chat_id: int, analytics_service: Any) -> None:
-    """Воскресная сводка (JobQueue). Ошибки только в лог."""
+async def send_weekly_digest(
+    bot: Bot, chat_id: int, analytics_service: Any
+) -> Sent | None:
+    """Воскресная сводка (JobQueue). Ошибки только в лог, None."""
     try:
         report = await asyncio.to_thread(analytics_service.weekly_digest)
         sent = await send_report(bot, chat_id, report)
         logger.info("Weekly digest sent as %s", sent.kind)
+        return sent
     except Exception:
         logger.exception("Failed to send the weekly digest")
+        return None

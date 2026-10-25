@@ -2,15 +2,20 @@
 
 import logging
 import subprocess
+from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from telegram import ReplyKeyboardMarkup
 from telegram.ext import CommandHandler, TypeHandler
 
 from app import config, main
 from app.chat_state import ChatState
+from app.handlers import cleanup
+from app.handlers.analytics import Sent
+from app.handlers.common import ANCHOR
 from app.web.auth import webhook_secret
 from tests.test_messages import CATEGORIES, SOURCES, SUBCATEGORIES, FakeSheets
 
@@ -115,9 +120,10 @@ async def test_gemini_self_check_does_not_delay_the_start() -> None:
 
     application.bot.set_my_commands.assert_awaited_once_with(main.COMMANDS)
     ai.self_check.assert_not_awaited()
-    (callback, when, name), packs = scheduled
+    (callback, when, name), packs, first = scheduled
     assert (when, name) == (1, "gemini_self_check")
     assert packs[1:] == (2, "emoji_packs")  # картинки на кнопках — тоже в фоне
+    assert first == (cleanup.first_run, 5, "first_run")  # «Клавиатуры скрыты»
     await callback(SimpleNamespace(bot_data=application.bot_data))
     ai.self_check.assert_awaited_once()
 
@@ -174,24 +180,93 @@ def test_morning_brief_can_be_switched_off(
     monkeypatch: pytest.MonkeyPatch, value: str
 ) -> None:
     app = build(monkeypatch, MORNING_TIME=value)
-    assert "morning_brief" not in {job.name for job in app.job_queue.jobs()}
+    jobs = {job.name: job for job in app.job_queue.jobs()}
+    assert "morning_brief" not in jobs
+    # уборка чата — всё равно в 8:00
+    fields = {field.name: str(field) for field in jobs["chat_cleanup"].trigger.fields}
+    assert (fields["hour"], fields["minute"]) == ("8", "0")
 
 
-async def test_morning_brief_goes_to_the_owner(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    sent: list[int] = []
+def morning_context(
+    monkeypatch: pytest.MonkeyPatch, state: ChatState
+) -> tuple[SimpleNamespace, list[tuple[int, object]], list[object]]:
+    sent: list[tuple[int, object]] = []
+    swept: list[object] = []
 
-    async def send(bot: object, chat_id: int, service: object) -> None:
-        sent.append(chat_id)
+    async def send(
+        bot: object, chat_id: int, service: object, reply_markup: object = None
+    ) -> Sent:
+        sent.append((chat_id, reply_markup))
+        return Sent("rich", (SimpleNamespace(message_id=500),))
+
+    async def sweep(application: object) -> None:
+        swept.append(application)
 
     monkeypatch.setattr(main.analytics, "send_morning_brief", send)
+    monkeypatch.setattr(main.cleanup, "sweep", sweep)
     monkeypatch.setattr(config, "ANALYTICS_CHAT_ID", None)
     monkeypatch.setattr(config, "ALLOWED_USER_IDS", frozenset({7}))
     monkeypatch.setattr(config, "OWNER_ID", 7)
-    context = SimpleNamespace(bot=object(), bot_data={"analytics_service": object()})
+    monkeypatch.setattr(config, "WEBAPP_URL", "https://example.test/app/")
+    application = SimpleNamespace(
+        bot_data={
+            "analytics_service": object(),
+            "chats": {7: state},
+            "sources": SOURCES,
+            "last_source": "VISA 9090 UZS",
+        },
+        user_data=defaultdict(dict),
+    )
+    context = SimpleNamespace(
+        bot=object(), bot_data=application.bot_data, application=application
+    )
+    return context, sent, swept
+
+
+async def test_morning_brief_goes_to_the_owner_then_the_chats_are_swept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context, sent, swept = morning_context(monkeypatch, ChatState())
     await main._morning_brief(context)
-    assert sent == [7]
+    [(chat_id, markup)] = sent
+    assert chat_id == 7
+    [[button]] = markup.inline_keyboard  # карты скрыты — кнопка приложения
+    assert button.web_app.url == "https://example.test/app/"
+    assert swept == [context.application]
+    assert ANCHOR not in context.application.user_data.get(7, {})
+
+
+async def test_with_cards_the_brief_holds_the_cards_keyboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context, sent, _ = morning_context(monkeypatch, ChatState(cards=True))
+    await main._morning_brief(context)
+    [(_, markup)] = sent
+    assert isinstance(markup, ReplyKeyboardMarkup)
+    assert context.application.user_data[7][ANCHOR] == 500
+
+
+async def test_the_weekly_digest_is_kept_from_the_sweep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    kept: list[tuple[int, list[int]]] = []
+
+    async def send(bot: object, chat_id: int, service: object) -> Sent:
+        return Sent("rich", (SimpleNamespace(message_id=150),))
+
+    async def keep(application: object, chat_id: int, ids: list[int]) -> None:
+        kept.append((chat_id, ids))
+
+    monkeypatch.setattr(main.analytics, "send_weekly_digest", send)
+    monkeypatch.setattr(main.cleanup, "keep", keep)
+    monkeypatch.setattr(config, "ANALYTICS_CHAT_ID", None)
+    monkeypatch.setattr(config, "OWNER_ID", 7)
+    application = SimpleNamespace(bot_data={"analytics_service": object()})
+    context = SimpleNamespace(
+        bot=object(), bot_data=application.bot_data, application=application
+    )
+    await main._weekly_digest(context)
+    assert kept == [(7, [150])]
 
 
 def test_icons_and_last_card_reach_the_handlers(
