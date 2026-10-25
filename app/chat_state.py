@@ -92,6 +92,21 @@ async def keep_messages(
     )
 
 
+async def finish_sweep(
+    bot_data: dict[str, Any], chat_id: int, last: int
+) -> ChatState | None:
+    """Уборка до номера last прошла: следующая — с last + 1, из «не удалять №»
+    уходят номера, которые уже позади (под замком: добавленные во время уборки
+    номера сохраняются)."""
+    return await _save(
+        bot_data,
+        chat_id,
+        lambda state: dataclasses.replace(
+            state, start=last + 1, keep=tuple(n for n in state.keep if n > last)
+        ),
+    )
+
+
 async def _save(
     bot_data: dict[str, Any], chat_id: int, change: Callable[[ChatState], ChatState]
 ) -> ChatState | None:

@@ -6,11 +6,18 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.error import BadRequest
 
 from app.chat_state import ChatState
 from app.handlers import common, last_write, messages
 from app.handlers.common import ANCHOR, LAST_WRITE
-from tests.test_messages import chat_messages, make_chat, manual_state, sent_message
+from tests.test_messages import (
+    again,
+    chat_messages,
+    make_chat,
+    manual_state,
+    sent_message,
+)
 
 OFF = ChatState()
 CARD_ACTIONS = [
@@ -55,16 +62,18 @@ def buttons(markup: Any) -> list[list[tuple[str, str]]]:
 
 
 async def press(
-    context: SimpleNamespace, data: str
+    context: SimpleNamespace, data: str, message_id: int = 500, refuse: bool = False
 ) -> tuple[SimpleNamespace, SimpleNamespace]:
-    """Нажатие кнопки записи; update.effective_chat — куда бот пишет ответ."""
+    """Нажатие кнопки записи на сообщении message_id; update.effective_chat — куда
+    бот пишет ответ; refuse — Telegram не меняет кнопки этого сообщения."""
+    markup_edit = AsyncMock(side_effect=BadRequest("Message can't be edited"))
     query = SimpleNamespace(
         data=data,
         answer=AsyncMock(),
         edit_message_text=AsyncMock(),
-        edit_message_reply_markup=AsyncMock(),
+        edit_message_reply_markup=markup_edit if refuse else AsyncMock(),
         message=SimpleNamespace(
-            message_id=500,
+            message_id=message_id,
             chat_id=1,
             delete=AsyncMock(),
             reply_text=AsyncMock(side_effect=lambda *a, **k: sent_message()),
@@ -148,21 +157,22 @@ async def test_the_wifes_settings_leave_the_owners_chat_alone() -> None:
 
 
 async def test_undo_on_the_card_swaps_only_the_buttons() -> None:
-    _, context, sheets, _ = await record()
-    _, query = await press(context, "card:undo")
+    _, context, sheets, sent = await record()
+    card = sent[0].message_id
+    _, query = await press(context, "card:undo", card)
     assert buttons(new_markup(query)) == [
         [("🗑 Да, удалить запись", "card:undo:yes"), ("Нет", "card:undo:no")]
     ]
     query.edit_message_text.assert_not_awaited()  # текст карточки цел
     assert not hasattr(sheets, "undone")
 
-    _, query = await press(context, "card:undo:no")
+    _, query = await press(context, "card:undo:no", card)
     assert buttons(new_markup(query)) == [CARD_ACTIONS]
 
 
 async def test_undo_yes_on_the_card_deletes_the_card_and_says_so() -> None:
-    _, context, sheets, _ = await record()
-    update, query = await press(context, "card:undo:yes")
+    _, context, sheets, sent = await record()
+    update, query = await press(context, "card:undo:yes", sent[0].message_id)
     assert sheets.undone[:2] == (4169, 4169)
     query.message.delete.assert_awaited_once()
     note = update.effective_chat.send_message.await_args
@@ -171,9 +181,9 @@ async def test_undo_yes_on_the_card_deletes_the_card_and_says_so() -> None:
 
 
 async def test_undo_that_changed_rows_block_drops_the_buttons() -> None:
-    _, context, sheets, _ = await record()
+    _, context, sheets, sent = await record()
     sheets.undo_allowed = False
-    update, query = await press(context, "card:undo:yes")
+    update, query = await press(context, "card:undo:yes", sent[0].message_id)
     query.message.delete.assert_not_awaited()
     assert new_markup(query) is None  # отменять больше нечего
     note = update.effective_chat.send_message.await_args.args[0]
@@ -190,11 +200,42 @@ async def test_card_buttons_after_a_restart_only_say_so() -> None:
 
 
 async def test_card_fix_opens_the_same_dialog_as_the_command() -> None:
-    _, context, _, _ = await record()
-    _, query = await press(context, "card:fix")
+    _, context, _, sent = await record()
+    _, query = await press(context, "card:fix", sent[0].message_id)
     text = query.message.reply_text.await_args.args[0]
     assert text.startswith("✏️ 48 000 UZS • латте • 🍔 ЕДА (кофе)")
     query.edit_message_reply_markup.assert_not_awaited()
+
+
+async def test_buttons_on_an_older_card_touch_nothing() -> None:
+    update, context, sheets, sent = await record()
+    older = sent[0].message_id
+    context.user_data.update(manual_state())
+    second, _ = again(update, context, "52000 капучино")
+    await messages.text_handler(second, context)
+    assert context.user_data[LAST_WRITE]["first"] == 4170
+    for data in ("card:undo:yes", "card:undo", "card:fix", "card:check"):
+        _, query = await press(context, data, older)
+        query.answer.assert_awaited_once_with(
+            "Кнопки работают только у последней записи", show_alert=True
+        )
+        assert new_markup(query) is None
+        query.message.reply_text.assert_not_awaited()
+        query.message.delete.assert_not_awaited()
+    assert not hasattr(sheets, "undone")  # последняя запись цела
+
+
+async def test_when_telegram_keeps_the_buttons_undo_asks_in_a_message() -> None:
+    _, context, sheets, sent = await record()
+    _, query = await press(context, "card:undo", sent[0].message_id, refuse=True)
+    call = query.message.reply_text.await_args
+    assert call.args[0] == (
+        "↩️ Удалить строку 4169: 48 000 UZS • 🍔 ЕДА (кофе) • VISA 9090 UZS?"
+    )
+    assert buttons(call.kwargs["reply_markup"]) == [
+        [("🗑 Да, удалить", "last:undo:yes"), ("Нет", "last:undo:no")]
+    ]
+    assert not hasattr(sheets, "undone")
 
 
 async def test_no_after_undo_without_groups_brings_back_only_the_actions() -> None:

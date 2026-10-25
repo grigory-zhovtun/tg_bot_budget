@@ -34,6 +34,7 @@ from app.utils.keyboards import (
 logger = logging.getLogger(__name__)
 
 GONE = "Последней записи уже нет"
+STALE = "Кнопки работают только у последней записи"
 
 
 def describe_write(last: dict, icons: dict[str, str] | None) -> str:
@@ -53,17 +54,23 @@ def _shown(markup: InlineKeyboardMarkup) -> InlineKeyboardMarkup | None:
     return markup if markup.inline_keyboard else None
 
 
+async def _dialog(
+    query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, step: str
+) -> None:
+    """«Исправить» и «Проверить»: диалог — новым сообщением, кнопки записи остаются."""
+    start = fix.start_fix if step == "fix" else fix.start_check
+    track_message(context, await start(query.message.reply_text, context))
+
+
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     step = query.data.split(":", 1)[1]  # fix, check, undo, undo:yes, undo:no
-    if step in ("fix", "check"):
-        await query.answer()
-        start = fix.start_fix if step == "fix" else fix.start_check
-        # диалог — новым сообщением, кнопки записи остаются
-        track_message(context, await start(query.message.reply_text, context))
-        return
     if query.data.startswith(CARD):
         await _card_button(update, query, context, step)
+        return
+    if step in ("fix", "check"):
+        await query.answer()
+        await _dialog(query, context, step)
         return
 
     await query.answer()
@@ -100,24 +107,54 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await query.edit_message_text(f"{result}\n{prompt}", reply_markup=_shown(menu))
 
 
+async def _set_buttons(
+    query: CallbackQuery, markup: InlineKeyboardMarkup | None
+) -> bool:
+    """Сменить кнопки сообщения; Telegram отказал — False (кнопки те же — не отказ)."""
+    try:
+        await query.edit_message_reply_markup(reply_markup=markup)
+    except TelegramError as error:
+        if "not modified" in str(error).lower():
+            return True
+        logger.warning("The buttons of a summary were not changed: %s", error)
+        return False
+    return True
+
+
 async def _card_button(
     update: Update, query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE, step: str
 ) -> None:
-    """Кнопки на самой сводке: меняются только кнопки, текст сводки остаётся."""
+    """Кнопки на самой сводке: меняются только кнопки, текст сводки остаётся.
+
+    Работают только у сводки последней записи: на старой «Отменить» удалила бы
+    чужие строки — последнюю запись, а не ту, что на карточке.
+    """
     last = context.user_data.get(LAST_WRITE)
-    if not last:  # бота перезапускали — отменять нечего, кнопки снимаем
-        await query.answer(GONE, show_alert=True)
-        await query.edit_message_reply_markup(reply_markup=None)
+    card = (query.message.chat_id, query.message.message_id)
+    if not last or last.get("menu") != card:
+        # бота перезапускали или карточка не последняя — кнопки снимаем
+        await query.answer(STALE if last else GONE, show_alert=True)
+        await _set_buttons(query, None)
         return
     await query.answer()
+    if step in ("fix", "check"):
+        await _dialog(query, context, step)
+        return
     actions = InlineKeyboardMarkup(
         record_actions(len(last.get("checks", {})), on_card=True)
     )
     if step == "undo":
-        await query.edit_message_reply_markup(reply_markup=undo_confirm(True))
+        if not await _set_buttons(query, undo_confirm(True)):
+            # кнопки сводки не поменялись — спрашиваем, как в меню, сообщением
+            icons = context.bot_data.get("icons")
+            asked = await query.message.reply_text(
+                f"↩️ Удалить {describe_write(last, icons)}?",
+                reply_markup=undo_confirm(),
+            )
+            track_message(context, asked)
         return
     if step == "undo:no":
-        await query.edit_message_reply_markup(reply_markup=actions)
+        await _set_buttons(query, actions)
         return
     result, deleted = await undo_rows(context)
     if deleted:  # строк больше нет — и сводки о них тоже
@@ -127,7 +164,7 @@ async def _card_button(
             logger.debug("The card after undo was not deleted: %s", error)
     else:  # не вышло: можно повторить — кнопки снова, нельзя — без кнопок
         again = actions if context.user_data.get(LAST_WRITE) else None
-        await query.edit_message_reply_markup(reply_markup=again)
+        await _set_buttons(query, again)
     chat = update.effective_chat
     sent = await send_report(
         context.bot, chat.id, note_report(result), send=chat.send_message

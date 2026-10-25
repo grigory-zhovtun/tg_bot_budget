@@ -18,7 +18,7 @@ from telegram.error import TelegramError
 from telegram.ext import ContextTypes
 
 from app import config
-from app.chat_state import keep_messages, state_of, update_state
+from app.chat_state import finish_sweep, keep_messages, state_of, update_state
 from app.domain import local_today
 from app.handlers.analytics import Sent, send_report
 from app.handlers.common import ANCHOR, CHOOSE_SOURCE, app_url
@@ -108,25 +108,40 @@ async def clean(application: Any, chat_id: int, today: date) -> None:
         await update_state(bot_data, chat_id, start=last + 1)
         return
     user_data = application.user_data.get(chat_id, {})
-    anchor = user_data.get(ANCHOR) if state.cards else None
-    spared = {*state.keep, anchor}
+    spared = set(state.keep)
+    if state.cards:
+        anchor = user_data.get(ANCHOR)
+        if anchor is None or anchor <= last:
+            # клавиатура держится на вчерашнем (или неизвестном) сообщении: сначала
+            # новое с клавиатурой, потом уборка — иначе вчерашние копились бы
+            anchor = await _new_anchor(application, chat_id) or anchor
+        if anchor is not None:
+            spared.add(anchor)
     numbers = [n for n in range(state.start, last + 1) if n not in spared]
     await _delete(application.bot, chat_id, numbers)
-    await update_state(
-        bot_data, chat_id, start=last + 1, keep=tuple(n for n in state.keep if n > last)
-    )
+    await finish_sweep(bot_data, chat_id, last)
     if "bot_messages" in user_data:  # удалённые незачем удалять снова
         user_data["bot_messages"] = [n for n in user_data["bot_messages"] if n > last]
     logger.info("Chat %s: swept %d messages up to %d", chat_id, len(numbers), last)
-    if state.cards and anchor is None:  # клавиатура могла уйти вместе с сообщением
-        source, keyboard = _cards(application, chat_id)
+
+
+async def _new_anchor(application: Any, chat_id: int) -> int | None:
+    """Без звука — «💳 карта» с клавиатурой карт; не отправилось — None."""
+    source, keyboard = _cards(application, chat_id)
+    try:
         message = await application.bot.send_message(
             chat_id,
             f"💳 {source}" if source else CHOOSE_SOURCE,
             reply_markup=keyboard,
             disable_notification=True,
         )
-        application.user_data[chat_id][ANCHOR] = message.message_id
+    except TelegramError as error:
+        logger.warning(
+            "Chat %s: the cards keyboard was not sent again: %s", chat_id, error
+        )
+        return None
+    application.user_data[chat_id][ANCHOR] = message.message_id
+    return message.message_id
 
 
 async def sweep(application: Any, today: date | None = None) -> None:

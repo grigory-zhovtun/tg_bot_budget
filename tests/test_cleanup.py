@@ -12,7 +12,7 @@ from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.error import BadRequest
 
 from app import config
-from app.chat_state import ChatState
+from app.chat_state import ChatState, keep_messages
 from app.handlers import cleanup
 from app.handlers.common import ANCHOR
 from app.message_log import MessageLog
@@ -113,14 +113,46 @@ async def test_without_a_start_it_only_remembers_where_to_begin() -> None:
     assert app.bot_data["chats"][2] == ChatState(start=61)
 
 
-async def test_the_message_holding_the_cards_keyboard_stays() -> None:
+async def test_todays_cards_keyboard_message_stays_without_a_new_one() -> None:
     app = application(
         {1: ChatState(cards=True, start=100)}, logged((1, 130, at(25, 9)))
     )
-    app.user_data[1] = {ANCHOR: 120}
+    app.user_data[1] = {ANCHOR: 135}  # утренняя сводка с клавиатурой — после полуночи
     await cleanup.sweep(app, TODAY)
-    assert 120 not in deleted(app) and 119 in deleted(app)
+    assert deleted(app) == list(range(100, 131))
     app.bot.send_message.assert_not_awaited()
+
+
+async def test_yesterdays_cards_keyboard_message_is_replaced_first() -> None:
+    app = application({2: ChatState(cards=True, start=50)}, logged((2, 60, at(25, 9))))
+    app.user_data[2] = {ANCHOR: 55}
+    order: list[str] = []
+
+    def anchor(*args: Any, **kwargs: Any) -> SimpleNamespace:
+        order.append("anchor")
+        return sent_message()
+
+    async def delete(chat_id: int, numbers: list[int]) -> None:
+        order.append("delete")
+
+    app.bot.send_message.side_effect = anchor
+    app.bot.delete_messages.side_effect = delete
+    await cleanup.sweep(app, TODAY)
+    assert order == ["anchor", "delete"]  # клавиатура не пропадает с экрана
+    assert 55 in deleted(app, 2)  # вчерашняя карточка не копится
+    assert app.bot.send_message.await_args.kwargs["disable_notification"] is True
+    assert app.user_data[2][ANCHOR] > 60
+
+
+async def test_a_keep_added_during_the_sweep_survives() -> None:
+    app = application({1: ChatState(start=100)}, logged((1, 140, at(25, 21))))
+
+    async def busy(chat_id: int, numbers: list[int]) -> None:
+        await keep_messages(app.bot_data, 1, [150])  # «⌨️ Карты скрыты» в 8:00:01
+
+    app.bot.delete_messages.side_effect = busy
+    await cleanup.sweep(app, TODAY)
+    assert app.bot_data["chats"][1] == ChatState(start=141, keep=(150,))
 
 
 async def test_an_unknown_cards_anchor_is_sent_again_quietly() -> None:
