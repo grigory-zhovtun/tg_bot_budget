@@ -635,8 +635,10 @@ async def save_rows(
     # после записи под сводкой — «✏️ Исправить запись» и «↩️ Отменить запись»,
     # а если есть строки с пометкой — «🔎 Проверить»
     checks = context.user_data[LAST_WRITE]["checks"] if rows else {}
-    # единственную строку с пометкой проверяем прямо в меню под сводкой
-    check_now = fix.inline_check(context) if len(rows) == 1 and checks else None
+    # единственную строку с пометкой проверяем прямо в меню под сводкой — если
+    # включены группы; без них вопрос с группами только по «🔎 Проверить»
+    single = len(rows) == 1 and checks and keys.groups
+    check_now = fix.inline_check(context) if single else None
     menu = await show_main_menu(
         chat,
         context,

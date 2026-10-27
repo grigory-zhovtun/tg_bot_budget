@@ -10,6 +10,7 @@ import pytest
 from telegram import ReplyKeyboardMarkup
 
 from app import config
+from app.chat_state import ChatState
 from app.domain import Catalog, MerchantBook
 from app.handlers import messages
 from app.handlers import sms as sms_chat
@@ -119,6 +120,20 @@ async def test_new_merchant_gets_one_ai_question_and_the_check() -> None:
         "ИИ предлагает: 🍔 ЕДА / кафе. Верно?"
     )
     assert ai.forgotten == 1 and ai.calls == 0
+
+
+async def test_new_merchant_without_groups_waits_behind_the_check_button() -> None:
+    ai = RulesAI(answer={"OOO SHAVI CAFE": ("🍔 ЕДА", "кафе")})
+    update, context, sheets = make_chat(PURCHASE, {}, ai)
+    context.bot_data["chats"] = {1: ChatState()}  # группы и карты выключены
+    await messages.text_handler(update, context)
+    # вопрос «Что это?» с группами — только по кнопке «🔎 Проверить» на карточке
+    [card] = update.effective_chat.send_message.await_args_list
+    assert "🆕 OOO SHAVI CAFE>TASHKENT" in card.args[0]
+    assert [
+        [button.callback_data for button in row]
+        for row in card.kwargs["reply_markup"].inline_keyboard
+    ] == [["card:check"], ["card:fix", "card:undo"]]
 
 
 async def test_several_sms_with_a_code_are_written_in_time_order() -> None:
