@@ -242,6 +242,25 @@ def test_amount_memory_tells_coffee_from_lunch_in_one_cafe() -> None:
     assert (target(row), row.flag) == (("🍔 ЕДА", "кафе"), None)  # 5 из 6 — кафе
 
 
+def test_a_shop_with_a_mixed_sum_follows_the_latest_decision() -> None:
+    # утренний кофе за 48 000: бот когда-то писал «кафе», владелец поправил на «кофе»
+    lunches = [
+        fact_row(f"0{day}.10.2026", "🍔 ЕДА", "кафе", 150000 + day, "OOO SHAVI CAFE")
+        for day in range(1, 8)
+    ]
+    coffee = [
+        fact_row("09.10.2026", "🍔 ЕДА", "кафе", 48000, "OOO SHAVI CAFE"),
+        fact_row("11.10.2026", "🍔 ЕДА", "кофе", 48000, "OOO SHAVI CAFE"),
+        fact_row("13.10.2026", "🍔 ЕДА", "кафе", 48000, "OOO SHAVI CAFE"),
+        fact_row("13.10.2026", "🍔 ЕДА", "кофе", 48000, "OOO SHAVI CAFE"),  # позже
+        fact_row("12.10.2026", "🍔 ЕДА", "кафе", 48000, "OOO SHAVI CAFE"),  # выписка
+    ]
+    fact = [HEADER, *coffee, *lunches]
+    book, memory = MerchantBook.from_sheet(fact), AmountMemory.from_sheet(fact, TODAY)
+    [row], _ = rows_of(PURCHASE, book=book, memory=memory)  # 48 000
+    assert (target(row), row.flag) == (("🍔 ЕДА", "кофе"), None)
+
+
 @pytest.mark.parametrize(
     ("text", "expected", "flag", "comment", "direction"),
     [

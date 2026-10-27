@@ -6,7 +6,7 @@
 
 import re
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from enum import StrEnum
 from typing import Any
@@ -137,16 +137,24 @@ class AmountMemory:
     """Категории расходов fact за 60 дней по (карта, магазин, сумма).
 
     Магазин "" — строки без названия: так узнаётся кофе по QR за ту же сумму.
+    latest — статья самой поздней такой строки: у магазина с названием, если
+    статьи расходятся, решает последнее решение владельца (утренний кофе за
+    48 000 в кафе, где раньше обедали за 150 000).
     """
 
     targets: dict[tuple[str, str, float], frozenset[tuple[str, str]]]
+    latest: dict[tuple[str, str, float], tuple[str, str]] = field(default_factory=dict)
 
     @classmethod
     def from_sheet(cls, rows: list[list[Any]], today: date) -> "AmountMemory":
         """Лист fact как есть (первая строка — заголовок)."""
         found: dict[tuple[str, str, float], set[tuple[str, str]]] = defaultdict(set)
+        # ключ → (день, номер строки) самой поздней строки и её статья
+        latest: dict[
+            tuple[str, str, float], tuple[tuple[date, int], tuple[str, str]]
+        ] = {}
         start = today - timedelta(days=MEMORY_DAYS)
-        for row in rows[1:]:
+        for number, row in enumerate(rows[1:]):
             cells = [*row[:8], *[""] * (8 - len(row[:8]))]
             day, amount = _cell_day(cells[0]), _cell_amount(cells[3])
             target = (str(cells[1]).strip(), str(cells[2]).strip())
@@ -158,13 +166,23 @@ class AmountMemory:
             name = "" if _nameless(comment) else merchant_key(comment)
             if name is None:
                 continue  # перевод, снятие и прочие служебные строки
-            found[(str(cells[7]).strip(), name, round(amount, 2))].add(target)
-        return cls({key: frozenset(value) for key, value in found.items()})
+            key = (str(cells[7]).strip(), name, round(amount, 2))
+            found[key].add(target)
+            if key not in latest or (day, number) > latest[key][0]:
+                latest[key] = ((day, number), target)
+        return cls(
+            {key: frozenset(value) for key, value in found.items()},
+            {key: target for key, (_, target) in latest.items()},
+        )
 
     def find(self, source: str, name: str, amount: float) -> tuple[str, str] | None:
-        """Категория, если у всех таких строк она одна; name "" — без магазина."""
-        targets = self.targets.get((source, name, round(amount, 2)), frozenset())
-        return next(iter(targets)) if len(targets) == 1 else None
+        """Категория: у всех таких строк одна — она; разные — у магазина с
+        названием последняя, без названия (QR) — никакая: name "" — без магазина."""
+        key = (source, name, round(amount, 2))
+        targets = self.targets.get(key, frozenset())
+        if len(targets) == 1:
+            return next(iter(targets))
+        return self.latest.get(key) if name and targets else None
 
 
 def _merchant_target(
