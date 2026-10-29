@@ -147,7 +147,7 @@ def test_the_current_month_pace_and_money_come_from_the_dashboard() -> None:
     )
     lines = advice_numbers(context(budget=budget, today=date(2026, 10, 2))).splitlines()
     assert "Потрачено за 1 дн.: 400000 UZS при плане 100000 UZS" in lines
-    assert "Можно в день до аванса 15-го: 353846 UZS" in lines
+    assert "Можно в день до аванса 15-го: 328571 UZS" in lines
     assert any(
         line.startswith("Сумы на картах и наличными: 4600000 UZS") for line in lines
     )

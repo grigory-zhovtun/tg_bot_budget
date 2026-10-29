@@ -54,15 +54,15 @@ def test_plan_status_of_the_written_subcategory(
 
 
 def test_today_line_left_over_and_no_limit() -> None:
-    day = budget(date(2026, 10, 2), OVERSPENT)  # 4,6 млн на 13 дней до аванса
-    assert today_line(day) == "💸 На сегодня осталось 353 846 из 353 846"
+    day = budget(date(2026, 10, 2), OVERSPENT)  # 4,6 млн на 14 дней по аванс
+    assert today_line(day) == "💸 На сегодня осталось 328 571 из 328 571"
     spent = replace(day, spent_today=400_000)
     assert today_line(spent) == (
-        "💸 Сегодня сверх лимита на 46 154 (лимит 353 846 в день до аванса 15-го)"
+        "💸 Сегодня сверх лимита на 71 429 (лимит 328 571 в день до аванса 15-го)"
     )
     broke = replace(day, limit=-30_000)
     assert today_line(broke) == (
-        "💸 Лимита на сегодня нет: до аванса 15-го не хватает 390 000"
+        "💸 Лимита на сегодня нет: до аванса 15-го не хватает 420 000"
     )
 
 
@@ -78,7 +78,7 @@ def test_service_reads_the_month_tab_after_the_write() -> None:
         "🔴 инвентарь: 720 000 из 500 000 — сверх плана на 220 000",
         "🟢 🍽️ кафе: 0,00 из 2,60 млн (0%)",  # обе суммы в одних единицах
         "⚪ такси: нет в плане месяца",
-        "💸 На сегодня осталось 353 846 из 353 846",
+        "💸 На сегодня осталось 328 571 из 328 571",
     ]
     assert AnalyticsService(Sheets({})).write_feedback(
         ["кафе"], {}, date(2026, 11, 1)
