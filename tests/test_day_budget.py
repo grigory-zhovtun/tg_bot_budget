@@ -104,14 +104,14 @@ def charge(day: date, amount: float, comment: str, cur: str = "UZS") -> list[Any
 
 def test_first_day_limit_lasts_until_the_advance() -> None:
     first = budget(date(2026, 10, 1))
-    # 5 млн сумов на 14 дней до аванса 15-го: доллары и план в лимит не входят
+    # 5 млн сумов на 15 дней, по день аванса 15-го: доллары и план не входят
     assert (first.sums, first.bills) == (5_000_000, 0)
     assert (first.payday, first.payday_name, first.days_left) == (
         date(2026, 10, 15),
         "Аванс",
-        14,
+        15,
     )
-    assert first.limit == pytest.approx(5_000_000 / 14)
+    assert first.limit == pytest.approx(5_000_000 / 15)
     assert first.plan_per_day == pytest.approx(100_000)
     assert first.yesterday_limit is None  # 30 сентября — прошлый месяц
     assert first.plan_gap is None
@@ -121,9 +121,9 @@ def test_spending_lowers_the_limit_until_the_advance() -> None:
     second = budget(
         date(2026, 10, 2), fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000)
     )
-    assert second.limit == pytest.approx(4_600_000 / 13)
+    assert second.limit == pytest.approx(4_600_000 / 14)
     assert second.yesterday_spent == pytest.approx(400_000)
-    assert second.yesterday_limit == pytest.approx(5_000_000 / 14)
+    assert second.yesterday_limit == pytest.approx(5_000_000 / 15)
     # траты дня против плана: 400 000 при плане 100 000 в день
     assert second.plan_gap == pytest.approx(300_000)
 
@@ -133,14 +133,14 @@ def test_on_the_advance_day_before_it_comes_the_limit_lasts_until_the_salary() -
     assert (day.payday, day.payday_name, day.days_left) == (
         date(2026, 10, 30),
         "ЗП",
-        15,
+        16,
     )
-    assert day.limit == pytest.approx(5_000_000 / 15)
+    assert day.limit == pytest.approx(5_000_000 / 16)
 
 
 def test_the_advance_that_came_counts_from_the_next_morning() -> None:
     day = budget(date(2026, 10, 16), ADVANCE_PAID)
-    assert day.limit == pytest.approx(7_000_000 / 14)
+    assert day.limit == pytest.approx(7_000_000 / 15)
 
 
 def test_after_the_last_salary_the_limit_lasts_until_next_months_advance() -> None:
@@ -149,9 +149,9 @@ def test_after_the_last_salary_the_limit_lasts_until_next_months_advance() -> No
     assert (last.payday, last.payday_name, last.days_left) == (
         date(2026, 11, 15),
         "Аванс",
-        15,
+        16,
     )
-    assert last.limit == pytest.approx(17_000_000 / 15)
+    assert last.limit == pytest.approx(17_000_000 / 16)
 
 
 def test_without_salaries_in_sums_the_limit_lasts_until_the_month_end() -> None:
@@ -165,10 +165,44 @@ def test_only_a_salary_row_sets_the_limits_horizon() -> None:
     refund = [*ITEMS, ("Возврат долга", 3, 1_000_000, "UZS")]
     day = budget(date(2026, 10, 2), items=refund)
     assert (day.payday, day.payday_name) == (date(2026, 10, 15), "Аванс")
-    assert day.limit == pytest.approx(5_000_000 / 13)
+    assert day.limit == pytest.approx(5_000_000 / 14)
     salary = fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000)
     last = budget(date(2026, 10, 31), ADVANCE_PAID, RENT_PAID, salary, items=refund)
     assert (last.payday, last.payday_name) == (date(2026, 11, 15), "Аванс")
+
+
+def test_the_day_before_the_salary_covers_the_salary_day_too() -> None:
+    # зарплату могут начислить и вечером: сумы делятся на сегодня и на её день
+    day = budget(date(2026, 10, 29), ADVANCE_PAID, RENT_PAID)
+    assert (day.payday, day.days_left) == (date(2026, 10, 30), 2)
+    assert day.limit == pytest.approx(7_000_000 / 2)
+
+
+def test_payments_on_the_salary_day_come_off_the_limit() -> None:
+    # интернет и подписка 30-го спишутся раньше, чем придёт зарплата
+    bills = [*ITEMS, ("Интернет", 30, -300_000, "UZS")]
+    video = [
+        charge(date(2026, 8, 30), 40_000, "VIDEO CLUB"),
+        charge(date(2026, 9, 30), 40_000, "VIDEO CLUB"),
+    ]
+    day = budget(date(2026, 10, 29), ADVANCE_PAID, RENT_PAID, *video, items=bills)
+    assert (day.bills, day.subscriptions) == (
+        pytest.approx(340_000),
+        pytest.approx(40_000),
+    )
+    assert day.limit == pytest.approx((6_920_000 - 340_000) / 2)
+
+
+def test_next_months_advance_day_counts_too() -> None:
+    salary = fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000)
+    paper = [
+        charge(date(2026, 9, 15), 20_000, "PAPER PRESS"),
+        charge(date(2026, 10, 15), 20_000, "PAPER PRESS"),
+    ]
+    last = budget(date(2026, 10, 31), ADVANCE_PAID, RENT_PAID, salary, *paper)
+    # с 31 октября по 15 ноября включительно; подписка 15 ноября — в день аванса
+    assert (last.payday, last.days_left) == (date(2026, 11, 15), 16)
+    assert last.bills == pytest.approx(20_000)
 
 
 BILLS = [*ITEMS, ("Интернет", 10, -300_000, "UZS"), ("Кружок", 20, -500_000, "UZS")]
@@ -178,7 +212,7 @@ def test_list_payments_in_sums_before_the_salary_come_off_the_limit() -> None:
     day = budget(date(2026, 10, 5), items=BILLS)
     # интернет 10-го — до аванса 15-го, кружок 20-го — после; подписок нет
     assert (day.bills, day.subscriptions) == (pytest.approx(300_000), 0)
-    assert day.limit == pytest.approx(4_700_000 / 10)
+    assert day.limit == pytest.approx(4_700_000 / 11)
     paid = budget(
         date(2026, 10, 7),
         fact_row(date(2026, 10, 6), "🏚️ ДОМ", "интернет", 300_000),
@@ -202,7 +236,7 @@ def test_a_subscription_in_sums_before_the_salary_comes_off_the_limit() -> None:
         pytest.approx(50_000),
         pytest.approx(50_000),
     )
-    assert day.limit == pytest.approx((6_900_000 - 50_000) / 14)
+    assert day.limit == pytest.approx((6_900_000 - 50_000) / 15)
 
 
 def test_a_paid_or_a_dollar_subscription_does_not() -> None:
@@ -223,12 +257,12 @@ def test_after_the_last_salary_next_months_subscriptions_come_off() -> None:
     salary = fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000)
     last = budget(date(2026, 10, 31), ADVANCE_PAID, RENT_PAID, salary, *news)
     assert last.bills == pytest.approx(30_000)  # 5 ноября — до аванса 15-го
-    assert last.limit == pytest.approx((16_940_000 - 30_000) / 15)
+    assert last.limit == pytest.approx((16_940_000 - 30_000) / 16)
 
 
 def test_when_the_sums_do_not_cover_the_payments_there_is_no_limit() -> None:
     spree = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 6_000_000)
-    assert budget(date(2026, 10, 2), spree).limit == pytest.approx(-1_000_000 / 13)
+    assert budget(date(2026, 10, 2), spree).limit == pytest.approx(-1_000_000 / 14)
 
 
 def test_every_day_of_the_month_keeps_its_spending_and_limit() -> None:
@@ -243,9 +277,9 @@ def test_every_day_of_the_month_keeps_its_spending_and_limit() -> None:
         (date(2026, 10, 2), 50_000),
         (date(2026, 10, 3), 30_000),
     ]
-    # каждый день — сумы на вечер накануне на дни до аванса 15-го
+    # каждый день — сумы на вечер накануне на дни по аванс 15-го
     assert [day.limit for day in third.history] == pytest.approx(
-        [5_000_000 / 14, 4_600_000 / 13, 4_550_000 / 12]
+        [5_000_000 / 15, 4_600_000 / 14, 4_550_000 / 13]
     )
     assert third.plan_gap == pytest.approx(250_000)  # 450 000 при плане 200 000
     # те же числа, что в утреннем сообщении: вчера против лимита и лимит на сегодня
@@ -262,7 +296,7 @@ def test_on_the_first_the_history_is_only_today() -> None:
     assert (today.day, today.spent, today.limit) == (
         date(2026, 10, 1),
         0,
-        pytest.approx(5_000_000 / 14),
+        pytest.approx(5_000_000 / 15),
     )
 
 
@@ -277,7 +311,7 @@ def test_payment_from_the_list_is_not_an_expense_of_the_day() -> None:
 @pytest.mark.parametrize("goal", [6_000_000, 500_000, None])
 def test_the_savings_goal_does_not_change_the_limit(goal: float | None) -> None:
     first = budget(date(2026, 10, 1), goal=goal)
-    assert first.limit == pytest.approx(5_000_000 / 14)
+    assert first.limit == pytest.approx(5_000_000 / 15)
     assert first.growth == pytest.approx(4_100_000)
 
 
@@ -293,10 +327,10 @@ def test_frozen_is_the_dollar_card_without_dollar_payments_ahead() -> None:
     ]
     took = budget(date(2026, 10, 10), *exchange)
     assert (took.frozen, took.frozen_change) == (500, -100)
-    # доллары стали сумами: лимит до аванса вырос — (5 + 1,2) млн на 5 дней
+    # доллары стали сумами: лимит до аванса вырос — (5 + 1,2) млн на 6 дней
     assert (calm.limit, took.limit) == (
-        pytest.approx(5_000_000 / 5),
-        pytest.approx(6_200_000 / 5),
+        pytest.approx(5_000_000 / 6),
+        pytest.approx(6_200_000 / 6),
     )
     assert "🧊 Заморожено: 500,00 USD ≈ 6,00 млн (с 1-го числа −100,00 USD)" in (
         format_day_budget(took)
@@ -320,10 +354,10 @@ def test_morning_message() -> None:
     )
     assert text.splitlines() == [
         "☀️ Пятница, 2 октября",
-        "💸 Можно тратить в день до аванса 15-го: 353 846 сум",
+        "💸 Можно тратить в день до аванса 15-го: 328 571 сум",
         "   на сумовых картах 4 600 000",
         "⚠️ Сверх плана на 300 000 за 1 день",
-        "Вчера: 400 000 при лимите 357 143 — больше на 42 857",
+        "Вчера: 400 000 при лимите 333 333 — больше на 66 667",
         "🧊 Заморожено: 600,00 USD ≈ 7,20 млн",
         "💳 Сумы 4,60 млн — до конца месяца хватит",
         "🔴 Сверх плана: инвентарь 720 000 из 500 000",
@@ -334,7 +368,7 @@ def test_morning_message() -> None:
 def test_today_adds_what_is_spent_and_left() -> None:
     coffee = fact_row(date(2026, 10, 2), "🍔 ЕДА", "кафе", 30_000)
     text = format_day_budget(budget(date(2026, 10, 2), OVERSPENT, coffee), now=True)
-    assert "   потрачено 30 000 — осталось 323 846" in text.splitlines()
+    assert "   потрачено 30 000 — осталось 298 571" in text.splitlines()
 
 
 def test_no_limit_left_and_goal_lines() -> None:
@@ -459,8 +493,8 @@ RENT_PAID = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата
 def test_an_early_salary_is_not_counted_twice() -> None:
     early = fact_row(date(2026, 10, 29), "💰 ДОХОДЫ", "зарплата", 10_000_000)
     day = budget(date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, early)
-    # зарплата уже на картах: 17 млн сумов на 16 дней до аванса 15 ноября
-    assert day.limit == pytest.approx(17_000_000 / 16)
+    # зарплата уже на картах: 17 млн сумов на 17 дней по аванс 15 ноября
+    assert day.limit == pytest.approx(17_000_000 / 17)
     assert day.upcoming == ()
 
 
@@ -474,8 +508,8 @@ def test_half_a_salary_a_week_early_leaves_only_the_rest_ahead() -> None:
 
 def test_a_late_salary_stays_ahead() -> None:
     day = budget(date(2026, 10, 31), ADVANCE_PAID, RENT_PAID)
-    # опоздавшую зарплату лимит не ждёт: 7 млн сумов на 15 дней до аванса 15 ноября
-    assert day.limit == pytest.approx(7_000_000 / 15)
+    # опоздавшую зарплату лимит не ждёт: 7 млн сумов на 16 дней по аванс 15 ноября
+    assert day.limit == pytest.approx(7_000_000 / 16)
     assert "📅 Впереди: ⏳ 30.10 ЗП +10,00 млн" in format_day_budget(day)
 
 
@@ -483,7 +517,7 @@ def test_a_salary_that_came_today_keeps_the_morning_limit() -> None:
     today = fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000)
     day = budget(date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, today)
     # лимит с утра: зарплаты на картах ещё нет — до следующей, аванса 15 ноября
-    assert day.limit == pytest.approx(7_000_000 / 16)
+    assert day.limit == pytest.approx(7_000_000 / 17)
     assert day.upcoming == ()  # а в «Впереди» её уже нет
 
 
