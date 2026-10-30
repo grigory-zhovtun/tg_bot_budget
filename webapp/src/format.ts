@@ -62,6 +62,18 @@ export function deviceDay(now: Date = new Date()): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }
 
+/** Сегодня по боту сейчас: часы телефона, сдвинутые на offset бота от UTC (минут).
+ * Без сдвига (справочник из старой копии) или с часами позади — today справочника. */
+export function botDay(
+  today: string,
+  offset: number | undefined,
+  now: number = Date.now(),
+): string {
+  if (offset === undefined) return today;
+  const day = new Date(now + offset * 60_000).toISOString().slice(0, 10);
+  return day > today ? day : today;
+}
+
 /** «2026-10-10» ± дни → ISO-дата; считаем в UTC, без часовых поясов. */
 export function shiftDay(isoDay: string, days: number): string {
   const date = new Date(`${isoDay}T00:00:00Z`);

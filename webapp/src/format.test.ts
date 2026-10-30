@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  botDay,
   dayLabel,
   deviceDay,
   daysBetween,
@@ -73,6 +74,25 @@ describe("deviceDay", () => {
   it("is the date on the phone clock, not in UTC", () => {
     expect(deviceDay(new Date(2026, 9, 17, 0, 30))).toBe("2026-10-17");
     expect(deviceDay(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
+  });
+});
+
+describe("botDay", () => {
+  it("is the bot's date now: the phone clock moved by the bot's offset", () => {
+    // 19:30 UTC — уже 00:30 следующего дня в Ташкенте (UTC+5)
+    const late = Date.parse("2026-10-11T19:30:00Z");
+    expect(botDay("2026-10-10", 300, late)).toBe("2026-10-12");
+    expect(botDay("2026-10-10", 300, Date.parse("2026-10-10T12:00:00Z"))).toBe(
+      "2026-10-10",
+    );
+  });
+
+  it("keeps the catalog's day without an offset or with a clock behind it", () => {
+    const late = Date.parse("2026-10-11T19:30:00Z");
+    expect(botDay("2026-10-10", undefined, late)).toBe("2026-10-10");
+    expect(botDay("2026-10-10", 300, Date.parse("2026-10-01T12:00:00Z"))).toBe(
+      "2026-10-10",
+    );
   });
 });
 

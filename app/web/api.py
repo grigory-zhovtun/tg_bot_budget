@@ -12,6 +12,7 @@ from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from gspread.exceptions import WorksheetNotFound
 from pydantic import ValidationError
@@ -1220,10 +1221,12 @@ def routes(application: Application) -> list[Route]:
         context = user_context(application, user.id)
         sources: list[str] = context.bot_data.get("sources", [])
         chosen = context.user_data.get("source") or context.bot_data.get("last_source")
+        now = datetime.now(ZoneInfo(config.ANALYTICS_TIMEZONE))
         body = BootstrapOut(
             user=UserOut(id=user.id, first_name=user.first_name),
             bot_username=application.bot.username or "",
-            today=local_today(config.ANALYTICS_TIMEZONE),
+            today=now.date(),
+            utc_offset=(now.utcoffset() or timedelta()) // timedelta(minutes=1),
             default_source=chosen if chosen in sources else next(iter(sources), None),
             sources=[SourceOut(name=s, currency=currency_of(s)) for s in sources],
             groups=groups_out(context.bot_data),
@@ -1239,10 +1242,8 @@ def routes(application: Application) -> list[Route]:
                 {str(e["loc"][0]) if e["loc"] else "body" for e in error.errors()}
             )
         context = user_context(application, user.id)
-        today = local_today(config.ANALYTICS_TIMEZONE)
-        if bad := check_entry(entry, context.bot_data, today):
-            return validation_error(bad)
-
+        # записанное — «уже записано», даже если справочник или окно дат с тех пор
+        # поменялись: трата могла ждать на телефоне, пока не было связи
         fingerprint = f"app:{entry.entry_id}"
         if seen := seen_input(context, fingerprint):
             first, last = seen["rows"]
@@ -1250,6 +1251,9 @@ def routes(application: Application) -> list[Route]:
                 status="duplicate", rows=RowsOut(first=first, last=last), lines=[]
             )
             return JSONResponse(same.model_dump(mode="json"))
+        today = local_today(config.ANALYTICS_TIMEZONE)
+        if bad := check_entry(entry, context.bot_data, today):
+            return validation_error(bad)
         pending: set[str] = context.user_data.setdefault(PENDING, set())
         if fingerprint in pending:
             return error_response(409, "in_progress", "Эта запись ещё сохраняется")
@@ -1265,7 +1269,9 @@ def routes(application: Application) -> list[Route]:
                 entry.day or today,
             )
             chat = private_chat(application.bot, user.id)
-            result = await save_rows(context, chat, [row], [], fingerprint)
+            result = await save_rows(
+                context, chat, [row], [], fingerprint, notify_failure=False
+            )
         finally:
             pending.discard(fingerprint)
         if result.first is None or result.last is None:

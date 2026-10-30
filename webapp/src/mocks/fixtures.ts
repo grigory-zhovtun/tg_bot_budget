@@ -18,6 +18,7 @@ export const bootstrapFixture: Bootstrap = {
   user: { id: 1, first_name: "Тест" },
   bot_username: "budget_test_bot",
   today: "2026-10-10",
+  utc_offset: 300,
   default_source: "VISA 9090 UZS",
   sources: [
     { name: "VISA 9090 UZS", currency: "UZS" },

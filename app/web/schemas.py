@@ -48,6 +48,7 @@ class BootstrapOut(ApiModel):
     user: UserOut
     bot_username: str
     today: date
+    utc_offset: int  # минут к востоку от UTC у бота: «сегодня по боту» в момент нажатия
     default_source: str | None
     sources: list[SourceOut]
     groups: list[GroupOut]
