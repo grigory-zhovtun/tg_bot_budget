@@ -228,6 +228,24 @@ describe("DashboardScreen", () => {
     ]);
   });
 
+  it("on the salary day the daily chart says tomorrow's limit", async () => {
+    // «можно X в день» у графика — то же «с завтра», что в «Сегодня»
+    const user = userEvent.setup();
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue(SALARY_DAY);
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    await show(user, "Траты");
+    expect(screen.getByText("можно 612 903 в день")).toBeTruthy();
+  });
+
+  it("says the advance came when it stands in for the salary", async () => {
+    const dashboard = vi
+      .fn<Api["dashboard"]>()
+      .mockResolvedValue({ ...SALARY_DAY, came: "Пришёл аванс" });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    const today = await screen.findByRole("region", { name: "Можно сегодня" });
+    expect(lines(today)[0]).toBe("✓ Пришёл аванс 10 000 000");
+  });
+
   it("on the salary day says when there is no limit from tomorrow either", async () => {
     const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
       ...SALARY_DAY,

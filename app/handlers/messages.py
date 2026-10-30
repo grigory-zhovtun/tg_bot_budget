@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -482,23 +483,31 @@ def record_blocks(
 async def _plan_feedback(
     context: ContextTypes.DEFAULT_TYPE, rows: Sequence[SheetRow]
 ) -> Feedback:
-    """Статус статей месяца и остаток на сегодня; ошибка не мешает записи."""
+    """Статус статей месяца и остаток на сегодня; запись дохода этого месяца — «💸 С
+    завтра можно …», если сегодня пришла зарплата. Ошибка не мешает записи."""
     analytics = context.bot_data.get("analytics_service")
     today = local_today(config.ANALYTICS_TIMEZONE)
+    this_month = [
+        row
+        for row in rows
+        if (row.day.year, row.day.month) == (today.year, today.month)
+    ]
     spent = [
         row.subcategory
-        for row in rows
+        for row in this_month
         if row.category not in (INCOME_GROUP, TRANSFERS_GROUP)
-        and (row.day.year, row.day.month) == (today.year, today.month)
     ]
-    if analytics is None or not spent:
+    salary = any(row.category == INCOME_GROUP for row in this_month)
+    if analytics is None or not (spent or salary):
         return Feedback([], [])
+    icons = context.bot_data.get("icons")
+    feedback = (
+        partial(analytics.write_feedback, list(dict.fromkeys(spent)), icons)
+        if spent
+        else partial(analytics.write_feedback, [], icons, salary_day_only=True)
+    )
     try:
-        return await asyncio.to_thread(
-            analytics.write_feedback,
-            list(dict.fromkeys(spent)),
-            context.bot_data.get("icons"),
-        )
+        return await asyncio.to_thread(feedback)
     except Exception:
         logger.exception("Plan feedback failed")
         return Feedback([], [])

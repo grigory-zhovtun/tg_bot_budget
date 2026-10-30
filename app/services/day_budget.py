@@ -50,7 +50,7 @@ from app.services.analytics_service import (
     plan_lines,
 )
 from app.services.calendar import CalendarRecord, calendar_state
-from app.services.forecast import currency_forecast
+from app.services.forecast import PACE_DAYS, currency_forecast
 from app.services.receipts import NOTHING, Receipt, closed, match_receipts, remaining
 from app.services.runway import Runway, horizon_runway
 
@@ -292,6 +292,13 @@ def _payday(
     return _on(_next_month(first), salaries[0].day), salaries[0].name
 
 
+def came_word(name: str) -> str:
+    """«пришла ЗП»; аванс вместо основной зарплаты (правило 1.1) — «пришёл аванс»."""
+    if ADVANCE.search(name) and not MAIN_SALARY.search(name):
+        return "пришёл аванс"
+    return "пришла ЗП"
+
+
 def _sums_payday(
     salaries: Sequence[ForecastItem], receipts: Mapping[int, Receipt], today: date
 ) -> tuple[date | None, str]:
@@ -304,8 +311,13 @@ def _sums_payday(
         return None, ""
     first = today.replace(day=1)
     for item in salaries:
-        if not closed(item, receipts.get(item.row, NOTHING)):
-            return max(_on(first, item.day), today), item.name
+        receipt = receipts.get(item.row, NOTHING)
+        if closed(item, receipt):
+            continue
+        due = _on(first, item.day)
+        if due < today and receipt.received:
+            continue  # опоздавшая с частью денег — как у лимита, ждём следующую
+        return max(due, today), item.name
     return _on(_next_month(first), salaries[0].day), salaries[0].name
 
 
@@ -484,8 +496,8 @@ def day_budget(
     сверке с fact (services.receipts): к утру дня — для лимита и заморозки; на сейчас —
     для «Впереди», трат дня и «Сумы». «Сумы» (services.runway) — по дням до
     зарплаты, которая ещё не пришла: сумы сейчас, темп и траты сегодня — из модели
-    прогноза (services.forecast) с записями календаря records, авансы, платежи и
-    подписки — в их дни.
+    прогноза (services.forecast) с записями календаря records, авансы, платежи,
+    подписки и неоплаченные разовые записи в сумах — в их дни.
     previous — вкладка прошлого месяца (None — её нет): её недополученные
     поступления «Впереди» показывает первыми.
     """
@@ -567,28 +579,28 @@ def day_budget(
     morning = _ahead(items, early)
     now = match_receipts(frame, items, first, today)
     paid = frozenset(index for receipt in now.values() for index in receipt.operations)
-    # зарплата пришла сегодня: строка закрыта на сейчас, а к утру — нет
-    came = next(
-        (
-            item
-            for item in salaries
-            if closed(item, now.get(item.row, NOTHING))
-            and not closed(item, early.get(item.row, NOTHING))
-        ),
-        None,
-    )
+    # зарплата пришла сегодня: строка закрыта на сейчас, а к утру — нет; один приход
+    # может закрыть и две строки — пришло по всем
+    came_rows = [
+        item
+        for item in salaries
+        if closed(item, now.get(item.row, NOTHING))
+        and not closed(item, early.get(item.row, NOTHING))
+    ]
+    came = came_rows[0] if came_rows else None
     tomorrow = allowance_on(today + timedelta(days=1)) if came else None
     # «Сумы»: по дням срока от сумов сейчас — авансы, платежи и подписки в их дни,
     # неоплаченные разовые записи «Календаря» — тоже, как в его линии «по темпу»
     sums_payday, sums_name = _sums_payday(salaries, now, today)
     end = sums_payday or month_end
     reach = end + timedelta(days=1)
+    # как в «Календаре»: записи сумов, закрытие разовых — за PACE_DAYS дней назад
     planned = calendar_state(
         frame,
-        records,
+        [record for record in records if record.currency == "UZS"],
         today,
         end,
-        today,
+        today - timedelta(days=PACE_DAYS),
         frozenset(index for receipt in early.values() for index in receipt.operations),
         paid,
     )
@@ -661,7 +673,13 @@ def day_budget(
         runway=horizon_runway(
             paced.now,
             paced.per_day_pace,
-            paced.spent_today,
+            # траты дня линии «по темпу»: повторы календаря в ней — обычные траты
+            paced.spent_today
+            + sum(
+                occurrence.covered
+                for occurrence in planned.occurrences
+                if occurrence.record.repeat != "once" and occurrence.day == today
+            ),
             today,
             end,
             events,
@@ -682,7 +700,7 @@ def day_budget(
         payday_name=now_allowance.payday_name,
         plan_gap=done - per_day * passed if passed else None,
         tomorrow=tomorrow,
-        salary_came=now[came.row].received if came else 0.0,
+        salary_came=sum(now[item.row].received for item in came_rows),
         salary_name=came.name if came else "",
     )
 
@@ -850,7 +868,7 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
                 f"{money(-tomorrow.limit * tomorrow.days)}"
             )
         lines.append(
-            f"   ✓ пришла ЗП {money(b.salary_came)}, "
+            f"   ✓ {came_word(b.salary_name)} {money(b.salary_came)}, "
             f"потрачено сегодня {money(b.spent_today)}"
         )
         lines.append(f"   {_money_line(tomorrow, b.today, money, now=True)}")
@@ -941,7 +959,7 @@ def _rich_tomorrow(budget: DayBudget, tomorrow: Allowance) -> list[str]:
     """/today в день прихода зарплаты: лимит с завтра по деньгам на сейчас."""
     b = budget
     ahead = allowance_until(tomorrow, b.today)
-    came = f"✓ пришла ЗП {whole(b.salary_came)}"
+    came = f"✓ {came_word(b.salary_name)} {whole(b.salary_came)}"
     spent = f"потрачено сегодня {whole(b.spent_today)}"
     sums = _money_line(tomorrow, b.today, now=True)
     if tomorrow.limit <= 0:

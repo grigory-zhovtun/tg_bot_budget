@@ -43,6 +43,7 @@ from app.services.cards import CardBalance
 from app.services.dashboard import Dashboard
 from app.services.day_budget import (
     allowance_until,
+    came_word,
     payday_on,
     runway_until,
     until_text,
@@ -226,6 +227,11 @@ CURRENCY_LOCKED = (
     "Валюту не поменять: в копилке есть движения. Закройте её и заведите новую"
 )
 KIND_TEXT = {"saved": SAVED, "spent": SPENT, "write_off": WRITE_OFF}
+
+
+def _capital(text: str) -> str:
+    """«пришла ЗП» → «Пришла ЗП»: str.capitalize() опустил бы «ЗП»."""
+    return text[:1].upper() + text[1:]
 
 
 def error_response(
@@ -717,6 +723,9 @@ def dashboard_out(
         advance_on=budget.advance_on,
         tomorrow=tomorrow,
         salary_came=budget.salary_came if tomorrow is not None else None,
+        came=(
+            _capital(came_word(budget.salary_name)) if tomorrow is not None else None
+        ),
         frozen=frozen,
         groups=groups,
         daily=[

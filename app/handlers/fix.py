@@ -13,6 +13,7 @@ import asyncio
 import dataclasses
 import logging
 from collections.abc import Awaitable, Callable
+from functools import partial
 
 from telegram import (
     CallbackQuery,
@@ -357,6 +358,27 @@ async def _cancel(query: CallbackQuery, context: ContextTypes.DEFAULT_TYPE) -> N
     await _edit(query, "Исправление отменено.")
 
 
+async def _salary_day(context: ContextTypes.DEFAULT_TYPE) -> list[str]:
+    """«💸 С завтра можно …», если перенесённый в доходы приход — сегодняшняя
+    зарплата (спека 1.4); сбой — только в лог."""
+    analytics = context.bot_data.get("analytics_service")
+    if analytics is None:
+        return []
+    try:
+        found = await asyncio.to_thread(
+            partial(
+                analytics.write_feedback,
+                [],
+                context.bot_data.get("icons"),
+                salary_day_only=True,
+            )
+        )
+    except Exception:
+        logger.exception("Salary day line failed")
+        return []
+    return list(found.lines)
+
+
 async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Кнопки /fix и проверки: fix:r:<i> — операция, fix:c:<i> — группа,
     fix:s:<i> — подгруппа, fix:ok — «✓ Верно», fix:b — назад, fix:x — отмена."""
@@ -488,9 +510,9 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     verdict = f"✅ Исправил (строка {number}): {describe(fixed)}"
     moved_in = row.category != INCOME_GROUP and category == INCOME_GROUP
     if moved_in:
-        # зарплата по SMS приходит переводом с ❓ — «отложите» звучит здесь
+        # зарплата по SMS приходит переводом с ❓ — «отложите» и «с завтра» звучат здесь
         hint = await asyncio.to_thread(save_hint, gs_service, [fixed])
-        verdict = "\n".join([verdict, *hint])
+        verdict = "\n".join([verdict, *hint, *await _salary_day(context)])
     if "mode" in state:
         await _checked(query, context, state, last, verdict, True)
     else:

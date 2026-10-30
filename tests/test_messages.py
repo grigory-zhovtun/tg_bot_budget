@@ -12,6 +12,7 @@ from app import config
 from app.chat_state import ChatState
 from app.domain import Rates, entry_row, local_today
 from app.handlers import messages, undo
+from app.services.analytics_service import Feedback
 from app.services.google_sheets import BALANCE_FORMULA, row_values
 from app.web.auth import check_launch_token
 
@@ -630,6 +631,44 @@ async def test_an_income_asks_its_month_in_the_background(
     )
     assert first == result.first  # номер строки fact — для пометки кнопкой
     assert order == ["month", "piggy"]
+
+
+class TomorrowAnalytics:
+    """Ответ на запись дохода: что спросили и строка лимита «с завтра»."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], bool]] = []
+
+    def write_feedback(
+        self,
+        subcategories: list[str],
+        icons: Any = None,
+        today: Any = None,
+        *,
+        salary_day_only: bool = False,
+    ) -> Feedback:
+        self.calls.append((subcategories, salary_day_only))
+        return Feedback(["💸 С завтра можно 600 000 в день до зарплаты 30 ноября"], [])
+
+
+async def test_a_salary_record_gets_tomorrows_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    update, context, _ = make_chat("", {})
+    analytics = TomorrowAnalytics()
+    context.bot_data["analytics_service"] = analytics
+    monkeypatch.setattr(messages, "income_prompt", AsyncMock())
+    monkeypatch.setattr(messages, "ask_month", MagicMock())
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    salary = entry_row(
+        10_000_000.0, True, "", "VISA 1111 UZS", "💰 ДОХОДЫ", "зарплата", today
+    )
+    result = await messages.save_rows(
+        context, update.effective_chat, [salary], [], "app:12"
+    )
+    # одна строка лимита — и только в день зарплаты (её решает write_feedback)
+    assert analytics.calls == [([], True)]
+    assert "💸 С завтра можно 600 000 в день до зарплаты 30 ноября" in result.lines
 
 
 async def test_a_piggy_spending_reaches_the_app_answer(

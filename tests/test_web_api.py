@@ -558,7 +558,7 @@ def test_dashboard_has_tomorrows_limit_on_the_salary_day() -> None:
         "advances": 2_000_000,
         "advance_on": "2026-11-15",
     }
-    assert body["salary_came"] == 10_000_000
+    assert (body["salary_came"], body["came"]) == (10_000_000, "Пришла ЗП")
     # ЗП пришла — «Сумы» до следующей
     assert (body["runway"]["payday"], body["runway"]["target"]) == (
         "2026-11-30",
@@ -567,7 +567,7 @@ def test_dashboard_has_tomorrows_limit_on_the_salary_day() -> None:
     # на другой день — без лимита с завтра
     found = build_dashboard(frame(*SALARY_DAY), tab(), date(2026, 10, 31), RATES, "USD")
     body = dashboard_for(found).json()
-    assert (body["tomorrow"], body["salary_came"]) == (None, None)
+    assert (body["tomorrow"], body["salary_came"], body["came"]) == (None, None, None)
 
 
 def test_the_dashboard_takes_copies_unless_asked_to_refresh() -> None:

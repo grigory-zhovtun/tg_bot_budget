@@ -187,6 +187,7 @@ export interface Dashboard {
   advance_on: string | null; // первый из них; null — авансов в сроке нет
   tomorrow?: Tomorrow | null; // день прихода зарплаты: лимит с завтра; иначе null
   salary_came?: number | null; // сколько пришло по строке зарплаты в этот день
+  came?: string | null; // «Пришла ЗП» или «Пришёл аванс»; нет — «Пришла ЗП»
   frozen: {
     amount: number;
     currency: string;

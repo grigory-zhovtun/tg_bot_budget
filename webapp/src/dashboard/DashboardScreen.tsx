@@ -94,7 +94,9 @@ function SalaryDay({
   plan: ReactNode;
 }) {
   const ahead = glued(tomorrow.until);
-  const came = <Good>{`Пришла ЗП ${money(data.salary_came ?? 0)}`}</Good>;
+  const came = (
+    <Good>{`${data.came ?? "Пришла ЗП"} ${money(data.salary_came ?? 0)}`}</Good>
+  );
   const source = (
     <LimitSource source={tomorrow} today={data.today} first="сумы сейчас" />
   );
@@ -304,7 +306,8 @@ function SectionCards({ data, section }: SectionProps) {
               <SpendingChart
                 spending={data.spending}
                 today={data.today}
-                limit={data.limit}
+                // в день зарплаты «можно X в день» — с завтра, как в «Сегодня»
+                limit={data.tomorrow?.limit ?? data.limit}
                 planPerDay={data.plan_per_day}
               />
             </section>

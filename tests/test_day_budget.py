@@ -11,8 +11,13 @@ from gspread.exceptions import WorksheetNotFound
 from app.domain import Rates
 from app.handlers import analytics
 from app.rich import Report
-from app.services.analytics_service import AnalyticsService, transactions_frame
+from app.services.analytics_service import (
+    AnalyticsService,
+    money,
+    transactions_frame,
+)
 from app.services.calendar import HEADER as CALENDAR_HEADER
+from app.services.calendar import read_calendar
 from app.services.day_budget import (
     ForecastItem,
     _advance_days,
@@ -833,3 +838,97 @@ def test_a_row_raised_after_it_came_opens_again() -> None:
     raised = [("Аванс", 15, 5_000_000, "UZS"), *ITEMS[1:]]
     day = budget(date(2026, 10, 16), ADVANCE_PAID, items=raised)
     assert [(item.name, item.amount) for item in day.ahead][0] == ("Аванс", 3_000_000)
+
+
+# --- финальное ревью этапа 1б ---
+
+TWO_SALARIES = [
+    ("ЗП", 15, 5_000_000, "UZS"),
+    ("ЗП", 30, 5_000_000, "UZS"),
+    ("Квартплата", 18, -400, "USD"),
+]
+
+
+def test_two_salary_rows_closed_by_one_payment_add_up() -> None:
+    both = fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 10_000_000)
+    day = budget(date(2026, 10, 15), both, items=TWO_SALARIES)
+    assert day.tomorrow is not None
+    assert day.salary_came == 10_000_000
+
+
+def test_a_late_salary_with_part_of_the_money_does_not_hold_the_sums_today() -> None:
+    part = fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 4_250_000)  # 85 %
+    day = budget(date(2026, 10, 20), part, items=TWO_SALARIES)
+    # как лимит: часть пришла — ждём следующую ЗП, а не «сегодня» две недели
+    assert day.runway is not None and day.runway.payday == date(2026, 10, 30)
+    late = budget(date(2026, 10, 20), items=TWO_SALARIES)  # денег нет вовсе
+    assert late.runway is not None and late.runway.payday == date(2026, 10, 20)
+
+
+DAILY_LUNCH = ["d4ly01", "01.10.2026", "каждый день", "", "🍔 ЕДА", "кафе", "UZS",
+               100_000, "Обед", "Тест"]  # fmt: skip
+
+
+def test_a_repeat_record_paid_today_is_not_taken_off_the_sums_twice() -> None:
+    lunches = [
+        fact_row(date(2026, 10, day), "🍔 ЕДА", "кафе", 100_000) for day in range(1, 11)
+    ]
+    today = date(2026, 10, 10)
+    plain = day_budget(frame(*lunches), tab(), today, RATES, "USD")
+    planned = day_budget(
+        frame(*lunches),
+        tab(),
+        today,
+        RATES,
+        "USD",
+        read_calendar([CALENDAR_HEADER, DAILY_LUNCH]),
+    )
+    assert plain is not None and planned is not None
+    assert plain.runway is not None and planned.runway is not None
+    assert planned.runway.left == pytest.approx(plain.runway.left)
+
+
+CIRCLE = [
+    ["k1rz09", "09.10.2026", "нет", "", "👶 ДЕТИ", "кружок", "UZS", 300_000, "Кружок",
+     "Тест"],
+    ["k1rz10", "10.10.2026", "нет", "", "👶 ДЕТИ", "кружок", "UZS", 300_000, "Кружок",
+     "Тест"],
+]  # fmt: skip
+
+
+def test_yesterdays_payment_closes_yesterdays_record_not_todays() -> None:
+    # как «Календарь»: кружок 9-го оплачен, кружок 10-го ещё впереди
+    paid = fact_row(date(2026, 10, 9), "👶 ДЕТИ", "кружок", 300_000)
+    day = day_budget(
+        frame(paid),
+        tab(),
+        date(2026, 10, 10),
+        RATES,
+        "USD",
+        read_calendar([CALENDAR_HEADER, *CIRCLE]),
+    )
+    assert day is not None and day.runway is not None
+    # 5 млн − 300 000 (9-го) − 300 000 (сегодня) + аванс 15-го 2 млн
+    assert day.runway.left == pytest.approx(6_400_000)
+
+
+def test_an_advance_in_place_of_the_salary_says_it_came() -> None:
+    items = [("Аванс", 15, 2_000_000, "UZS"), ("Квартплата", 18, -400, "USD")]
+    came = budget(date(2026, 10, 15), ADVANCE_PAID, items=items)
+    assert came.tomorrow is not None
+    assert (
+        "   ✓ пришёл аванс 2 000 000, потрачено сегодня 0"
+        in format_day_budget(came, now=True).splitlines()
+    )
+
+
+def test_the_salary_reply_says_tomorrows_limit() -> None:
+    fact = [FACT_HEADER, *OPENING, ADVANCE_PAID, RENT_PAID, SALARY_TODAY]
+    service = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab()}))
+    found = service.write_feedback([], today=date(2026, 10, 30), salary_day_only=True)
+    # 17 млн на сумовых картах и аванс 15 ноября 2 млн — на 31 день
+    limit = money(19_000_000 / 31)
+    assert found.lines == [f"💸 С завтра можно {limit} в день до зарплаты 30 ноября"]
+    # в другой день ответ на доход лимита не добавляет
+    other = service.write_feedback([], today=date(2026, 10, 29), salary_day_only=True)
+    assert other.lines == []

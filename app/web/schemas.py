@@ -280,6 +280,7 @@ class DashboardOut(ApiModel):
     # день прихода зарплаты: лимит с завтра и сколько пришло по строке; иначе None
     tomorrow: TomorrowOut | None = None
     salary_came: float | None = None
+    came: str | None = None  # «Пришла ЗП» или «Пришёл аванс» — вместе с tomorrow
     frozen: FrozenOut | None = None
     groups: list[GroupPlanOut] = []
     daily: list[DayPointOut] = []  # для открытых до обновления версий приложения
