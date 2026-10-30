@@ -221,7 +221,7 @@ def test_the_forecast_may_take_copies_of_the_sheets() -> None:
     sheets = Sheets({"fact": [FACT_HEADER, *OPENING], "Oct 26": tab()})
     service = AnalyticsService(sheets)
     assert service.forecast(date(2026, 10, 2), ["UZS"], max_age=120) is not None
-    assert sheets.ages == [120, 120, 120, 120, 120]
+    assert sheets.ages == [120, 120, 120, 120]
 
 
 def test_the_screen_takes_copies_unless_asked_to_refresh() -> None:

@@ -742,7 +742,7 @@ class AnalyticsService:
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
         sheet = month_title(today)
-        sheets = read_month_sheets(self.gs_service, sheet, max_age)
+        sheets = read_month_sheets(self.gs_service, sheet, max_age, previous=True)
         if sheets.month is None:
             logger.info("No plan sheet %s", sheet)
             return None
@@ -786,10 +786,7 @@ class AnalyticsService:
         from app.services.savings import month_savings
 
         sheet = month_title(today)
-        # «Накоплениям» нужна только заморозка — переносу в ней нечего менять
-        sheets = read_month_sheets(
-            self.gs_service, sheet, max_age, calendar=False, previous=False
-        )
+        sheets = read_month_sheets(self.gs_service, sheet, max_age, calendar=False)
         if sheets.month is None:
             logger.info("No plan sheet %s", sheet)
             return None
@@ -820,7 +817,7 @@ class AnalyticsService:
         max_age > 0 — годятся копии листов не старше стольких секунд.
         """
         from app.services.calendar import read_calendar
-        from app.services.day_budget import carried_items, read_forecast
+        from app.services.day_budget import read_forecast
         from app.services.forecast import month_forecast
         from app.services.plan import read_plan
 
@@ -840,7 +837,6 @@ class AnalyticsService:
             sheets.rates,
             currencies,
             read_calendar(sheets.calendar),
-            carried=carried_items(sheets.previous, frame, today.replace(day=1)),
         )
 
     def weekly_digest(self, today: date | None = None) -> Report:

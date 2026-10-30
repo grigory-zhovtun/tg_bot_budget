@@ -19,10 +19,10 @@
 которые ещё впереди. Лимит эти деньги не тратит: он считает только сумы, а доллары
 входят в него, когда их обменяли на сумы.
 
-Перенос: поступления прошлого месяца не в сумах, по которым пришло меньше 90 %, ждут
-свой остаток в этом (carried_items) — сверка строк сначала закрывает их, «Впереди»
-показывает их первыми. Сумовые не переносятся: они задают срок и деньги лимита, и
-остаток октябрьской ЗП съедал бы ноябрьскую — её строка не закрывалась бы.
+Перенос: поступления прошлого месяца, по которым пришло меньше 90 %, «Впереди»
+показывает первыми (carried_items). Остаток закрывают доходы с пометкой «за <прошлый
+месяц>» (receipts.income_month); сами строки денег не забирают: сверка строк месяца
+их не видит, срок лимита и деньги срока они не задают.
 """
 
 import calendar
@@ -373,26 +373,25 @@ def _ahead(
 
 
 def carried_items(
-    previous: list[list[Any]] | None, frame: pd.DataFrame, first: date
+    previous: list[list[Any]] | None, frame: pd.DataFrame, first: date, through: date
 ) -> tuple[ForecastItem, ...]:
     """Перенос: поступления прошлого месяца, по которым пришло меньше 90 %, ждут свой
     остаток в месяце first — «<название> за <месяц>, остаток», день 1, сумма —
-    непришедшая часть в валюте строки. Сверка прошлого месяца — по fact на сейчас:
-    доход, записанный позже с его датой, уменьшает остаток; из позапрошлого месяца
-    ничего не переносится. Платежи и поступления в сумах не переносятся: сумовые
-    строки задают срок и деньги лимита (и формулу P5 по колонке T). Строки — −1, −2,
-    … по дням прошлого месяца: со строками вкладки не совпадут. previous — вкладка
-    прошлого месяца; её нет или в ней нет списка — ()."""
+    непришедшая часть в валюте строки. Сверка прошлого месяца — доходы его месяца
+    (по дате или пометке «за <месяц>») по through: доход с пометкой, пришедший уже в
+    этом месяце, или записанный позже с датой прошлого — уменьшает остаток. Из
+    позапрошлого месяца ничего не переносится, платежи не переносятся. Строки — −1,
+    −2, … по дням прошлого месяца: со строками вкладки не совпадут. previous —
+    вкладка прошлого месяца; её нет или в ней нет списка — ()."""
     listed = read_forecast(previous) if previous is not None else None
     if listed is None:
         return ()
-    last = first - timedelta(days=1)
-    start = last.replace(day=1)
-    receipts = match_receipts(frame, listed.items, start, last)
+    start = (first - timedelta(days=1)).replace(day=1)
+    receipts = match_receipts(frame, listed.items, start, through)
     month = MONTHS_RU[start.month - 1]
     found: list[ForecastItem] = []
     for item in sorted(listed.items, key=lambda item: (item.day, item.row)):
-        if item.amount <= 0 or item.currency == "UZS":
+        if item.amount <= 0:
             continue
         rest = remaining(item, receipts.get(item.row, NOTHING))
         if rest > 0:
@@ -427,7 +426,7 @@ def day_budget(
     для «Впереди» и трат дня. Прогноз по сумам — линия «по темпу» модели прогноза
     (services.forecast) с записями календаря records, как во вкладке «Календарь».
     previous — вкладка прошлого месяца (None — её нет): её недополученные
-    поступления сверка закрывает первыми, «Впереди» показывает их первыми.
+    поступления «Впереди» показывает первыми.
     """
     # recurring сам берёт отсюда MONTHS_PREPOSITIONAL и short
     from app.services.recurring import find_series, outside_list
@@ -447,12 +446,12 @@ def day_budget(
     plan_end = opening + sum(item.uzs for item in items) - per_day * days
     series = outside_list(find_series(frame, today), items)
     month_end = first.replace(day=days)
-    salaries, spare = _salaries(items)  # перенос — не зарплата и не аванс
-    carried = carried_items(previous, frame, first)
+    salaries, spare = _salaries(items)
+    carried = carried_items(previous, frame, first, today)
 
     def allowance_on(day: date) -> Allowance:
         """Лимит дня day: сумы на вечер накануне, авансы, платежи и дни до зарплаты."""
-        receipts = match_receipts(frame, items, first, day - timedelta(days=1), carried)
+        receipts = match_receipts(frame, items, first, day - timedelta(days=1))
         payday, name = _payday(salaries, receipts, day)
         # день зарплаты — тоже: её могут начислить и вечером
         until = (payday or month_end) + timedelta(days=1)
@@ -499,8 +498,8 @@ def day_budget(
 
     passed = yesterday.day if yesterday >= first else 0
     now_allowance = allowance_on(today)
-    morning = _ahead(items, match_receipts(frame, items, first, yesterday, carried))
-    now = match_receipts(frame, items, first, today, carried)
+    morning = _ahead(items, match_receipts(frame, items, first, yesterday))
+    now = match_receipts(frame, items, first, today)
     paid = frozenset(index for receipt in now.values() for index in receipt.operations)
 
     frozen, change, frozen_uzs = None, 0.0, 0.0
@@ -525,7 +524,7 @@ def day_budget(
         key=lambda line: line.fact - line.plan,
         reverse=True,
     )
-    left_now = _ahead((*carried, *items), now)  # перенос — первым: его день 1
+    left_now = (*carried, *_ahead(items, now))  # перенос — первым: его день 1
     history = tuple(
         DaySpend(day, _spent_on(frame, day, paid), allowance_on(day).limit)
         for day in (first + timedelta(days=k) for k in range(today.day))
@@ -553,9 +552,7 @@ def day_budget(
         ),
         over_plan=tuple(over[:3]),
         runway=uzs_runway(
-            currency_forecast(
-                frame, (), items, today, "UZS", records=records, carried=carried
-            ),
+            currency_forecast(frame, (), items, today, "UZS", records=records),
             today,
             rates,
         ),

@@ -1340,14 +1340,14 @@ def read_month_sheets(
     title: str,
     max_age: float = 0.0,
     calendar: bool = True,
-    previous: bool = True,
+    previous: bool = False,
 ) -> MonthSheets:
     """Вкладка месяца, вкладка прошлого месяца, курсы, fact и «Календарь» —
     одновременно: каждое чтение ждёт Google, а не процессор, и экран ждёт самое
     долгое из них, а не их сумму.
 
-    max_age > 0 — годятся копии листов не старше стольких секунд. previous=False —
-    без вкладки прошлого месяца: экрану перенос не нужен.
+    max_age > 0 — годятся копии листов не старше стольких секунд. previous=True —
+    ещё вкладка прошлого месяца: её недополученное «Сводка» показывает во «Впереди».
     """
     first = parse_month_title(title)
     last = month_title(first - timedelta(days=1)) if first is not None else ""

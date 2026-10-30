@@ -1,17 +1,19 @@
 """Сверка жёлтого списка вкладки месяца с листом fact: что пришло и что ушло.
 
 Строка списка — поступление (+) или крупный платёж (−): день, сумма со знаком,
-валюта. Поступления — по плану месяца, без окна: доходы валюты с 1-го числа по
+валюта. Поступления — по плану месяца, без окна: доходы валюты этого месяца по
 порядку дней заполняют строки этой валюты по порядку их дней — первую до её суммы,
 что сверх — следующую, что сверх последней — последнюю. Так зарплата, пришедшая
-частями и раньше своего дня, засчитывается ей. Перед строками месяца в очереди
-валюты стоят остатки поступлений прошлого месяца (перенос, day_budget.carried_items):
-доходы сначала закрывают их. Платёж закрывает одна трата той же валюты на сумму
-плана ± PAYMENT_TOLERANCE с дня строки − EARLY_DAYS. Строка закрыта, когда пришло
-DONE_SHARE плана; иначе впереди — недостающая часть.
+частями и раньше своего дня, засчитывается ей. Месяц дохода — пометка «за <месяц>»
+в комментарии (её пишет банк, владелец или кнопка бота), без пометки — месяц даты:
+часть ЗП, опоздавшая в следующий месяц, с пометкой остаётся своему месяцу. Платёж
+закрывает одна трата той же валюты на сумму плана ± PAYMENT_TOLERANCE с дня строки −
+EARLY_DAYS. Строка закрыта, когда пришло DONE_SHARE плана; иначе впереди —
+недостающая часть.
 """
 
 import calendar
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -24,6 +26,15 @@ from app.services.analytics_service import expenses, income
 EARLY_DAYS = 5  # платёж может уйти на несколько дней раньше дня в списке
 DONE_SHARE = 0.9  # строка закрыта, когда пришло 90 % плана
 PAYMENT_TOLERANCE = 0.1  # платёж — одна трата на сумму плана ± 10 %
+# «за октябрь», «Зарплата за Сентябрь 2026»: «за» — отдельным словом, месяц — целым
+MONTH_MARK = re.compile(
+    r"(?<![а-яёa-z])за\s+(январ[ья]|феврал[ья]|март[а]?|апрел[ья]|ма[йя]|июн[ья]|"
+    r"июл[ья]|август[а]?|сентябр[ья]|октябр[ья]|ноябр[ья]|декабр[ья])"
+    r"(?![а-яё])(?:\s+(\d{4}))?",
+    re.IGNORECASE,
+)
+MONTH_STEMS = ("янв", "фев", "мар", "апр", "ма", "июн", "июл", "авг", "сен", "окт",
+               "ноя", "дек")  # fmt: skip
 
 
 class ListLine(Protocol):
@@ -65,19 +76,39 @@ def _opens(first: date, line: ListLine) -> date:
     return max(_due(first, line.day) - timedelta(days=EARLY_DAYS), first)
 
 
+def income_month(day: date, comment: str) -> date:
+    """1-е число месяца дохода: пометка «за <месяц>» в комментарии — ближайший к дню
+    месяц с этим названием (поровну назад и вперёд — прошлый) или год из пометки;
+    без пометки — месяц даты."""
+    mark = MONTH_MARK.search(comment)
+    if mark is None:
+        return day.replace(day=1)
+    word = mark.group(1).lower()
+    month = (
+        5
+        if word.startswith("ма") and not word.startswith("мар")
+        else (MONTH_STEMS.index(word[:3]) + 1)
+    )
+    if mark.group(2):
+        return date(int(mark.group(2)), month, 1)
+    here = day.year * 12 + day.month - 1
+    nearest = min(
+        (year * 12 + month - 1 for year in (day.year - 1, day.year, day.year + 1)),
+        key=lambda index: (abs(index - here), index),
+    )
+    return date(nearest // 12, nearest % 12 + 1, 1)
+
+
 def match_receipts(
     frame: pd.DataFrame,
     lines: Sequence[ListLine],
     first: date,
     through: date,
-    carried: Sequence[ListLine] = (),
 ) -> dict[int, Receipt]:
-    """Что пришло по строкам списка месяца first — по операциям с first по through.
+    """Что пришло по строкам списка месяца first к дню through: доходы этого месяца
+    (income_month) с датой по through и траты с first по through.
 
-    carried — остатки поступлений прошлого месяца: доходы валюты заполняют их раньше
-    строк месяца, в том порядке, в каком они даны (по дням прошлого месяца). Ключ —
-    строка вкладки, у перенесённых — отрицательная; строк, по которым ничего не
-    пришло, в ответе нет.
+    Ключ — строка вкладки; строк, по которым ничего не пришло, в ответе нет.
     """
     month = frame[(frame["day"] >= first) & (frame["day"] <= through)]
     found: dict[int, Receipt] = {}
@@ -90,12 +121,20 @@ def match_receipts(
             old.operations | {index},
         )
 
-    got = income(month)
-    got = got[got["amount"] > 0].sort_values("day", kind="stable")
-    left = [line for line in carried if line.amount > 0]
+    got = income(frame)
+    got = got[(got["amount"] > 0) & (got["day"] <= through)]
+    ours = pd.Series(
+        [
+            income_month(day, str(comment)) == first
+            for day, comment in zip(got["day"], got["comment"], strict=True)
+        ],
+        index=got.index,
+        dtype=bool,
+    )
+    got = got[ours].sort_values("day", kind="stable")
     incomes = [line for line in lines if line.amount > 0]
-    for currency in sorted({line.currency for line in [*left, *incomes]}):
-        queue = [line for line in left if line.currency == currency] + sorted(
+    for currency in sorted({line.currency for line in incomes}):
+        queue = sorted(
             (line for line in incomes if line.currency == currency),
             key=lambda line: (line.day, line.row),
         )

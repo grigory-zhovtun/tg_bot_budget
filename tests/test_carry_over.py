@@ -1,5 +1,6 @@
 """Перенос: поступление прошлого месяца, по которому пришло меньше 90 %, ждёт свой
-остаток в этом месяце (спека 1.8). Суммы выдуманные."""
+остаток в этом месяце (спека 1.8). Месяц дохода — пометка «за <месяц>» в комментарии,
+без неё — месяц даты. Суммы выдуманные."""
 
 from datetime import date
 from typing import Any
@@ -22,6 +23,7 @@ from tests.test_day_budget import Sheets as DaySheets
 
 RATES = Rates({"UZS": 1.0, "USD": 12_000.0, "RUB": 150.0})
 NOVEMBER = date(2026, 11, 1)
+NOW = date(2026, 11, 3)  # по какой день сверяем прошлый месяц
 
 
 def listed(*items: tuple[str, int, float, str]) -> list[list[Any]]:
@@ -42,26 +44,33 @@ def rubles(day: date, amount: float) -> list[Any]:
     return fact_row(day, "💰 ДОХОДЫ", "зарплата", amount, "RUB")
 
 
+def marked_rubles(day: date, amount: float, comment: str) -> list[Any]:
+    """Рубли с комментарием: «за октябрь» в нём — к какому месяцу они относятся."""
+    row = rubles(day, amount)
+    row[5] = comment
+    return row
+
+
 def facts(*rows: list[Any]) -> Any:
     return transactions_frame([FACT_HEADER, *OPENING, *rows], RATES)
 
 
 def test_the_unpaid_part_of_last_months_income_waits_this_month() -> None:
     came = facts(rubles(date(2026, 10, 28), 45_000))
-    assert carried_items(OCTOBER_TAB, came, NOVEMBER) == (
+    assert carried_items(OCTOBER_TAB, came, NOVEMBER, NOW) == (
         ForecastItem("ЗП Питер за октябрь, остаток", 1, 55_000, "RUB", 8_250_000, -1),
     )
 
 
 def test_ninety_percent_closes_last_months_income() -> None:
     came = facts(rubles(date(2026, 10, 28), 95_000))
-    assert carried_items(OCTOBER_TAB, came, NOVEMBER) == ()
+    assert carried_items(OCTOBER_TAB, came, NOVEMBER, NOW) == ()
 
 
 def test_payments_do_not_carry_over() -> None:
     # квартплата 18 октября не ушла — платёж в следующий месяц не переносится
     came = facts(rubles(date(2026, 10, 28), 100_000))
-    assert carried_items(OCTOBER_TAB, came, NOVEMBER) == ()
+    assert carried_items(OCTOBER_TAB, came, NOVEMBER, NOW) == ()
 
 
 def test_an_income_recorded_later_with_last_months_date_lowers_the_rest() -> None:
@@ -72,7 +81,7 @@ def test_an_income_recorded_later_with_last_months_date_lowers_the_rest() -> Non
         rubles(date(2026, 11, 2), 10_000),
         rubles(date(2026, 10, 31), 20_000),
     )
-    [rest] = carried_items(OCTOBER_TAB, came, NOVEMBER)
+    [rest] = carried_items(OCTOBER_TAB, came, NOVEMBER, NOW)
     assert (rest.amount, rest.uzs) == (35_000, 5_250_000)
 
 
@@ -81,27 +90,36 @@ def test_rows_go_minus_one_minus_two_by_last_months_days() -> None:
         ("ЗП Питер", 28, 100_000, "RUB"),
         ("Возврат долга", 5, 500, "USD"),
     )
-    found = carried_items(october, facts(), NOVEMBER)
+    found = carried_items(october, facts(), NOVEMBER, NOW)
     assert [(item.name, item.row) for item in found] == [
         ("Возврат долга за октябрь, остаток", -1),
         ("ЗП Питер за октябрь, остаток", -2),
     ]
 
 
-def test_incomes_in_sums_do_not_carry_over() -> None:
-    # строки в сумах задают срок и деньги лимита: их остаток не ждём
-    october = listed(
-        ("Возврат долга", 5, 1_000_000, "UZS"),
-        ("ЗП", 30, 10_000_000, "UZS"),
+def test_a_late_part_marked_for_last_month_lowers_the_rest() -> None:
+    came = facts(HALF_PAID, marked_rubles(date(2026, 11, 2), 30_000, "за октябрь"))
+    [rest] = carried_items(OCTOBER_TAB, came, NOVEMBER, NOW)
+    assert rest.amount == 25_000
+    # пришло в ноябре без пометки — это ноябрьские деньги, остаток октября тот же
+    plain = facts(HALF_PAID, rubles(date(2026, 11, 2), 30_000))
+    [rest] = carried_items(OCTOBER_TAB, plain, NOVEMBER, NOW)
+    assert rest.amount == 55_000
+
+
+def test_incomes_in_sums_carry_over_too() -> None:
+    # остаток денег не забирает — сумовой не мешает лимиту, а «Впереди» его видно
+    october = listed(("ЗП", 30, 10_000_000, "UZS"))
+    came = facts(fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 8_000_000))
+    assert carried_items(october, came, NOVEMBER, NOW) == (
+        ForecastItem("ЗП за октябрь, остаток", 1, 2_000_000, "UZS", 2_000_000, -1),
     )
-    came = facts(fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 5_000_000))
-    assert carried_items(october, came, NOVEMBER) == ()
 
 
 def test_without_last_months_tab_or_its_list_nothing_carries_over() -> None:
-    assert carried_items(None, facts(), NOVEMBER) == ()
+    assert carried_items(None, facts(), NOVEMBER, NOW) == ()
     no_list = [row[:14] for row in OCTOBER_TAB]
-    assert carried_items(no_list, facts(), NOVEMBER) == ()
+    assert carried_items(no_list, facts(), NOVEMBER, NOW) == ()
 
 
 NOVEMBER_TAB = listed(
@@ -137,18 +155,25 @@ def test_last_months_remainder_is_ahead_first() -> None:
     ) in format_day_budget(day).splitlines()
 
 
-def test_the_remainder_is_filled_before_this_months_line() -> None:
-    day = november(date(2026, 11, 4), rubles(date(2026, 11, 4), 55_000))
-    # 55 000 закрыли октябрьский остаток — ноябрьская ЗП ждёт 100 000 целиком
+def test_a_part_marked_for_october_closes_the_rest_and_leaves_november_whole() -> None:
+    day = november(
+        date(2026, 11, 4), marked_rubles(date(2026, 11, 4), 55_000, "ЗП за октябрь")
+    )
     assert [(item.name, item.amount) for item in day.ahead] == [
         ("Аванс", 2_000_000),
         ("ЗП Питер", 100_000),
         ("ЗП", 10_000_000),
     ]
-    alone = november(
-        date(2026, 11, 4), rubles(date(2026, 11, 4), 55_000), previous=None
-    )
-    assert ("ЗП Питер", 45_000) in [(item.name, item.amount) for item in alone.ahead]
+
+
+def test_an_unmarked_part_is_novembers_and_the_rest_keeps_waiting() -> None:
+    # без пометки бот не гадает: деньги ноября — ноябрьской строке
+    day = november(date(2026, 11, 4), rubles(date(2026, 11, 4), 55_000))
+    assert [(item.name, item.amount) for item in day.ahead][:3] == [
+        ("ЗП Питер за октябрь, остаток", 55_000),
+        ("Аванс", 2_000_000),
+        ("ЗП Питер", 45_000),
+    ]
 
 
 OCTOBER_SALARY = listed(("ЗП", 30, 10_000_000, "UZS"))
@@ -186,8 +211,8 @@ DEBT_BACK = fact_row(date(2026, 11, 2), "💰 ДОХОДЫ", "возврат д�
 
 
 def test_the_sums_card_does_not_change_with_last_months_tab() -> None:
-    # октябрьский долг в сумах не переносится: вернувшийся 2 ноября закрывает
-    # строки ноября, как без вкладки октября
+    # октябрьский долг в сумах ждёт во «Впереди», но денег ноября не забирает:
+    # вернувшийся 2 ноября без пометки — ноябрьским строкам, как без вкладки октября
     came = facts(*PACE, DEBT_BACK)
     day = day_budget(came, NOVEMBER_TAB, date(2026, 11, 3), RATES, "USD", previous=DEBT)
     alone = day_budget(came, NOVEMBER_TAB, date(2026, 11, 3), RATES, "USD")
@@ -196,7 +221,7 @@ def test_the_sums_card_does_not_change_with_last_months_tab() -> None:
 
 
 def test_the_calendar_gets_no_new_events_and_waits_for_the_whole_line() -> None:
-    came = facts(HALF_PAID, rubles(date(2026, 11, 4), 55_000))
+    came = facts(HALF_PAID, marked_rubles(date(2026, 11, 4), 55_000, "за октябрь"))
     found = month_forecast(
         came,
         (),
@@ -206,7 +231,6 @@ def test_the_calendar_gets_no_new_events_and_waits_for_the_whole_line() -> None:
         date(2026, 11, 5),
         RATES,
         ["RUB"],
-        carried=carried_items(OCTOBER_TAB, came, NOVEMBER),
     )
     [rubles_line] = found.currencies
     assert [(event.name, event.amount) for event in rubles_line.events] == [
@@ -229,22 +253,15 @@ def test_the_morning_shows_this_months_rows_next_to_the_carry_over() -> None:
     ]
 
 
-def test_last_month_is_reconciled_without_its_own_carry_over() -> None:
-    # предел (спека 1.8): прошлый месяц сверяется своими строками. Октябрьский
-    # остаток, пришедший 4 ноября, в этой сверке засчитан ноябрьской ЗП — 1 декабря
-    # остатка за ноябрь нет, хотя 30 ноября «Впереди» ждал 55 000
-    came = facts(
-        HALF_PAID,
-        rubles(date(2026, 11, 4), 55_000),
-        rubles(date(2026, 11, 28), 45_000),
-    )
-    assert carried_items(NOVEMBER_TAB, came, date(2026, 12, 1)) == ()
-    day = november(
-        date(2026, 11, 30),
-        rubles(date(2026, 11, 4), 55_000),
-        rubles(date(2026, 11, 28), 45_000),
-    )
+def test_a_salary_split_across_every_month_end_carries_over_every_month() -> None:
+    # вторая часть каждый раз уходит в следующий месяц и приходит с пометкой
+    october_rest = marked_rubles(date(2026, 11, 4), 55_000, "ЗП за октябрь")
+    came = facts(HALF_PAID, october_rest, rubles(date(2026, 11, 28), 45_000))
+    day = november(date(2026, 11, 30), october_rest, rubles(date(2026, 11, 28), 45_000))
     assert ("ЗП Питер", 55_000) in [(item.name, item.amount) for item in day.ahead]
+    found = carried_items(NOVEMBER_TAB, came, date(2026, 12, 1), date(2026, 12, 3))
+    rest = [(item.name, item.amount) for item in found if item.currency == "RUB"]
+    assert rest == [("ЗП Питер за ноябрь, остаток", 55_000)]
 
 
 class Sheets(DaySheets):
@@ -309,10 +326,13 @@ def test_savings_do_not_read_last_months_tab() -> None:
     assert "Oct 26" not in sheets.read
 
 
-def test_next_months_plan_does_not_read_this_month_for_the_carry_over() -> None:
+def test_the_plan_screens_do_not_read_last_months_tab() -> None:
+    # пометка месяца у дохода — в fact: сверке строк плана вкладка прошлого не нужна
     sheets = Sheets({**BOTH, "Dec 26": NOVEMBER_TAB})
+    assert load_plan(sheets, "Nov 26", date(2026, 11, 3)) is not None
     assert load_plan(sheets, "Dec 26", date(2026, 11, 3)) is not None
-    assert "Nov 26" not in sheets.read
+    assert "Oct 26" not in sheets.read
+    assert sheets.read.count("Nov 26") == 1  # своя вкладка, а не «прошлая» для декабря
 
 
 def test_the_reply_to_a_record_does_not_read_last_months_tab() -> None:
@@ -335,7 +355,7 @@ def test_the_summary_screen_reads_last_months_tab() -> None:
     ]
 
 
-PAID_REST = [*FACT, rubles(date(2026, 11, 4), 55_000)]
+PAID_REST = [*FACT, marked_rubles(date(2026, 11, 4), 55_000, "ЗП за октябрь")]
 
 
 def test_the_calendar_screen_waits_for_the_whole_line() -> None:
@@ -346,18 +366,13 @@ def test_the_calendar_screen_waits_for_the_whole_line() -> None:
     assert [(event.name, event.amount) for event in rubles_line.events] == [
         ("ЗП Питер", 100_000)
     ]
+    assert "Oct 26" not in sheets.read
 
 
-def test_the_month_plan_list_matches_after_last_months_rest() -> None:
+def test_the_month_plan_list_leaves_a_part_marked_for_october_out() -> None:
     loaded = load_plan(Sheets({**BOTH, "fact": PAID_REST}), "Nov 26", date(2026, 11, 5))
     assert loaded is not None
     assert 13 not in loaded.receipts  # «ЗП Питер» ноября: 55 000 — октябрю
-    alone = load_plan(
-        Sheets({"fact": PAID_REST, "Nov 26": NOVEMBER_TAB}),
-        "Nov 26",
-        date(2026, 11, 5),
-    )
-    assert alone is not None and alone.receipts[13].received == 55_000
 
 
 def test_the_advisor_sees_last_months_rest_ahead() -> None:

@@ -15,7 +15,13 @@ from app.services.receipts_sync import (
     RECEIVED_HEADER,
     sync_receipts,
 )
-from tests.test_carry_over import HALF_PAID, NOVEMBER_TAB, OCTOBER_TAB, rubles
+from tests.test_carry_over import (
+    HALF_PAID,
+    NOVEMBER_TAB,
+    OCTOBER_TAB,
+    marked_rubles,
+    rubles,
+)
 from tests.test_carry_over import RATES as CARRY_RATES
 from tests.test_day_budget import FACT_HEADER, OPENING, RATES, charge, fact_row, tab
 
@@ -179,12 +185,16 @@ class RubleSheets(Sheets):
         return CARRY_RATES
 
 
-def test_this_months_rows_get_what_is_left_after_last_months_rest() -> None:
-    came = (HALF_PAID, rubles(date(2026, 11, 3), 70_000))
+def test_a_late_part_marked_for_last_month_stays_out_of_this_months_column() -> None:
+    came = (
+        HALF_PAID,
+        marked_rubles(date(2026, 11, 3), 55_000, "ЗП за октябрь"),
+        rubles(date(2026, 11, 3), 15_000),
+    )
     sheets = RubleSheets({"Oct 26": OCTOBER_TAB, "Nov 26": NOVEMBER_TAB}, *came)
     sync_receipts(sheets, date(2026, 11, 4))
-    # 55 000 закрыли остаток октября: ноябрьской «ЗП Питер» — 15 000; перенос в лист
-    # не пишется, вкладка октября не меняется
+    # 55 000 с пометкой — октябрю: ноябрьской «ЗП Питер» — только 15 000; вкладка
+    # октября не меняется
     november = sheets.tabs["Nov 26"]
     assert [row[COLUMN_T] for row in november[10:14]] == [
         RECEIVED_HEADER,
@@ -193,7 +203,3 @@ def test_this_months_rows_get_what_is_left_after_last_months_rest() -> None:
         "",
     ]
     assert sheets.tabs["Oct 26"] == wide(OCTOBER_TAB)
-    # вкладки октября нет — как раньше: всё пришедшее — ноябрьской строке
-    alone = RubleSheets({"Nov 26": NOVEMBER_TAB}, *came)
-    sync_receipts(alone, date(2026, 11, 4))
-    assert alone.tabs["Nov 26"][12][COLUMN_T] == 70_000

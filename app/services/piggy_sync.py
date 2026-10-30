@@ -148,10 +148,7 @@ def sync_piggy(
     rows, journal = gs.get_piggy(0.0)
     if len(rows) < 2:
         return 0
-    # копилкам нужна только заморозка — переносу в ней нечего менять
-    sheets = read_month_sheets(
-        gs, month_title(today), SHEET_AGE, calendar=False, previous=False
-    )
+    sheets = read_month_sheets(gs, month_title(today), SHEET_AGE, calendar=False)
     rates = sheets.rates
     frame = transactions_frame(sheets.fact, rates)
     book = read_book(rows, journal, currencies, groups, subcategories)

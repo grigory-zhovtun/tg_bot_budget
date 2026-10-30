@@ -541,8 +541,8 @@ def test_load_plan_without_the_tab_is_none() -> None:
 def test_load_plan_may_take_copies_of_the_sheets() -> None:
     sheets = PlanSheets({"Oct 26": TAB})
     assert load_plan(sheets, "Oct 26", date(2026, 10, 11), max_age=120) is not None
-    # вкладка, прошлая вкладка, курсы и fact; «Календарь» плану не нужен
-    assert sheets.ages == [120, 120, 120, 120]
+    # вкладка, курсы и fact; «Календарь» плану не нужен
+    assert sheets.ages == [120, 120, 120]
 
 
 def test_save_plan_writes_and_the_tab_shows_the_new_plan() -> None:
