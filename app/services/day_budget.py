@@ -52,7 +52,7 @@ from app.services.analytics_service import (
 from app.services.calendar import CalendarRecord
 from app.services.forecast import currency_forecast
 from app.services.receipts import NOTHING, Receipt, closed, match_receipts, remaining
-from app.services.runway import Runway, uzs_runway
+from app.services.runway import Runway, horizon_runway
 
 COLUMN_O = 14  # блок прогноза: O название, P день, Q сумма, R валюта, S в сумах
 LIST_HEADER = "Поступления"  # «Поступления (+) и крупные платежи (−)»
@@ -292,6 +292,23 @@ def _payday(
     return _on(_next_month(first), salaries[0].day), salaries[0].name
 
 
+def _sums_payday(
+    salaries: Sequence[ForecastItem], receipts: Mapping[int, Receipt], today: date
+) -> tuple[date | None, str]:
+    """Срок карточки «Сумы» — день следующей зарплаты, которая ещё не пришла: открытая
+    по сверке на сейчас строка salaries; сегодняшняя и опоздавшая, пока денег нет,
+    ждутся сегодня (как у заморозки), иначе утром в день зарплаты карточка просила бы
+    обменять доллары на месяц вперёд. В месяце открытых нет — первая из них в
+    следующем месяце; строк нет — (None, ""), конец месяца."""
+    if not salaries:
+        return None, ""
+    first = today.replace(day=1)
+    for item in salaries:
+        if not closed(item, receipts.get(item.row, NOTHING)):
+            return max(_on(first, item.day), today), item.name
+    return _on(_next_month(first), salaries[0].day), salaries[0].name
+
+
 def _advance_days(
     advances: Sequence[ForecastItem],
     receipts: Mapping[int, Receipt],
@@ -367,10 +384,11 @@ def _list_bills(
 
 
 def _subscription_days(
-    series: Sequence[Any], day: date, until: date
+    series: Sequence[Any], day: date, until: date, now: bool = False
 ) -> list[tuple[date, float]]:
     """Подписки в UZS с day по день перед until — в их ожидаемый день: не отменённые и
-    ещё не списанные в своём месяце до day."""
+    ещё не списанные в своём месяце до day; now — и в сам day: деньги на сейчас уже
+    без сегодняшнего списания."""
     first = day.replace(day=1)
     later = _next_month(first)
     found: list[tuple[date, float]] = []
@@ -380,7 +398,8 @@ def _subscription_days(
         for month in (first, later):
             due = one.expected_on(month)
             charged = any(
-                (c.day.year, c.day.month) == (due.year, due.month) and c.day < day
+                (c.day.year, c.day.month) == (due.year, due.month)
+                and (c.day <= day if now else c.day < day)
                 for c in one.charges
             )
             if day <= due < until and not charged:
@@ -464,8 +483,10 @@ def day_budget(
     минус платежи по день основной зарплаты в сумах, на дни по него включительно; денег
     до аванса меньше — по день аванса без него (страховка). Строки списка — по
     сверке с fact (services.receipts): к утру дня — для лимита и заморозки; на сейчас —
-    для «Впереди» и трат дня. Прогноз по сумам — линия «по темпу» модели прогноза
-    (services.forecast) с записями календаря records, как во вкладке «Календарь».
+    для «Впереди», трат дня и «Сумы». «Сумы» (services.runway) — по дням до
+    зарплаты, которая ещё не пришла: сумы сейчас, темп и траты сегодня — из модели
+    прогноза (services.forecast) с записями календаря records, авансы, платежи и
+    подписки — в их дни.
     previous — вкладка прошлого месяца (None — её нет): её недополученные
     поступления сверка закрывает первыми, «Впереди» показывает их первыми.
     """
@@ -560,6 +581,21 @@ def day_budget(
         None,
     )
     tomorrow = allowance_on(today + timedelta(days=1)) if came else None
+    # «Сумы»: по дням срока от сумов сейчас — авансы, платежи и подписки в их дни
+    sums_payday, sums_name = _sums_payday(salaries, now, today)
+    end = sums_payday or month_end
+    reach = end + timedelta(days=1)
+    events = [
+        *((due, amount) for due, amount, _ in _advance_days(spare, now, today, reach)),
+        *((due, -amount) for due, amount in _bill_days(items, now, today, reach)),
+        *(
+            (due, -amount)
+            for due, amount in _subscription_days(series, today, reach, now=True)
+        ),
+    ]
+    paced = currency_forecast(
+        frame, (), items, today, "UZS", records=records, carried=carried
+    )
 
     frozen, change, frozen_uzs = None, 0.0, 0.0
     rate = rates.to_uzs.get(frozen_currency) if frozen_currency else None
@@ -610,12 +646,16 @@ def day_budget(
             *[item for item in left_now if item.row > 0][:2],
         ),
         over_plan=tuple(over[:3]),
-        runway=uzs_runway(
-            currency_forecast(
-                frame, (), items, today, "UZS", records=records, carried=carried
-            ),
+        runway=horizon_runway(
+            paced.now,
+            paced.per_day_pace,
+            paced.spent_today,
             today,
+            end,
+            events,
             rates,
+            sums_payday,
+            sums_name,
         ),
         history=history,
         ahead=left_now,

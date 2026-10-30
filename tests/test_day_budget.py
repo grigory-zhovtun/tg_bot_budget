@@ -536,20 +536,22 @@ def test_service_builds_the_message_from_the_sheet() -> None:
     )
 
 
-def test_a_one_off_record_in_sums_moves_the_sums_card() -> None:
-    fact = [FACT_HEADER, *OPENING]
-    camp = ["k7f2qa", "05.10.2026", "нет", "", "👶 ДЕТИ", "лагерь", "UZS", 6_000_000,
+def test_a_one_off_record_keeps_its_payment_out_of_the_sums_pace() -> None:
+    paid = fact_row(date(2026, 10, 5), "👶 ДЕТИ", "лагерь", 3_500_000)
+    fact = [FACT_HEADER, *OPENING, paid]
+    camp =["k7f2qa", "05.10.2026", "нет", "", "👶 ДЕТИ", "лагерь", "UZS", 3_500_000,
             "Лагерь", "Тест"]  # fmt: skip
     plain = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab()}))
     planned = AnalyticsService(
         Sheets({"fact": fact, "Oct 26": tab(), "Календарь": [CALENDAR_HEADER, camp]})
     )
-    day = date(2026, 10, 2)
-    assert "💳 Сумы 5,00 млн — до конца месяца хватит" in (
+    day = date(2026, 10, 10)
+    # без записи лагерь — обычная трата: темп 250 000 в день, до ЗП сумов не хватит
+    assert "💳 Сумы 1,50 млн — хватит до 23.10 · до 30.10 обменять ≈ $150" in (
         plain.morning_brief(day).text.splitlines()
     )
-    # 5 млн − лагерь 6 млн 5-го: хватит до 04.10, аванс 15-го закрывает минус
-    assert "💳 Сумы 5,00 млн — хватит до 04.10 · до 15.10 обменять ≈ $90" in (
+    # платёж закрыл разовую запись календаря — в темп он не входит
+    assert "💳 Сумы 1,50 млн — до конца месяца хватит" in (
         planned.morning_brief(day).text.splitlines()
     )
 
@@ -732,8 +734,34 @@ def test_sums_wait_for_a_late_salary_today() -> None:
         for day in range(17, 31)
     ]
     late = budget(date(2026, 10, 31), ADVANCE_PAID, *cafe)
-    # сумы на вечер 30-го: 5 + 2 − 14 = −7 млн; зарплата 10 млн — сегодня
-    assert late.runway is not None and late.runway.short == 0
+    # опоздавшую ЗП ждём сегодня: срок «Сумы» кончается сегодня, а сама она не
+    # прибавляется — сумы 5 + 2 − 14 = −7 млн и темп 1 млн в день
+    assert late.runway is not None
+    assert (late.runway.payday, late.runway.short) == (date(2026, 10, 31), 8_000_000)
+    # утром в день ЗП, до денег, — тоже до сегодня
+    morning = budget(date(2026, 10, 30), ADVANCE_PAID)
+    assert morning.runway is not None
+    assert morning.runway.payday == date(2026, 10, 30)
+
+
+def test_after_the_salary_the_sums_run_to_the_next_one() -> None:
+    day = budget(date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, SALARY_TODAY)
+    # ЗП пришла: срок — до ЗП 30 ноября, аванс 15 ноября — в свой день
+    assert day.runway is not None
+    assert (day.runway.payday, day.runway.short) == (date(2026, 11, 30), 0)
+    assert day.runway.left == 17_000_000 + 2_000_000
+
+
+def test_the_sums_card_takes_the_payments_on_their_days() -> None:
+    # интернет 10-го не оплачен — ждём сегодня; кружок и подписка — 20-го
+    day = budget(date(2026, 10, 16), ADVANCE_PAID, *CLOUD, items=BILLS)
+    assert day.runway is not None
+    assert day.runway.left == 6_900_000 - 300_000 - 500_000 - 50_000
+    # подписку списали сегодня: она уже в сумах сейчас, второй раз не вычитается
+    paid = charge(date(2026, 10, 20), 50_000, "CLOUD STORAGE")
+    later = budget(date(2026, 10, 20), ADVANCE_PAID, *CLOUD, paid, items=BILLS)
+    assert later.runway is not None
+    assert later.runway.left == 6_850_000 - 300_000 - 500_000
 
 
 def test_a_row_raised_after_it_came_opens_again() -> None:
