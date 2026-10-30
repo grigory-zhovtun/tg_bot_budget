@@ -675,6 +675,28 @@ def money_day(rows: list[list[Any]] | None) -> int | None:
     return max(days, default=None)
 
 
+# справочник бота для проверки строк копилок — как его отдаёт bot_catalog: валюты
+# карт, группы и подкатегории
+Catalog = tuple[Collection[str], Sequence[str], Mapping[str, Sequence[str]]]
+
+
+def piggies_now(
+    sheets: tuple[list[list[Any]], list[list[Any]]] | None,
+    catalog: Catalog,
+    frame: pd.DataFrame,
+    rates: Rates,
+    today: date,
+    currency: str | None,
+) -> float | None:
+    """Копилки на сейчас в currency — для «Заморожено» «Сводки» и утра: листы
+    «Копилки» и «Журнал копилок» по справочнику бота, журнал и траты окон по
+    сегодня. Листов нет (не прочитались) или валюты заморозки нет — None."""
+    if sheets is None or not currency:
+        return None
+    book = read_book(*sheets, *catalog)
+    return piggies_total(book, balances(book, frame, rates, today), rates, currency)
+
+
 def piggies_total(
     book: Book, found: Mapping[str, Balance], rates: Rates, currency: str
 ) -> float:

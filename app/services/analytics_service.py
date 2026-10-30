@@ -8,8 +8,8 @@ import calendar
 import io
 import logging
 import re
-from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from app.services.dashboard import Dashboard
     from app.services.day_budget import ForecastItem
     from app.services.forecast import MonthForecast
-    from app.services.piggy import Screen
+    from app.services.piggy import Catalog, Screen
     from app.services.savings import Savings
 
 logger = logging.getLogger(__name__)
@@ -423,8 +423,15 @@ def rich_plan_report(rows: list[list[Any]], today: date) -> list[str]:
 
 
 class AnalyticsService:
-    def __init__(self, gs_service: GoogleSheetsService) -> None:
+    def __init__(
+        self,
+        gs_service: GoogleSheetsService,
+        catalog: "Callable[[], Catalog] | None" = None,
+    ) -> None:
+        """catalog — справочник бота на момент чтения (bot_catalog): по нему «Сводка»,
+        утро и /today читают копилки для «Заморожено»; без него копилки не читаются."""
         self.gs_service = gs_service
+        self.catalog = catalog
 
     def _frame(self) -> pd.DataFrame:
         rows = self.gs_service.get_values(config.FACT_SHEET_NAME)
@@ -606,6 +613,35 @@ class AnalyticsService:
 
         return read_calendar(self.gs_service.get_calendar())
 
+    def _piggies_now(
+        self,
+        sheets: tuple[list[list[Any]], list[list[Any]]] | None,
+        frame: pd.DataFrame,
+        rates: Rates,
+        today: date,
+    ) -> float | None:
+        """Копилки на сейчас для «Заморожено»; без справочника или листов — None. Сбой —
+        в лог: «Заморожено» покажется без «не трогаем», экран и утро не падают."""
+        from app.services.piggy import piggies_now
+
+        if self.catalog is None:
+            return None
+        try:
+            return piggies_now(
+                sheets, self.catalog(), frame, rates, today, config.FROZEN_CURRENCY
+            )
+        except Exception:
+            logger.warning("Piggy banks were not counted: frozen money without them")
+            return None
+
+    def _piggy_sheets(self) -> tuple[list[list[Any]], list[list[Any]]] | None:
+        """Листы копилок для утра и /today — заново; не прочитались — None."""
+        try:
+            return self.gs_service.get_piggy()
+        except Exception:
+            logger.warning("Piggy sheets were not read: frozen money without piggies")
+            return None
+
     def morning_brief(self, today: date | None = None, now: bool = False) -> Report:
         """Лимит на сегодня по вкладке месяца: утреннее сообщение и /today."""
         return self._brief(today, now)[0]
@@ -662,6 +698,11 @@ class AnalyticsService:
                     + format_plan_report(rows, today)
                 ),
                 None,
+            )
+        if budget.frozen is not None and self.catalog is not None:
+            sheets = self._piggy_sheets()
+            budget = replace(
+                budget, piggies=self._piggies_now(sheets, frame, rates, today)
             )
         listed = read_forecast(rows)
         series = outside_list(find_series(frame, today), listed.items if listed else ())
@@ -765,7 +806,11 @@ class AnalyticsService:
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
         sheet = month_title(today)
-        sheets = read_month_sheets(self.gs_service, sheet, max_age, previous=True)
+        # копилки — для «Заморожено»: вместе с остальными листами, если есть справочник
+        piggy = self.catalog is not None and config.FROZEN_CURRENCY is not None
+        sheets = read_month_sheets(
+            self.gs_service, sheet, max_age, previous=True, piggy=piggy
+        )
         if sheets.month is None:
             logger.info("No plan sheet %s", sheet)
             return None
@@ -776,8 +821,9 @@ class AnalyticsService:
             # блок правят руками: его поломка не должна убрать всю «Сводку»
             logger.exception("Could not read the card balance block")
             cards = ()
+        frame = transactions_frame(fact, rates)
         return build_dashboard(
-            transactions_frame(fact, rates),
+            frame,
             sheets.month,
             today,
             rates,
@@ -785,6 +831,7 @@ class AnalyticsService:
             read_calendar(sheets.calendar),
             cards,
             previous=sheets.previous,
+            piggies=self._piggies_now(sheets.piggy, frame, rates, today),
         )
 
     def savings(

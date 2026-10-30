@@ -32,6 +32,7 @@ from app.services.day_budget import (
     short_on,
     today_line,
 )
+from app.services.google_sheets import PIGGY_JOURNAL_HEADER, PIGGY_LIST_HEADER
 from app.services.receipts import match_receipts
 from app.services.recurring import find_series, outside_list
 from tests.test_analytics_service import serial
@@ -546,6 +547,7 @@ class Sheets:
     def __init__(self, tabs: dict[str, list[list[Any]]]) -> None:
         self.tabs = tabs
         self.ages: list[float] = []  # max_age каждого чтения
+        self.piggy_reads = 0  # чтения листов копилок утром и в /today
 
     def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
         self.ages.append(max_age)
@@ -560,6 +562,26 @@ class Sheets:
     def get_calendar(self, max_age: float = 60.0) -> list[list[Any]]:
         self.ages.append(max_age)
         return self.tabs.get("Календарь", [])
+
+    def get_piggy(
+        self, max_age: float = 0.0
+    ) -> tuple[list[list[Any]], list[list[Any]]]:
+        self.piggy_reads += 1
+        return self.tabs.get("Копилки", []), self.tabs.get("Журнал копилок", [])
+
+
+# копилка в USD без срока и статьи — её строка проходит любой справочник с USD
+PIGGY_TABS = {
+    "Копилки": [
+        PIGGY_LIST_HEADER,
+        ["cash01", "Запас", "", "USD", "", "", "", "", "", "", "", "", "Иван", ""],
+    ],
+    "Журнал копилок": [
+        PIGGY_JOURNAL_HEADER,
+        ["01.10.2026", "cash01", "Запас", 500, "USD", "отложил", "Иван", ""],
+    ],
+}
+CATALOG = ({"UZS", "USD"}, ["🍔 ЕДА"], {"🍔 ЕДА": ["кафе"]})
 
 
 def test_service_builds_the_message_from_the_sheet() -> None:
@@ -578,6 +600,45 @@ def test_service_builds_the_message_from_the_sheet() -> None:
     assert AnalyticsService(Sheets({})).morning_brief(date(2026, 11, 1)).text == (
         "Вкладки «Nov 26» с планом нет — бот создаёт её 1-го числа."
     )
+
+
+def usd(amount: float) -> str:
+    return money_text(amount, "USD")
+
+
+def test_the_morning_reads_the_piggies_with_the_catalog() -> None:
+    sheets = Sheets({"fact": [FACT_HEADER, *OPENING], "Oct 26": tab(), **PIGGY_TABS})
+    text = AnalyticsService(sheets, catalog=lambda: CATALOG).morning_brief(
+        date(2026, 10, 10)
+    )
+    keeps = f"не трогаем: подушка {usd(100)}, копилки {usd(500)}"
+    assert f"🧊 Заморожено {usd(600)} — {keeps}" in text.text.splitlines()
+
+
+def test_without_the_catalog_the_morning_does_not_read_the_piggies() -> None:
+    sheets = Sheets({"fact": [FACT_HEADER, *OPENING], "Oct 26": tab(), **PIGGY_TABS})
+    text = AnalyticsService(sheets).morning_brief(date(2026, 10, 10)).text
+    assert f"🧊 Заморожено {usd(600)}" in text.splitlines()
+    assert sheets.piggy_reads == 0
+
+
+def test_a_failed_piggy_read_keeps_the_morning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class Down(Sheets):
+        def get_piggy(
+            self, max_age: float = 0.0
+        ) -> tuple[list[list[Any]], list[list[Any]]]:
+            raise ConnectionError("Google is down")
+
+    sheets = Down({"fact": [FACT_HEADER, *OPENING], "Oct 26": tab()})
+    text = AnalyticsService(sheets, catalog=lambda: CATALOG).morning_brief(
+        date(2026, 10, 10)
+    )
+    # сообщение уходит, «Заморожено» — без разбивки «не трогаем»
+    assert f"🧊 Заморожено {usd(600)}" in text.text.splitlines()
+    assert "не трогаем" not in text.text
+    assert "Piggy" in caplog.text
 
 
 def test_a_one_off_record_keeps_its_payment_out_of_the_sums_pace() -> None:

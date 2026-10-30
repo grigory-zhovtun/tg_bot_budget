@@ -16,6 +16,7 @@ from app.chat_state import ChatState
 from app.handlers import cleanup
 from app.handlers.analytics import Sent
 from app.handlers.common import ANCHOR
+from app.services.piggy_sync import bot_catalog
 from app.web.auth import webhook_secret
 from tests.test_messages import CATEGORIES, SOURCES, SUBCATEGORIES, FakeSheets
 
@@ -284,6 +285,16 @@ def test_icons_and_last_card_reach_the_handlers(
     )
     assert app.bot_data["icons"] == {"кофе": "☕"}
     assert app.bot_data["last_source"] == "VISA 9090 UZS"
+
+
+def test_the_analytics_service_reads_the_bot_catalog(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app = build(monkeypatch)
+    service = app.bot_data["analytics_service"]
+    # копилки «Сводки» и утра проверяются по справочнику бота на момент чтения
+    assert service.catalog is not None
+    assert service.catalog() == bot_catalog(app.bot_data)
 
 
 def test_chat_states_reach_the_handlers(monkeypatch: pytest.MonkeyPatch) -> None:
