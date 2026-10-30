@@ -367,6 +367,42 @@ def _ahead(
     return tuple(sorted(left, key=lambda item: item.day))
 
 
+def carried_items(
+    previous: list[list[Any]] | None, frame: pd.DataFrame, first: date
+) -> tuple[ForecastItem, ...]:
+    """Перенос: поступления прошлого месяца, по которым пришло меньше 90 %, ждут свой
+    остаток в месяце first — «<название> за <месяц>, остаток», день 1, сумма —
+    непришедшая часть в валюте строки. Сверка прошлого месяца — по fact на сейчас:
+    доход, записанный позже с его датой, уменьшает остаток; из позапрошлого месяца
+    ничего не переносится. Платежи не переносятся. Строки — −1, −2, … по дням
+    прошлого месяца: со строками вкладки не совпадут. previous — вкладка прошлого
+    месяца; её нет или в ней нет списка — ()."""
+    listed = read_forecast(previous) if previous is not None else None
+    if listed is None:
+        return ()
+    last = first - timedelta(days=1)
+    start = last.replace(day=1)
+    receipts = match_receipts(frame, listed.items, start, last)
+    month = MONTHS_RU[start.month - 1]
+    found: list[ForecastItem] = []
+    for item in sorted(listed.items, key=lambda item: (item.day, item.row)):
+        if item.amount <= 0:
+            continue
+        rest = remaining(item, receipts.get(item.row, NOTHING))
+        if rest > 0:
+            found.append(
+                ForecastItem(
+                    f"{item.name} за {month}, остаток",
+                    1,
+                    rest,
+                    item.currency,
+                    item.uzs * rest / item.amount,
+                    -len(found) - 1,
+                )
+            )
+    return tuple(found)
+
+
 def day_budget(
     frame: pd.DataFrame,
     rows: list[list[Any]],
