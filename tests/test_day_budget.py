@@ -489,10 +489,15 @@ def test_an_unpaid_payment_waits_with_its_next_month() -> None:
 
 
 def test_the_frozen_money_splits_into_the_cushion_and_the_piggies() -> None:
-    assert frozen_split(2_300, 1_000) == (1_300, 0, 0)
-    assert frozen_split(1_200, 1_500) == (0, 300, 0)  # копилки больше карты
-    assert frozen_split(-400, 0) == (0, 0, 400)  # долларов не хватает на платежи
-    assert frozen_split(-400, 500) == (0, 900, 0)  # одно предупреждение — про копилки
+    # (заморожено, копилки, всего на карте)
+    assert frozen_split(2_300, 1_000, 3_000) == (1_300, 0, 0)
+    assert frozen_split(1_200, 1_500, 1_200) == (0, 300, 0)  # копилки больше карты
+    assert frozen_split(-400, 0, 300) == (0, 0, 400)  # долларов не хватает на платежи
+    # копилки больше всей карты — одно предупреждение, про копилки
+    assert frozen_split(-400, 500, 300) == (0, 200, 0)
+    # день ЗП: 600 $ на карте, копилки 500 $, квартплата 400 $ — копилки меньше
+    # карты, не хватает долларов на платёж
+    assert frozen_split(200, 500, 600) == (0, 0, 300)
     rent = Payment(date(2026, 10, 18), "Квартплата", 400)
     course = Payment(date(2026, 10, 25), "Курсы", 1_000)
     assert short_on(1_000, (rent, course)) == date(2026, 10, 25)
@@ -637,6 +642,9 @@ def test_a_failed_piggy_read_keeps_the_morning(
     )
     # сообщение уходит, «Заморожено» — без разбивки «не трогаем»
     assert f"🧊 Заморожено {usd(600)}" in text.text.splitlines()
+    # в логе — и причина сбоя, а не только что копилок нет
+    warned = [r for r in caplog.records if "Piggy sheets were not read" in r.message]
+    assert warned and warned[-1].exc_info is not None
     assert "не трогаем" not in text.text
     assert "Piggy" in caplog.text
 

@@ -258,11 +258,18 @@ def test_a_payment_of_next_month_names_its_month() -> None:
 
 
 def test_the_frozen_line_says_what_to_do_when_it_does_not_add_up() -> None:
-    over = replace(budget(date(2026, 10, 10)), piggies=700)
+    # 1000 $ на карте, квартплата 18-го 400 $: копилки 1200 $ больше всей карты
+    over = replace(budget(date(2026, 10, 10)), piggies=1_200)
     assert (
-        f"   ⚠️ копилки больше карты на {usd(100)} — отложите разницу или "
+        f"   ⚠️ копилки больше карты на {usd(200)} — отложите разницу или "
         "поправьте копилки"
     ) in format_day_budget(over).splitlines()
+    # копилки 700 $ меньше карты, но с квартплатой не помещаются — долларов мало
+    tight = format_day_budget(replace(budget(date(2026, 10, 10)), piggies=700))
+    assert (
+        f"   ⚠️ долларов не хватает на платежи — купите {usd(100)} до 18-го"
+    ) in tight.splitlines()
+    assert "копилки больше карты" not in tight
     short = budget(date(2026, 10, 10), items=[*ITEMS, ("Курсы", 25, -1_000, "USD")])
     lines = format_day_budget(short).splitlines()
     at = lines.index(f"🧊 Заморожено {usd(-400)}")  # копилок не читали: без разбивки
@@ -272,6 +279,13 @@ def test_the_frozen_line_says_what_to_do_when_it_does_not_add_up() -> None:
         f"   Квартплата 18-го — {usd(400)}",
         f"   Курсы 25-го — {usd(1_000)}",
     ]
+
+
+def test_a_payment_that_is_already_late_says_to_buy_today() -> None:
+    # курсы 8-го на 1200 $ не оплачены: долларов не хватает уже сейчас
+    late = [*ITEMS, ("Курсы", 8, -1_200, "USD")]
+    lines = format_day_budget(budget(date(2026, 10, 10), items=late)).splitlines()
+    assert f"   ⚠️ долларов не хватает на платежи — купите {usd(600)} сегодня" in lines
 
 
 def test_due_subscriptions_are_short_lines() -> None:

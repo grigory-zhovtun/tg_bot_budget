@@ -206,7 +206,9 @@ def monthly_spending(
         return 0.0
     spending = expenses(frame)
     if groups is not None:
-        spending = spending[spending["group"].isin(list(groups))]
+        # по названию без эмодзи: «🏚 ДОМ» в fact и «🏚️ ДОМ» в справочнике — одна группа
+        wanted = {_bare(group) for group in groups}
+        spending = spending[spending["group"].map(_bare).isin(wanted)]
     spent = _by_month(spending)
     return float(sum(spent.get(month, 0.0) for month in months) / len(months))
 

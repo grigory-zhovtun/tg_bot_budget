@@ -2,7 +2,12 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Api, SavingsScreen } from "../api";
-import { bootstrapFixture, savingsFixture } from "../mocks/fixtures";
+import {
+  bootstrapFixture,
+  dashboardFixture,
+  savingsFixture,
+} from "../mocks/fixtures";
+import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
 import { nb } from "../test/text";
 import SavingsTab from "./SavingsTab";
@@ -311,6 +316,25 @@ describe("SavingsTab", () => {
     await user.click(screen.getByRole("button", { name: "Сохранить" }));
     expect(api.updatePiggy).toHaveBeenCalled();
     await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("asks «Сводка» again after a piggy save: its frozen card shows the piggies", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    const store = new Store();
+    store.put("dashboard", dashboardFixture);
+    render(
+      <StoreProvider value={store}>
+        <SavingsTab api={api} boot={bootstrapFixture} />
+      </StoreProvider>,
+    );
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Открыть копилку «Новый год»",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+    await vi.waitFor(() => expect(store.get("dashboard").at).toBe(0));
   });
 
   it("starts a new piggy and sets a sum aside from the top", async () => {

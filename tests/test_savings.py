@@ -132,6 +132,14 @@ def test_the_month_of_life_counts_only_the_mandatory_groups() -> None:
     assert life_month(frame(*rows), TODAY, ()).amount == 0  # групп нет
 
 
+def test_the_month_of_life_finds_the_group_whatever_its_emoji() -> None:
+    # в fact «🏚 ДОМ» без вариационного знака, в справочнике — «🏚️ ДОМ»
+    rows = [
+        fact_row(date(2026, m, 5), "🏚 ДОМ", "квартплата", 6_000_000) for m in (7, 8, 9)
+    ]
+    assert life_month(frame(*rows), TODAY, ("🏚️ ДОМ",)).amount == 6_000_000
+
+
 def test_the_mandatory_groups_are_the_defaults_in_the_catalog() -> None:
     catalog = ["🍔 ЕДА", "🚌 ТРАНСПОРТ", "🏚 ДОМ", "🌛 ЕЖЕМЕСЯЧНО", "💳 СЧЕТА"]
     # нет 🚑 ЗДОРОВЬЕ, 👶 ДЕТИ, 🎓 ОБРАЗОВАНИЕ — пропущены; «🏚 ДОМ» — та же группа

@@ -256,7 +256,9 @@ function SectionCards({ data, section }: SectionProps) {
           {/* лимита нет именно здесь — здесь и объясняем */}
           {data.status === "no_forecast" && <NoForecastNote />}
           <Today data={data} />
-          {data.frozen && <FrozenCard frozen={data.frozen} />}
+          {data.frozen && (
+            <FrozenCard frozen={data.frozen} today={data.today} />
+          )}
           <Sums data={data} />
           {data.cards.length > 0 && (
             <CardBalances cards={data.cards} today={data.today} />

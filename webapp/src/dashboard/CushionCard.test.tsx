@@ -41,7 +41,7 @@ function counted(): (string | undefined)[] {
 
 describe("CushionCard", () => {
   it("shows the cushion now and how it is counted", () => {
-    render(<CushionCard cushion={fixture()} />);
+    render(<CushionCard today="2026-10-10" cushion={fixture()} />);
     const heading = screen.getByRole("heading");
     expect(heading.textContent).toBe("🛟 Подушка");
     // при крупном шрифте плашка уходит на следующую строку, а не за экран
@@ -74,6 +74,7 @@ describe("CushionCard", () => {
   it("colours the months by the steps", () => {
     const low = render(
       <CushionCard
+        today="2026-10-10"
         cushion={fixture({
           months: 0.8,
           steps: [
@@ -90,6 +91,7 @@ describe("CushionCard", () => {
     low.unmount();
     const mid = render(
       <CushionCard
+        today="2026-10-10"
         cushion={fixture({
           months: 3.5,
           steps: [{ months: 6, short: 2500, short_uzs: 30_000_000 }],
@@ -99,13 +101,18 @@ describe("CushionCard", () => {
     expect(screen.getByText("3,5 мес.").className).toContain("bg-chip-good");
     expect(screen.getByText("До цели 6 месяцев — ещё 2 500 $")).toBeTruthy();
     mid.unmount();
-    render(<CushionCard cushion={fixture({ months: 6, steps: [] })} />);
+    render(
+      <CushionCard
+        today="2026-10-10"
+        cushion={fixture({ months: 6, steps: [] })}
+      />,
+    );
     expect(screen.getByText("✓ 6,0 мес.").className).toContain("bg-chip-good");
     expect(screen.getByText("✓ Цель 6 мес. достигнута")).toBeTruthy();
   });
 
   it("marks one and three months on the bar", () => {
-    render(<CushionCard cushion={fixture()} />);
+    render(<CushionCard today="2026-10-10" cushion={fixture()} />);
     const bar = screen.getByRole("progressbar", {
       name: "Подушка: 1,3 из 6 месяцев",
     });
@@ -120,7 +127,12 @@ describe("CushionCard", () => {
   });
 
   it("keeps the bar value within its scale", () => {
-    render(<CushionCard cushion={fixture({ months: 12, steps: [] })} />);
+    render(
+      <CushionCard
+        today="2026-10-10"
+        cushion={fixture({ months: 12, steps: [] })}
+      />,
+    );
     const bar = screen.getByRole("progressbar");
     expect(bar.getAttribute("aria-valuenow")).toBe("6");
     expect(bar.getAttribute("aria-valuetext")).toBe("12,0 из 6 месяцев");
@@ -129,6 +141,7 @@ describe("CushionCard", () => {
   it("says when there are no mandatory groups", () => {
     render(
       <CushionCard
+        today="2026-10-10"
         cushion={fixture({ life_groups: [], months: null, monthly: 0 })}
       />,
     );
@@ -144,6 +157,7 @@ describe("CushionCard", () => {
   it("says why there are no months before any spending", () => {
     render(
       <CushionCard
+        today="2026-10-10"
         cushion={fixture({ life_months: [], months: null, monthly: 0 })}
       />,
     );
@@ -152,7 +166,12 @@ describe("CushionCard", () => {
   });
 
   it("warns when the piggies are over the card", () => {
-    render(<CushionCard cushion={fixture({ amount: 0, uzs: 0, over: 300 })} />);
+    render(
+      <CushionCard
+        today="2026-10-10"
+        cushion={fixture({ amount: 0, uzs: 0, over: 300 })}
+      />,
+    );
     expect(screen.getByText("⚠️ Копилки больше карты")).toBeTruthy();
     expect(screen.getByText("разница 300 $")).toBeTruthy();
   });

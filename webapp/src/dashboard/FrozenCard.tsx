@@ -6,8 +6,9 @@ import { dayMonth } from "./piggyText";
 interface WarningsProps {
   currency: string;
   over: number; // копилки больше карты на столько
-  lacking: number; // копилок нет, а долларов на платежи не хватает
+  lacking: number; // копилки и платежи срока не помещаются на карте — купить столько
   lackingOn: string | null; // день платежа, с которого не хватает
+  today: string; // этот день прошёл — купить сегодня
 }
 
 /** Когда «Заморожено» не сходится — что делать: копилки больше карты или долларов
@@ -17,8 +18,12 @@ export function FrozenWarnings({
   over,
   lacking,
   lackingOn,
+  today,
 }: WarningsProps) {
   const sum = (value: number) => moneyText(value, currency);
+  let when = "";
+  if (lackingOn)
+    when = lackingOn <= today ? " сегодня" : ` до ${dayMonth(lackingOn)}`;
   return (
     <>
       {over > 0 && (
@@ -32,9 +37,7 @@ export function FrozenWarnings({
       {lacking > 0 && (
         <>
           <Warn>Долларов не хватает на платежи</Warn>
-          <Line>
-            {`купите ${sum(lacking)}${lackingOn ? ` до ${dayMonth(lackingOn)}` : ""}`}
-          </Line>
+          <Line>{`купите ${sum(lacking)}${when}`}</Line>
         </>
       )}
     </>
@@ -43,7 +46,13 @@ export function FrozenWarnings({
 
 /** «🧊 Заморожено»: доллары, которые не трогаем, — подушка и копилки; остальные — на
  * платежи до зарплаты; всего на карте — как в «Остатках на картах». */
-export default function FrozenCard({ frozen }: { frozen: Frozen }) {
+export default function FrozenCard({
+  frozen,
+  today,
+}: {
+  frozen: Frozen;
+  today: string;
+}) {
   const sum = (value: number) => moneyText(value, frozen.currency);
   const known = frozen.piggies !== null && frozen.cushion !== null;
   return (
@@ -69,6 +78,7 @@ export default function FrozenCard({ frozen }: { frozen: Frozen }) {
         over={frozen.over}
         lacking={frozen.lacking}
         lackingOn={frozen.lacking_on}
+        today={today}
       />
       {frozen.payments.length > 0 && (
         <>

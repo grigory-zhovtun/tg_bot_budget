@@ -1193,7 +1193,7 @@ def savings_screen(
     frozen = budget.frozen if budget is not None else None
     if budget is not None and frozen is not None and currency and frozen_rate:
         envelopes = piggies_total(book, now, rates, currency)
-        kept, over, lacking = frozen_split(frozen, envelopes)
+        kept, over, lacking = frozen_split(frozen, envelopes, budget.frozen_total)
         life = life_month(frame, today, life_groups(groups))
         cushion = Cushion(
             kept,

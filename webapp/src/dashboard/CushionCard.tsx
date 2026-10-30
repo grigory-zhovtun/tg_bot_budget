@@ -142,7 +142,13 @@ function LifeMonth({ cushion }: { cushion: Cushion }) {
 
 /** «🛟 Подушка»: подушка на сейчас — доллары на карте без платежей срока и копилок,
  * в месяцах жизни; полоса до цели и сколько ещё до ступеней 1, 3 и цели. */
-export default function CushionCard({ cushion }: { cushion: Cushion }) {
+export default function CushionCard({
+  cushion,
+  today,
+}: {
+  cushion: Cushion;
+  today: string;
+}) {
   const { months, target_months: target, currency } = cushion;
   const sum = (value: number) => moneyText(value, currency);
   const shown = months === null ? null : level(months, target);
@@ -181,6 +187,7 @@ export default function CushionCard({ cushion }: { cushion: Cushion }) {
         over={cushion.over}
         lacking={cushion.lacking}
         lackingOn={cushion.lacking_on}
+        today={today}
       />
     </Card>
   );

@@ -32,7 +32,7 @@ function lines(): string[] {
 
 describe("FrozenCard", () => {
   it("shows what the frozen dollars keep and where the rest goes", () => {
-    render(<FrozenCard frozen={fixture()} />);
+    render(<FrozenCard frozen={fixture()} today="2026-10-10" />);
     expect(lines()).toEqual([
       "🧊 Заморожено 2 300 $",
       "не трогаем:",
@@ -45,7 +45,12 @@ describe("FrozenCard", () => {
   });
 
   it("shows no breakdown without the piggies", () => {
-    render(<FrozenCard frozen={fixture({ piggies: null, cushion: null })} />);
+    render(
+      <FrozenCard
+        frozen={fixture({ piggies: null, cushion: null })}
+        today="2026-10-10"
+      />,
+    );
     expect(screen.queryByText("не трогаем:")).toBeNull();
     expect(screen.queryByRole("table")).toBeNull();
     expect(lines()[0]).toBe("🧊 Заморожено 2 300 $");
@@ -58,7 +63,7 @@ describe("FrozenCard", () => {
       cushion: 0,
       over: 300,
     });
-    render(<FrozenCard frozen={over} />);
+    render(<FrozenCard frozen={over} today="2026-10-10" />);
     expect(screen.getByText("⚠️ Копилки больше карты")).toBeTruthy();
     expect(lines()).toContain("разница 300 $");
     expect(screen.getByText("отложите разницу")).toBeTruthy();
@@ -74,13 +79,28 @@ describe("FrozenCard", () => {
       lacking: 400,
       lacking_on: "2026-11-18",
     });
-    render(<FrozenCard frozen={short} />);
+    render(<FrozenCard frozen={short} today="2026-10-10" />);
     expect(lines()).toContain("🧊 Заморожено −400 $");
     expect(screen.getByText("⚠️ Долларов не хватает на платежи")).toBeTruthy();
     expect(lines()).toContain("купите 400 $ до 18.11");
     // без дня — без «до …»
     const unknown = fixture({ amount: -400, lacking: 400, piggies: null });
-    render(<FrozenCard frozen={{ ...unknown, cushion: null }} />);
+    render(
+      <FrozenCard frozen={{ ...unknown, cushion: null }} today="2026-10-10" />,
+    );
     expect(screen.getByText(/^купите 400\s\$$/)).toBeTruthy();
+  });
+
+  it("says to buy today when the payment day has passed", () => {
+    const late = fixture({
+      amount: -600,
+      total: 1000,
+      piggies: 0,
+      cushion: 0,
+      lacking: 600,
+      lacking_on: "2026-10-08",
+    });
+    render(<FrozenCard frozen={late} today="2026-10-10" />);
+    expect(lines()).toContain("купите 600 $ сегодня");
   });
 });

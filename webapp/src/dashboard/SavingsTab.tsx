@@ -179,6 +179,8 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
   const saved = useCallback(
     (fresh: SavingsScreen) => {
       store.put("savings", fresh);
+      // «Заморожено» «Сводки» делится на подушку и копилки — пусть перечитает
+      store.expire(["dashboard"]);
       setOpened(null);
       setSaving(false);
       setSetting(null);
@@ -261,7 +263,9 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
           onPercent={boot ? () => setSetting("percent") : null}
         />
       )}
-      {data.cushion && <CushionCard cushion={data.cushion} />}
+      {data.cushion && (
+        <CushionCard cushion={data.cushion} today={data.today} />
+      )}
       <section className="flex flex-col gap-2" aria-label="Копилки">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-fact font-extrabold">🐷 Копилки</h2>

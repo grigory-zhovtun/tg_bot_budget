@@ -580,7 +580,9 @@ class AnalyticsService:
         except WorksheetNotFound:
             return None
         except Exception:
-            logger.warning("Last month's tab %s was not read: no carry-over", sheet)
+            logger.warning(
+                "Last month's tab %s was not read: no carry-over", sheet, exc_info=True
+            )
             return None
 
     def last_months_rest(self, today: date) -> tuple["ForecastItem", ...]:
@@ -631,7 +633,10 @@ class AnalyticsService:
                 sheets, self.catalog(), frame, rates, today, config.FROZEN_CURRENCY
             )
         except Exception:
-            logger.warning("Piggy banks were not counted: frozen money without them")
+            logger.warning(
+                "Piggy banks were not counted: frozen money without them",
+                exc_info=True,
+            )
             return None
 
     def _piggy_sheets(self) -> tuple[list[list[Any]], list[list[Any]]] | None:
@@ -639,7 +644,10 @@ class AnalyticsService:
         try:
             return self.gs_service.get_piggy()
         except Exception:
-            logger.warning("Piggy sheets were not read: frozen money without piggies")
+            logger.warning(
+                "Piggy sheets were not read: frozen money without piggies",
+                exc_info=True,
+            )
             return None
 
     def morning_brief(self, today: date | None = None, now: bool = False) -> Report:

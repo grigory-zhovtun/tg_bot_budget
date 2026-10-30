@@ -591,6 +591,12 @@ def test_the_frozen_card_adds_up() -> None:
     plain = build_dashboard(frame(), tab(), date(2026, 10, 2), RATES, "USD")
     body = dashboard_for(plain).json()["frozen"]
     assert (body["piggies"], body["cushion"]) == (None, None)
+    # копилки 700 $ меньше карты, но с квартплатой не помещаются: купить 100 $ до 18-го
+    tight = build_dashboard(
+        frame(), tab(), date(2026, 10, 2), RATES, "USD", piggies=700
+    )
+    body = dashboard_for(tight).json()["frozen"]
+    assert (body["over"], body["lacking"], body["lacking_on"]) == (0, 100, "2026-10-18")
 
 
 def test_the_dashboard_takes_copies_unless_asked_to_refresh() -> None:

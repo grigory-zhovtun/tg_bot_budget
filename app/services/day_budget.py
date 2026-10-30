@@ -438,15 +438,19 @@ def _bill_days(
     )
 
 
-def frozen_split(frozen: float, piggies: float) -> tuple[float, float, float]:
+def frozen_split(
+    frozen: float, piggies: float, total: float
+) -> tuple[float, float, float]:
     """«Заморожено» → (подушка, копилки больше карты, долларов не хватает), до цента.
-    Подушка — заморожено без копилок, не меньше нуля; копилки есть и их больше — на
-    сколько; копилок нет, а заморожено меньше нуля — столько долларов не хватает на
-    платежи. Одно предупреждение: с копилками — про копилки."""
+    Подушка — заморожено без копилок, не меньше нуля. Копилок больше, чем всего на
+    карте (total), — на сколько: это поправить в копилках. Иначе копилки и платежи срока
+    не помещаются на карте — столько долларов купить. Одно предупреждение: при обоих —
+    про копилки."""
     cushion = round(max(0.0, frozen - piggies), 2)
-    if piggies > 0:
-        return cushion, round(max(0.0, piggies - frozen), 2), 0.0
-    return cushion, 0.0, round(max(0.0, -frozen), 2)
+    over = round(max(0.0, piggies - total), 2)
+    if over > 0:
+        return cushion, over, 0.0
+    return cushion, 0.0, round(max(0.0, piggies - frozen), 2)
 
 
 def short_on(total: float, payments: Sequence[Payment]) -> date | None:
@@ -889,7 +893,8 @@ def _frozen_lines(budget: DayBudget) -> tuple[str, str | None, list[str]] | None
     if b.frozen is None or not b.frozen_currency:
         return None
     code = b.frozen_currency
-    cushion, over, lacking = frozen_split(b.frozen, b.piggies or 0.0)
+    piggies = b.piggies or 0.0
+    cushion, over, lacking = frozen_split(b.frozen, piggies, b.frozen_total)
     keeps = None
     if b.piggies is not None:
         keeps = (
@@ -903,8 +908,13 @@ def _frozen_lines(budget: DayBudget) -> tuple[str, str | None, list[str]] | None
             "или поправьте копилки"
         )
     if lacking > 0:
-        day = short_on(b.frozen_total, b.frozen_payments)
-        until = f" до {_day_text(day, b.today)}" if day is not None else ""
+        # без копилок на карте не хватает с платежа day; он прошёл — купить сегодня
+        day = short_on(b.frozen_total - piggies, b.frozen_payments)
+        until = (
+            ""
+            if day is None
+            else " сегодня" if day <= b.today else f" до {_day_text(day, b.today)}"
+        )
         lines.append(
             f"⚠️ долларов не хватает на платежи — купите {money_text(lacking, code)}"
             f"{until}"

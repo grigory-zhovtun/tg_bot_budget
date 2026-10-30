@@ -1376,7 +1376,9 @@ def _optional_tab(
     try:
         return _tab(read)
     except Exception:
-        logger.warning("Last month's tab %s was not read: no carry-over", title)
+        logger.warning(
+            "Last month's tab %s was not read: no carry-over", title, exc_info=True
+        )
         return None
 
 
@@ -1394,7 +1396,10 @@ def _piggy_sheets(
         except gspread.WorksheetNotFound:
             found.append([])
         except Exception:
-            logger.warning("Piggy sheets were not read: frozen money without piggies")
+            logger.warning(
+                "Piggy sheets were not read: frozen money without piggies",
+                exc_info=True,
+            )
             return None
     return found[0], found[1]
 

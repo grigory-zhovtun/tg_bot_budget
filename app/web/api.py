@@ -375,7 +375,9 @@ def cushion_out(cushion: Cushion | None) -> CushionOut | None:
         ],
         lacking=_rounded(cushion.lacking, code),
         lacking_on=(
-            short_on(cushion.card, cushion.payments) if cushion.lacking > 0 else None
+            short_on(cushion.card - cushion.piggies, cushion.payments)
+            if cushion.lacking > 0
+            else None
         ),
         life_months=[f"{month:%Y-%m}" for month in life.months] if life else [],
         life_groups=list(life.groups) if life else [],
@@ -610,7 +612,8 @@ def frozen_out(budget: DayBudget) -> FrozenOut | None:
     копилки), что не сходится и платежи срока; заморозку не считаем — None."""
     if budget.frozen is None or not budget.frozen_currency:
         return None
-    cushion, over, lacking = frozen_split(budget.frozen, budget.piggies or 0.0)
+    piggies = budget.piggies or 0.0
+    cushion, over, lacking = frozen_split(budget.frozen, piggies, budget.frozen_total)
     return FrozenOut(
         amount=budget.frozen,
         currency=budget.frozen_currency,
@@ -625,7 +628,7 @@ def frozen_out(budget: DayBudget) -> FrozenOut | None:
         over=over,
         lacking=lacking,
         lacking_on=(
-            short_on(budget.frozen_total, budget.frozen_payments)
+            short_on(budget.frozen_total - piggies, budget.frozen_payments)
             if lacking > 0
             else None
         ),
