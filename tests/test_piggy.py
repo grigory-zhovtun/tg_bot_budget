@@ -466,7 +466,7 @@ def frozen(amount: float, change: float = 0.0) -> Any:
     """Дневной бюджет — только то, что берут копилки: «Заморожено» в долларах."""
     return SimpleNamespace(
         frozen=amount,
-        frozen_change=change,
+        frozen_start=amount - change,
         frozen_currency="USD",
         frozen_uzs=amount * 12_000,
     )

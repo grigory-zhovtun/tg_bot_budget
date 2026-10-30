@@ -20,13 +20,16 @@ from app.services.calendar import HEADER as CALENDAR_HEADER
 from app.services.calendar import read_calendar
 from app.services.day_budget import (
     ForecastItem,
+    Payment,
     _advance_days,
     _bill_days,
     _salaries,
     _subscription_days,
     day_budget,
     format_day_budget,
+    frozen_split,
     read_forecast,
+    short_on,
     today_line,
 )
 from app.services.receipts import match_receipts
@@ -432,34 +435,67 @@ def test_the_savings_goal_does_not_change_the_limit(goal: float | None) -> None:
     assert first.growth == pytest.approx(4_100_000)
 
 
-def test_frozen_is_the_dollar_card_without_dollar_payments_ahead() -> None:
+EXCHANGE_TODAY = [
+    fact_row(date(2026, 10, 10), "💳 СЧЕТА", "обмен валюты", 100, "USD"),
+    fact_row(date(2026, 10, 10), "💳 СЧЕТА", "обмен валюты", -1_200_000),
+]
+
+
+def test_frozen_is_the_dollars_now_without_the_payments_until_the_salary() -> None:
     calm = budget(date(2026, 10, 10))
-    assert (calm.frozen, calm.frozen_change) == (600, 0)  # 1000 − 400 на квартиру
-    assert calm.frozen_uzs == pytest.approx(7_200_000)
-
-    # 5 октября 100 USD перевели на сумовую карту: заморозка меньше, лимит тот же
-    exchange = [
-        fact_row(date(2026, 10, 5), "💳 СЧЕТА", "обмен валюты", 100, "USD"),
-        fact_row(date(2026, 10, 5), "💳 СЧЕТА", "обмен валюты", -1_200_000),
-    ]
-    took = budget(date(2026, 10, 10), *exchange)
-    assert (took.frozen, took.frozen_change) == (500, -100)
-    # доллары стали сумами: лимит до ЗП вырос — (5 + 1,2 + аванс 2) млн на 21 день
-    assert (calm.limit, took.limit) == (
-        pytest.approx(7_000_000 / 21),
-        pytest.approx(8_200_000 / 21),
-    )
-    assert "🧊 Заморожено: 500,00 USD ≈ 6,00 млн (с 1-го числа −100,00 USD)" in (
-        format_day_budget(took)
-    )
-
-    paid = budget(
-        date(2026, 10, 19),
-        fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 400, "USD"),
-    )
-    assert paid.frozen == 600  # квартплату заплатили из отложенного на неё
-
+    # квартплата 18-го — в сроке до ЗП 30-го
+    assert (calm.frozen, calm.frozen_total, calm.frozen_uzs) == (600, 1000, 7_200_000)
+    assert calm.frozen_payments == (Payment(date(2026, 10, 18), "Квартплата", 400),)
+    assert calm.frozen_start == 600  # на 1-е по прежнему правилу — плану копилок
+    took = budget(date(2026, 10, 10), *EXCHANGE_TODAY)  # обмен сегодня виден сразу
+    assert (took.frozen, took.frozen_total, took.frozen_start) == (500, 900, 600)
+    assert budget(date(2026, 10, 19), RENT_PAID).frozen_payments == ()
     assert day_budget(frame(), tab(), date(2026, 10, 10), RATES, None).frozen is None
+
+
+def test_the_salary_day_morning_keeps_the_frozen_dollars() -> None:
+    eve = budget(date(2026, 10, 29), ADVANCE_PAID, RENT_PAID)
+    morning = budget(date(2026, 10, 30), ADVANCE_PAID, RENT_PAID)
+    # денег ещё нет — срок кончается сегодня: ноябрьская квартплата не вычитается
+    assert eve.frozen == morning.frozen == 600
+    assert morning.frozen_payments == ()
+    came = budget(date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, SALARY_TODAY)
+    assert came.tomorrow is not None  # этап 1б: ЗП пришла сегодня
+    assert came.frozen == 200  # срок — до ЗП 30 ноября, квартплата 18 ноября целиком
+    assert came.frozen_payments == (Payment(date(2026, 11, 18), "Квартплата", 400),)
+
+
+def test_a_late_salary_keeps_next_months_payments_out() -> None:
+    late = budget(date(2026, 10, 31), ADVANCE_PAID, RENT_PAID)  # ЗП 30-го не пришла
+    assert (late.frozen, late.frozen_payments) == (600, ())
+
+
+def test_the_first_of_the_month_keeps_the_frozen_dollars() -> None:
+    paid = (ADVANCE_PAID, RENT_PAID, SALARY_TODAY)
+    last, first = budget(date(2026, 10, 31), *paid), budget(date(2026, 11, 1), *paid)
+    # 1 ноября вкладка ноября с тем же списком: квартплата 18-го — уже строка месяца
+    assert last.frozen == first.frozen == 200
+    assert last.frozen_payments == first.frozen_payments
+
+
+def test_an_unpaid_payment_waits_with_its_next_month() -> None:
+    day = budget(date(2026, 10, 31), ADVANCE_PAID, SALARY_TODAY)  # октябрь не оплачен
+    assert day.frozen == 200  # 1000 − 400 за октябрь − 400 за ноябрь
+    assert [p.day for p in day.frozen_payments] == [
+        date(2026, 10, 18),
+        date(2026, 11, 18),
+    ]
+
+
+def test_the_frozen_money_splits_into_the_cushion_and_the_piggies() -> None:
+    assert frozen_split(2_300, 1_000) == (1_300, 0, 0)
+    assert frozen_split(1_200, 1_500) == (0, 300, 0)  # копилки больше карты
+    assert frozen_split(-400, 0) == (0, 0, 400)  # долларов не хватает на платежи
+    assert frozen_split(-400, 500) == (0, 900, 0)  # одно предупреждение — про копилки
+    rent = Payment(date(2026, 10, 18), "Квартплата", 400)
+    course = Payment(date(2026, 10, 25), "Курсы", 1_000)
+    assert short_on(1_000, (rent, course)) == date(2026, 10, 25)
+    assert short_on(1_000, (rent,)) is None
 
 
 OVERSPENT = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000)

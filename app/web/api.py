@@ -701,7 +701,7 @@ def dashboard_out(
             amount=budget.frozen,
             currency=budget.frozen_currency,
             uzs=budget.frozen_uzs,
-            change=budget.frozen_change,
+            change=0.0,  # «с 1-го числа» убрана; поле — для открытых до обновления
         )
     return DashboardOut(
         status="ok",

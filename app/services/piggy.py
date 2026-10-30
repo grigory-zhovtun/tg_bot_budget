@@ -994,15 +994,19 @@ def savings_screen(
     currency = budget.frozen_currency if budget is not None else None
     frozen_rate = rates.to_uzs.get(currency or "", 0.0)
     cushion_uzs: float | None = None
-    if budget is not None and budget.frozen is not None and currency and frozen_rate:
+    if (
+        budget is not None
+        and budget.frozen is not None
+        and budget.frozen_start is not None
+        and currency
+        and frozen_rate
+    ):
         envelopes_start = sum(
             rates.convert(start[piggy.id].left, piggy.currency, currency) or 0.0
             for piggy in open_piggies
             if piggy.id in start
         )
-        cushion_uzs = (
-            budget.frozen - budget.frozen_change - envelopes_start
-        ) * frozen_rate
+        cushion_uzs = (budget.frozen_start - envelopes_start) * frozen_rate
     collected_goals = {
         piggy.id: start[piggy.id].collected * rates.to_uzs.get(piggy.currency, 0.0)
         for piggy in goals

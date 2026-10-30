@@ -197,7 +197,7 @@ def test_runway_and_frozen_variants() -> None:
     short = Runway(
         5_000_000, 0, date(2026, 10, 23), 1_000_000, payday, 370, -1e6, payday, "ЗП"
     )
-    blocks = rich_day_budget(replace(b, runway=short, frozen_change=-117.45))
+    blocks = rich_day_budget(replace(b, runway=short))
     # заголовок — «сейчас»: сумы с утра уже могли измениться
     assert heading(f"💳 Сумы сейчас {whole(5_000_000)}") in blocks
     exchange = f"до зарплаты 30-го обменять ≈{NBSP}{in_currency(370, 'USD')}"
@@ -209,10 +209,8 @@ def test_runway_and_frozen_variants() -> None:
     assert para(
         "✓ до зарплаты сегодня хватит", f"останется ≈{NBSP}{whole(400_000)}"
     ) in (rich_day_budget(replace(b, runway=today)))
-    change = in_currency(117.45, "USD", with_cents=True)
-    assert (
-        para(f"≈{NBSP}{whole(b.frozen_uzs)} сум", f"с 1-го числа −{change}") in blocks
-    )
+    # «с 1-го числа ±X» убрана: она смешивала обмен, взносы и платежи
+    assert not any("с 1-го числа" in block for block in blocks)
 
 
 def test_due_subscriptions_are_short_lines() -> None:

@@ -20,9 +20,13 @@
 сумы по сегодня, срок с завтра по следующую зарплату. Завтра 1-е число — строки
 вкладки на те же дни следующего месяца, ещё не пришедшие.
 
-Заморожено — карты в валюте заморозки (долларовая) без платежей в этой валюте,
-которые ещё впереди. Лимит эти деньги не тратит: он считает только сумы, а доллары
-входят в него, когда их обменяли на сумы.
+Заморожено — доллары (валюта заморозки) на сейчас без открытых платежей списка в
+этой валюте по день зарплаты, которая ещё не пришла: срок тот же, что у «Сумы».
+Утром в день зарплаты, пока денег нет, срок кончается сегодня — платежи следующего
+месяца не вычитаются, и «Заморожено» не падает без движения денег; строки следующего
+месяца — тем же днём, целиком. Это «не трогаем» — подушка и копилки; остальные
+доллары — на платежи срока. Лимит эти деньги не тратит: он считает только сумы, а
+доллары входят в него, когда их обменяли на сумы.
 
 Перенос: поступления прошлого месяца, по которым пришло меньше 90 %, «Впереди»
 показывает первыми (carried_items). Остаток закрывают доходы с пометкой «за <прошлый
@@ -91,6 +95,16 @@ class Forecast:
 
 
 @dataclass(frozen=True)
+class Payment:
+    """Платёж списка в своей валюте: день (в следующем месяце — его день там),
+    название строки и сумма плюсом."""
+
+    day: date
+    name: str
+    amount: float
+
+
+@dataclass(frozen=True)
 class DaySpend:
     """День месяца: траты без платежей из списка и лимит, с которым день начался."""
 
@@ -131,8 +145,9 @@ class DayBudget:
     spent_today: float
     growth: float  # плановая экономия месяца: остаток на конец − на 1-е число
     goal: float
-    frozen: float | None  # в валюте заморозки на вечер вчера; None — не считаем
-    frozen_change: float  # с 1-го числа
+    # в валюте заморозки на сейчас: всего на картах без платежей срока; None — не
+    # считаем
+    frozen: float | None
     frozen_uzs: float
     frozen_currency: str | None
     upcoming: tuple[ForecastItem, ...]
@@ -157,6 +172,15 @@ class DayBudget:
     tomorrow: Allowance | None = None
     salary_came: float = 0.0  # сколько пришло по закрывшейся сегодня строке
     salary_name: str = ""  # её название
+    frozen_total: float = 0.0  # всего на картах в валюте заморозки на сейчас
+    # платежи списка в этой валюте по день зарплаты, которая ещё не пришла
+    frozen_payments: tuple[Payment, ...] = ()
+    # на 1-е по прежнему правилу: вечер последнего дня прошлого месяца минус все
+    # платежи списка в этой валюте — только для доли подушки в плане копилок
+    frozen_start: float | None = None
+    # копилки на сейчас в валюте заморозки; None — их не читали (day_budget не
+    # заполняет: читает тот, у кого листы копилок)
+    piggies: float | None = None
 
 
 def _number(value: Any) -> float | None:
@@ -360,6 +384,36 @@ def _advances(
     return sum((amount for _, amount, _ in found), 0.0), on, name
 
 
+def _payment_days(
+    items: tuple[ForecastItem, ...],
+    receipts: Mapping[int, Receipt],
+    day: date,
+    until: date,
+    currency: str,
+) -> list[Payment]:
+    """Платежи списка в currency по день перед until, сумма — плюсом: открытые строки
+    с минусом этого месяца — их неоплаченная часть, опоздавшие — в свой прошедший
+    день; в части срока в следующем месяце — эти строки целиком, тем же днём (31-е —
+    последний день). По дню, затем по строке списка."""
+    first = day.replace(day=1)
+    later = _next_month(first)
+    found: list[tuple[date, int, Payment]] = []
+    for item in items:
+        if item.amount >= 0 or item.currency != currency:
+            continue
+        receipt = receipts.get(item.row, NOTHING)
+        due = _on(first, item.day)
+        if due < until and not closed(item, receipt):
+            found.append(
+                (due, item.row, Payment(due, item.name, -remaining(item, receipt)))
+            )
+        due = _on(later, item.day)
+        if due < until:
+            found.append((due, item.row, Payment(due, item.name, -item.amount)))
+    found.sort(key=lambda entry: (entry[0], entry[1]))
+    return [payment for _, _, payment in found]
+
+
 def _bill_days(
     items: tuple[ForecastItem, ...],
     receipts: Mapping[int, Receipt],
@@ -367,22 +421,33 @@ def _bill_days(
     until: date,
 ) -> list[tuple[date, float]]:
     """Платежи списка в сумах с day по день перед until — положительными суммами в свой
-    день: открытые строки с минусом в UZS, опоздавшие — днём day; в части срока в
-    следующем месяце — эти строки целиком."""
-    first = day.replace(day=1)
-    later = _next_month(first)
-    found: list[tuple[date, float]] = []
-    for item in items:
-        if item.amount >= 0 or item.currency != "UZS":
-            continue
-        receipt = receipts.get(item.row, NOTHING)
-        due = _on(first, item.day)
-        if due < until and not closed(item, receipt):
-            found.append((max(due, day), -remaining(item, receipt)))
-        due = _on(later, item.day)
-        if due < until:
-            found.append((due, -item.amount))
-    return sorted(found)
+    день (_payment_days), опоздавшие — днём day."""
+    return sorted(
+        (max(payment.day, day), payment.amount)
+        for payment in _payment_days(items, receipts, day, until, "UZS")
+    )
+
+
+def frozen_split(frozen: float, piggies: float) -> tuple[float, float, float]:
+    """«Заморожено» → (подушка, копилки больше карты, долларов не хватает), до цента.
+    Подушка — заморожено без копилок, не меньше нуля; копилки есть и их больше — на
+    сколько; копилок нет, а заморожено меньше нуля — столько долларов не хватает на
+    платежи. Одно предупреждение: с копилками — про копилки."""
+    cushion = round(max(0.0, frozen - piggies), 2)
+    if piggies > 0:
+        return cushion, round(max(0.0, piggies - frozen), 2), 0.0
+    return cushion, 0.0, round(max(0.0, -frozen), 2)
+
+
+def short_on(total: float, payments: Sequence[Payment]) -> date | None:
+    """День платежа, на котором платежи срока по порядку дней становятся больше total
+    — с него долларов не хватает; хватает — None."""
+    paid = 0.0
+    for payment in payments:
+        paid += payment.amount
+        if round(paid, 2) > round(total, 2):
+            return payment.day
+    return None
 
 
 def _list_bills(
@@ -493,11 +558,13 @@ def day_budget(
     Лимит — по деньгам до зарплаты (Allowance): сумы на вечер вчера и авансы срока
     минус платежи по день основной зарплаты в сумах, на дни по него включительно; денег
     до аванса меньше — по день аванса без него (страховка). Строки списка — по
-    сверке с fact (services.receipts): к утру дня — для лимита и заморозки; на сейчас —
-    для «Впереди», трат дня и «Сумы». «Сумы» (services.runway) — по дням до
+    сверке с fact (services.receipts): к утру дня — для лимита; на сейчас — для
+    «Впереди», трат дня, «Сумы» и заморозки. «Сумы» (services.runway) — по дням до
     зарплаты, которая ещё не пришла: сумы сейчас, темп и траты сегодня — из модели
     прогноза (services.forecast) с записями календаря records, авансы, платежи,
-    подписки и неоплаченные разовые записи в сумах — в их дни.
+    подписки и неоплаченные разовые записи в сумах — в их дни. «Заморожено» — до
+    того же дня: доллары сейчас без долларовых платежей списка (записи календаря не
+    вычитаются).
     previous — вкладка прошлого месяца (None — её нет): её недополученные
     поступления «Впереди» показывает первыми.
     """
@@ -576,7 +643,6 @@ def day_budget(
     passed = yesterday.day if yesterday >= first else 0
     now_allowance = allowance_on(today)
     early = match_receipts(frame, items, first, yesterday)
-    morning = _ahead(items, early)
     now = match_receipts(frame, items, first, today)
     paid = frozenset(index for receipt in now.values() for index in receipt.operations)
     # зарплата пришла сегодня: строка закрыта на сейчас, а к утру — нет; один приход
@@ -621,22 +687,30 @@ def day_budget(
     ]
     paced = currency_forecast(frame, (), items, today, "UZS", records=records)
 
-    frozen, change, frozen_uzs = None, 0.0, 0.0
+    # «Заморожено»: доллары на сейчас без платежей в этой валюте по срок «Сумы» —
+    # день зарплаты, которая ещё не пришла; до цента, чтобы строки сходились
+    frozen: float | None = None
+    frozen_uzs, frozen_total = 0.0, 0.0
+    frozen_payments: tuple[Payment, ...] = ()
+    frozen_start: float | None = None
     rate = rates.to_uzs.get(frozen_currency) if frozen_currency else None
-    if rate:
+    if frozen_currency and rate:
         own = frame[frame["currency"] == frozen_currency]
-
-        def reserved(lines: tuple[ForecastItem, ...]) -> float:
-            """Платежи в валюте заморозки, которые ещё впереди: они не отложены."""
-            return -sum(
-                item.amount
-                for item in lines
-                if item.currency == frozen_currency and item.amount < 0
-            )
-
-        frozen = _balance(own, yesterday, "amount") - reserved(morning)
-        start = _balance(own, first - timedelta(days=1), "amount") - reserved(items)
-        change, frozen_uzs = frozen - start, frozen * rate
+        frozen_total = round(_balance(own, today, "amount"), 2)
+        frozen_payments = tuple(
+            replace(payment, amount=round(payment.amount, 2))
+            for payment in _payment_days(items, now, today, reach, frozen_currency)
+        )
+        frozen = round(
+            frozen_total - sum(payment.amount for payment in frozen_payments), 2
+        )
+        frozen_uzs = frozen * rate
+        # на 1-е — прежнее правило: доля подушки в плане месяца от него не двигается
+        frozen_start = _balance(own, first - timedelta(days=1), "amount") + sum(
+            item.amount
+            for item in items
+            if item.currency == frozen_currency and item.amount < 0
+        )
 
     over = sorted(
         (line for line in spend if line.plan > 0 and line.fact > line.plan),
@@ -661,7 +735,6 @@ def day_budget(
         growth=plan_end - opening,
         goal=forecast.savings_goal,
         frozen=frozen,
-        frozen_change=change,
         frozen_uzs=frozen_uzs,
         frozen_currency=frozen_currency,
         # остатки прошлого месяца — сверх двух строк месяца: аванс и платежи видны
@@ -702,6 +775,9 @@ def day_budget(
         tomorrow=tomorrow,
         salary_came=sum(now[item.row].received for item in came_rows),
         salary_name=came.name if came else "",
+        frozen_total=frozen_total,
+        frozen_payments=frozen_payments,
+        frozen_start=frozen_start,
     )
 
 
@@ -908,11 +984,10 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
         )
 
     if b.frozen is not None:
-        line = f"🧊 Заморожено: {_cents(b.frozen)} {b.frozen_currency} ≈ {short(b.frozen_uzs)}"
-        if abs(b.frozen_change) >= 0.01:
-            sign = "+" if b.frozen_change > 0 else "−"
-            line += f" (с 1-го числа {sign}{_cents(abs(b.frozen_change))} {b.frozen_currency})"
-        lines.append(line)
+        lines.append(
+            f"🧊 Заморожено: {_cents(b.frozen)} {b.frozen_currency} "
+            f"≈ {short(b.frozen_uzs)}"
+        )
     if b.runway is not None:
         lines.append(runway_line(b.runway, b.today))
     if b.goal > 0:
@@ -1033,14 +1108,11 @@ def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
     if b.runway is not None:
         blocks += _rich_runway(b.runway, b.today)
     if b.frozen is not None:
-        code = str(b.frozen_currency)
-        lines = [f"≈{NBSP}{whole(b.frozen_uzs)} сум"]
-        if abs(b.frozen_change) >= 0.01:
-            sign = "+" if b.frozen_change > 0 else "−"
-            change = in_currency(abs(b.frozen_change), code, with_cents=True)
-            lines.append(f"с 1-го числа {sign}{change}")
-        frozen = in_currency(b.frozen, code, with_cents=True)
-        blocks += [heading(f"🧊 Заморожено {frozen}"), para(*lines)]
+        frozen = in_currency(b.frozen, str(b.frozen_currency), with_cents=True)
+        blocks += [
+            heading(f"🧊 Заморожено {frozen}"),
+            para(f"≈{NBSP}{whole(b.frozen_uzs)} сум"),
+        ]
     if b.goal > 0:
         if b.goal > b.growth:
             reason: tuple[str, ...] = (f"больше плановой экономии {whole(b.growth)}",)
