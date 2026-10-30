@@ -18,6 +18,11 @@
 Заморожено — карты в валюте заморозки (долларовая) без платежей в этой валюте,
 которые ещё впереди. Лимит эти деньги не тратит: он считает только сумы, а доллары
 входят в него, когда их обменяли на сумы.
+
+Перенос: поступления прошлого месяца, по которым пришло меньше 90 %, ждут свой
+остаток в этом (carried_items) — сверка строк сначала закрывает их, «Впереди»
+показывает их первыми. Срок лимита и деньги срока они не задают: для лимита это
+прочие поступления.
 """
 
 import calendar
@@ -410,6 +415,7 @@ def day_budget(
     rates: Rates,
     frozen_currency: str | None,
     records: Sequence[CalendarRecord] = (),
+    previous: list[list[Any]] | None = None,
 ) -> DayBudget | None:
     """Лимит на сегодня по листу fact и вкладке месяца; None — во вкладке нет списка.
 
@@ -419,6 +425,8 @@ def day_budget(
     сверке с fact (services.receipts): к утру дня — для лимита и заморозки; на сейчас —
     для «Впереди» и трат дня. Прогноз по сумам — линия «по темпу» модели прогноза
     (services.forecast) с записями календаря records, как во вкладке «Календарь».
+    previous — вкладка прошлого месяца (None — её нет): её недополученные
+    поступления сверка закрывает первыми, «Впереди» показывает их первыми.
     """
     # recurring сам берёт отсюда MONTHS_PREPOSITIONAL и short
     from app.services.recurring import find_series, outside_list
@@ -438,11 +446,12 @@ def day_budget(
     plan_end = opening + sum(item.uzs for item in items) - per_day * days
     series = outside_list(find_series(frame, today), items)
     month_end = first.replace(day=days)
-    salaries, spare = _salaries(items)
+    salaries, spare = _salaries(items)  # перенос — не зарплата и не аванс
+    carried = carried_items(previous, frame, first)
 
     def allowance_on(day: date) -> Allowance:
         """Лимит дня day: сумы на вечер накануне, авансы, платежи и дни до зарплаты."""
-        receipts = match_receipts(frame, items, first, day - timedelta(days=1))
+        receipts = match_receipts(frame, items, first, day - timedelta(days=1), carried)
         payday, name = _payday(salaries, receipts, day)
         # день зарплаты — тоже: её могут начислить и вечером
         until = (payday or month_end) + timedelta(days=1)
@@ -489,8 +498,8 @@ def day_budget(
 
     passed = yesterday.day if yesterday >= first else 0
     now_allowance = allowance_on(today)
-    morning = _ahead(items, match_receipts(frame, items, first, yesterday))
-    now = match_receipts(frame, items, first, today)
+    morning = _ahead(items, match_receipts(frame, items, first, yesterday, carried))
+    now = match_receipts(frame, items, first, today, carried)
     paid = frozenset(index for receipt in now.values() for index in receipt.operations)
 
     frozen, change, frozen_uzs = None, 0.0, 0.0
@@ -515,7 +524,7 @@ def day_budget(
         key=lambda line: line.fact - line.plan,
         reverse=True,
     )
-    left_now = _ahead(items, now)
+    left_now = _ahead((*carried, *items), now)  # перенос — первым: его день 1
     history = tuple(
         DaySpend(day, _spent_on(frame, day, paid), allowance_on(day).limit)
         for day in (first + timedelta(days=k) for k in range(today.day))
@@ -539,7 +548,9 @@ def day_budget(
         upcoming=left_now[:2],
         over_plan=tuple(over[:3]),
         runway=uzs_runway(
-            currency_forecast(frame, (), items, today, "UZS", records=records),
+            currency_forecast(
+                frame, (), items, today, "UZS", records=records, carried=carried
+            ),
             today,
             rates,
         ),

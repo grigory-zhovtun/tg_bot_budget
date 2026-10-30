@@ -4,7 +4,8 @@
 картах (факт)» вкладки. Дальше по дням до последнего дня месяца две линии: «по
 плану» — остаток плана статей валюты, разложенный по дням, и «по темпу» — средние
 траты за PACE_DAYS дней до сегодня. Строки жёлтого списка, которые ещё не пришли и
-не ушли, — события в свой день; опоздавшие ждём сегодня.
+не ушли, — события в свой день; опоздавшие ждём сегодня. Остатки поступлений
+прошлого месяца (перенос) сверка строк закрывает первыми; событий они не дают.
 
 План и темп в день считаются на утро (сверка списка по вчера) и за день не
 меняются. Сегодняшние траты уже в деньгах «сейчас», поэтому за сегодня вычитается
@@ -447,17 +448,19 @@ def currency_forecast(
     code: str,
     plan_left: float | None = None,
     records: Sequence[CalendarRecord] = (),
+    carried: Sequence[ListItem] = (),
 ) -> CurrencyForecast:
     """Прогноз одной валюты с сегодня по последний день месяца.
 
     plan_left — сколько плана статей разложить по дням (month_forecast делит его
     между валютами); None — статьи своей валюты без резерва записей и без её
-    неоплаченных платежей. records — записи календаря всех валют.
+    неоплаченных платежей. records — записи календаря всех валют. carried — остатки
+    поступлений прошлого месяца (day_budget.carried_items): только в сверку строк.
     """
     first = today.replace(day=1)
     yesterday = today - timedelta(days=1)
-    morning = match_receipts(frame, items, first, yesterday)
-    now = match_receipts(frame, items, first, today)
+    morning = match_receipts(frame, items, first, yesterday, carried)
+    now = match_receipts(frame, items, first, today, carried)
     state = _calendar(frame, records, morning, now, today, code)
     start = today - timedelta(days=PACE_DAYS)
     paid_morning = _paid(morning) | state.closed_morning
@@ -561,12 +564,14 @@ def month_forecast(
     rates: Rates,
     currencies: Iterable[str],
     records: Sequence[CalendarRecord] = (),
+    carried: Sequence[ListItem] = (),
 ) -> MonthForecast:
-    """Прогноз по валютам карт и всего — по сегодняшним курсам таблицы."""
+    """Прогноз по валютам карт и всего — по сегодняшним курсам таблицы; carried —
+    остатки поступлений прошлого месяца, только в сверку строк."""
     codes = currency_order(currencies)
     first = today.replace(day=1)
-    morning = match_receipts(frame, items, first, today - timedelta(days=1))
-    now = match_receipts(frame, items, first, today)
+    morning = match_receipts(frame, items, first, today - timedelta(days=1), carried)
+    now = match_receipts(frame, items, first, today, carried)
     spreads: dict[str, float] = {}
     unpaid: dict[str, float] = {}
     booked: dict[str, float] = {}  # ID записи → её открытое на утро с сегодня
@@ -579,7 +584,9 @@ def month_forecast(
             booked[key] = booked.get(key, 0.0) + occurrence.morning
     left = _share(spreads, unpaid, rates, codes)
     lines = tuple(
-        currency_forecast(frame, articles, items, today, code, left[code], records)
+        currency_forecast(
+            frame, articles, items, today, code, left[code], records, carried
+        )
         for code in codes
     )
     rated = [(line, rate) for line in lines if (rate := rates.to_uzs.get(line.code))]
