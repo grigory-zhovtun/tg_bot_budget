@@ -267,10 +267,11 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
         <CushionCard cushion={data.cushion} today={data.today} />
       )}
       <section className="flex flex-col gap-2" aria-label="Копилки">
-        <div className="flex items-center justify-between gap-2">
+        {/* крупный шрифт на 320 px: кнопки переносятся строкой ниже, а не за экран */}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
           <h2 className="text-fact font-extrabold">🐷 Копилки</h2>
           {boot && (
-            <div className="flex gap-4">
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
               {ordered.length > 1 && (
                 <button
                   type="button"
