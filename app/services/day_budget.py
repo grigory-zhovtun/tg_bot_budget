@@ -561,14 +561,18 @@ def days_text(count: int) -> str:
     return f"{count} дней"
 
 
-def payday_on(budget: DayBudget) -> str:
-    """«15-го» — в этом месяце, «15 ноября» — в следующем."""
-    day = budget.payday
-    if day is None:
-        return "конца месяца"
-    if day.month == budget.today.month:
+def _day_text(day: date, today: date) -> str:
+    """«15-го» — в этом месяце, «15 ноября» — в другом."""
+    if day.month == today.month:
         return f"{day.day}-го"
     return f"{day.day} {MONTHS_GENITIVE[day.month - 1]}"
+
+
+def payday_on(budget: DayBudget) -> str:
+    """«15-го» — в этом месяце, «15 ноября» — в следующем."""
+    if budget.payday is None:
+        return "конца месяца"
+    return _day_text(budget.payday, budget.today)
 
 
 def until_text(budget: DayBudget) -> str:
@@ -580,8 +584,11 @@ def until_text(budget: DayBudget) -> str:
 
 
 def _money_line(budget: DayBudget, amount: Callable[[float], str] = whole) -> str:
-    """«на сумовых картах 7 200 000, платежи до 30-го 80 000»."""
+    """«на сумовых картах 7 200 000, аванс 15-го +2 000 000, платежи до 30-го 80 000»."""
     line = f"на сумовых картах {amount(budget.sums)}"
+    if budget.advance_on is not None and round(budget.advances) > 0:
+        day = _day_text(budget.advance_on, budget.today)
+        line += f", аванс {day} +{amount(budget.advances)}"
     if round(budget.bills) > 0:
         line += f", платежи до {payday_on(budget)} {amount(budget.bills)}"
     return line

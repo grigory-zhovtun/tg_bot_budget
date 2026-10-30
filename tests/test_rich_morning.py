@@ -57,7 +57,7 @@ def test_morning_blocks_follow_the_mockup() -> None:
         heading(f"💸 {whole(b.limit)} сум", 1),
         para(
             "можно тратить в день до зарплаты 30-го",
-            f"на сумовых картах {whole(b.sums)}",
+            f"на сумовых картах {whole(b.sums)}, аванс 15-го +{whole(2_000_000)}",
         ),
         heading(f"⚠️ Сверх плана на {whole(400_000 - b.plan_per_day)} за 1 день"),
         # «из» — с числом: блок переносит строку перед ним, а не после
@@ -111,7 +111,8 @@ def test_the_limit_names_its_salary_and_the_payments_before_it() -> None:
     b = budget(date(2026, 10, 5), items=bills)
     assert rich_day_budget(b)[2] == para(
         "можно тратить в день до зарплаты 30-го",
-        f"на сумовых картах {whole(5_000_000)}, платежи до 30-го {whole(300_000)}",
+        f"на сумовых картах {whole(5_000_000)}, аванс 15-го +{whole(2_000_000)}, "
+        f"платежи до 30-го {whole(300_000)}",
     )
     paid = [
         fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000),
@@ -120,7 +121,7 @@ def test_the_limit_names_its_salary_and_the_payments_before_it() -> None:
     last = budget(date(2026, 10, 31), *paid, items=LIST)
     assert rich_day_budget(last)[2] == para(
         "можно тратить в день до зарплаты 30 ноября",
-        f"на сумовых картах {whole(17_000_000)}",
+        f"на сумовых картах {whole(17_000_000)}, аванс 15 ноября +{whole(2_000_000)}",
     )
     rent = budget(date(2026, 10, 10), items=[("Аренда & Ко", 18, -420, "USD")])
     assert rich_day_budget(rent)[2] == para(
