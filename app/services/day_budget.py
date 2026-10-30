@@ -282,33 +282,68 @@ def _payday(
     return _on(_next_month(first), salaries[0].day), salaries[0].name
 
 
+def _advance_days(
+    advances: Sequence[ForecastItem],
+    receipts: Mapping[int, Receipt],
+    day: date,
+    until: date,
+) -> list[tuple[date, float, str]]:
+    """Авансы срока по дням — (день, сумма, название): строки аванса этого месяца с
+    днём от day и раньше until — их непришедшая часть, и они же в следующем месяце —
+    целиком. Аванс сегодня — в счёт: его день живём на то, что есть (страховка — этот
+    один день), и лимит не проседает на день; опоздавший — не в счёт, пока деньги не на
+    картах."""
+    first = day.replace(day=1)
+    later = _next_month(first)
+    found: list[tuple[date, float, str]] = []
+    for item in advances:
+        due = _on(first, item.day)
+        rest = remaining(item, receipts.get(item.row, NOTHING))
+        if day <= due < until and rest > 0:
+            found.append((due, rest, item.name))
+        due = _on(later, item.day)
+        if due < until:
+            found.append((due, item.amount, item.name))
+    return sorted(found)
+
+
 def _advances(
     advances: Sequence[ForecastItem],
     receipts: Mapping[int, Receipt],
     day: date,
     until: date,
 ) -> tuple[float, date | None, str]:
-    """Авансы срока: строки аванса этого месяца с днём от day и раньше until — их
-    непришедшая часть, и они же в следующем месяце — целиком; и первый из них. Аванс
-    сегодня — в счёт: его день живём на то, что есть (страховка — этот один день), и
-    лимит не проседает на день; опоздавший — не в счёт, пока деньги не на картах."""
-    first = day.replace(day=1)
-    later = _next_month(first)
-    total, found = 0.0, []
-    for item in advances:
-        due = _on(first, item.day)
-        rest = remaining(item, receipts.get(item.row, NOTHING))
-        if day <= due < until and rest > 0:
-            total += rest
-            found.append((due, item.name))
-        due = _on(later, item.day)
-        if due < until:
-            total += item.amount
-            found.append((due, item.name))
+    """Авансы срока одной суммой (_advance_days) и первый из них."""
+    found = _advance_days(advances, receipts, day, until)
     if not found:
         return 0.0, None, ""
-    on, name = min(found)
-    return total, on, name
+    on, name = min((due, name) for due, _, name in found)
+    return sum((amount for _, amount, _ in found), 0.0), on, name
+
+
+def _bill_days(
+    items: tuple[ForecastItem, ...],
+    receipts: Mapping[int, Receipt],
+    day: date,
+    until: date,
+) -> list[tuple[date, float]]:
+    """Платежи списка в сумах с day по день перед until — положительными суммами в свой
+    день: открытые строки с минусом в UZS, опоздавшие — днём day; в части срока в
+    следующем месяце — эти строки целиком."""
+    first = day.replace(day=1)
+    later = _next_month(first)
+    found: list[tuple[date, float]] = []
+    for item in items:
+        if item.amount >= 0 or item.currency != "UZS":
+            continue
+        receipt = receipts.get(item.row, NOTHING)
+        due = _on(first, item.day)
+        if due < until and not closed(item, receipt):
+            found.append((max(due, day), -remaining(item, receipt)))
+        due = _on(later, item.day)
+        if due < until:
+            found.append((due, -item.amount))
+    return sorted(found)
 
 
 def _list_bills(
@@ -317,28 +352,18 @@ def _list_bills(
     day: date,
     until: date,
 ) -> float:
-    """Платежи списка в сумах с day по день перед until: открытые строки с минусом в
-    UZS (и опоздавшие), в части срока в следующем месяце — эти строки целиком."""
-    first = day.replace(day=1)
-    later = _next_month(first)
-    total = 0.0
-    for item in items:
-        if item.amount >= 0 or item.currency != "UZS":
-            continue
-        receipt = receipts.get(item.row, NOTHING)
-        if _on(first, item.day) < until and not closed(item, receipt):
-            total -= remaining(item, receipt)
-        if until > later and _on(later, item.day) < until:
-            total -= item.amount
-    return total
+    """Платежи списка в сумах срока одной суммой (_bill_days)."""
+    return sum((amount for _, amount in _bill_days(items, receipts, day, until)), 0.0)
 
 
-def _subscriptions(series: Sequence[Any], day: date, until: date) -> float:
-    """Подписки в UZS с day по день перед until: не отменённые и ещё не списанные в
-    своём месяце до day."""
+def _subscription_days(
+    series: Sequence[Any], day: date, until: date
+) -> list[tuple[date, float]]:
+    """Подписки в UZS с day по день перед until — в их ожидаемый день: не отменённые и
+    ещё не списанные в своём месяце до day."""
     first = day.replace(day=1)
     later = _next_month(first)
-    total = 0.0
+    found: list[tuple[date, float]] = []
     for one in series:
         if one.last.currency != "UZS" or one.lapsed(day):
             continue
@@ -349,8 +374,13 @@ def _subscriptions(series: Sequence[Any], day: date, until: date) -> float:
                 for c in one.charges
             )
             if day <= due < until and not charged:
-                total += one.last.amount
-    return total
+                found.append((due, one.last.amount))
+    return sorted(found)
+
+
+def _subscriptions(series: Sequence[Any], day: date, until: date) -> float:
+    """Подписки в UZS срока одной суммой (_subscription_days)."""
+    return sum((amount for _, amount in _subscription_days(series, day, until)), 0.0)
 
 
 def _spent_on(frame: pd.DataFrame, day: date, paid: frozenset[int]) -> float:

@@ -15,10 +15,16 @@ from app.services.analytics_service import AnalyticsService, transactions_frame
 from app.services.calendar import HEADER as CALENDAR_HEADER
 from app.services.day_budget import (
     ForecastItem,
+    _advance_days,
+    _bill_days,
+    _salaries,
+    _subscription_days,
     day_budget,
     format_day_budget,
     read_forecast,
 )
+from app.services.receipts import match_receipts
+from app.services.recurring import find_series, outside_list
 from tests.test_analytics_service import serial
 
 RATES = Rates({"UZS": 1.0, "USD": 12000.0})
@@ -333,6 +339,36 @@ def test_after_the_last_salary_next_months_subscriptions_come_off() -> None:
     last = budget(date(2026, 10, 31), ADVANCE_PAID, RENT_PAID, salary, *news)
     assert last.bills == pytest.approx(30_000)  # 5 ноября — до ЗП 30 ноября
     assert last.limit == pytest.approx((16_940_000 + 2_000_000 - 30_000) / 31)
+
+
+def test_the_horizons_money_has_its_days() -> None:
+    bills = [*ITEMS, ("Свет", 20, -300_000, "UZS"), ("Газ", 10, -100_000, "UZS")]
+    items = read_forecast(tab(items=bills)).items
+    fact = frame(*CLOUD)
+    receipts = match_receipts(fact, items, date(2026, 10, 1), date(2026, 10, 15))
+    day, until = date(2026, 10, 16), date(2026, 10, 31)
+    # свет — в свой день; газ 10-го не оплачен — опоздал, ждём его сегодня
+    assert _bill_days(items, receipts, day, until) == [
+        (date(2026, 10, 16), 100_000),
+        (date(2026, 10, 20), 300_000),
+    ]
+    series = outside_list(find_series(fact, day), items)
+    assert _subscription_days(series, day, until) == [(date(2026, 10, 20), 50_000)]
+
+
+def test_next_months_rows_come_in_full() -> None:
+    items = read_forecast(tab(items=[*ITEMS, ("Свет", 20, -300_000, "UZS")])).items
+    _, advances = _salaries(items)
+    light = fact_row(date(2026, 10, 20), "🏚️ ДОМ", "свет", 300_000)
+    fact = frame(ADVANCE_PAID, RENT_PAID, light)
+    receipts = match_receipts(fact, items, date(2026, 10, 1), date(2026, 10, 29))
+    day, until = date(2026, 10, 30), date(2026, 12, 1)
+    # октябрьский аванс позади; ноябрьский — целиком
+    assert _advance_days(advances, receipts, day, until) == [
+        (date(2026, 11, 15), 2_000_000, "Аванс")
+    ]
+    # свет за октябрь оплачен; ноябрьский — целиком, в свой день
+    assert _bill_days(items, receipts, day, until) == [(date(2026, 11, 20), 300_000)]
 
 
 def test_when_the_sums_do_not_cover_the_payments_there_is_no_limit() -> None:
