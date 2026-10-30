@@ -166,6 +166,9 @@ export interface Dashboard {
   bills: number | null; // платежи в сумах до дня перед зарплатой
   until: string | null; // «до зарплаты 30-го», «до аванса 15 ноября», «до конца месяца»
   payday_on: string | null; // «30-го», «15 ноября», «конца месяца»
+  payday: string | null; // день, по который лимит; null — конец месяца
+  advances: number | null; // авансы срока: прибавлены к деньгам лимита
+  advance_on: string | null; // первый из них; null — авансов в сроке нет
   frozen: {
     amount: number;
     currency: string;

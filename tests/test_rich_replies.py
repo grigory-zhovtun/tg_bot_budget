@@ -80,16 +80,16 @@ def test_today_line_blocks() -> None:
     b = replace(budget(date(2026, 10, 2), items=LIST), limit=350_000)
     assert rich_today_line(replace(b, spent_today=48_000)) == [
         heading(f"💸 Осталось {whole(302_000)}"),
-        para(f"на сегодня, лимит {whole(350_000)} в день до аванса 15-го"),
+        para(f"на сегодня, лимит {whole(350_000)} в день до зарплаты 30-го"),
     ]
     assert rich_today_line(replace(b, spent_today=400_000)) == [
         heading(f"⚠️ Сверх лимита на {whole(50_000)}"),
-        para(f"лимит {whole(350_000)} в день до аванса 15-го"),
+        para(f"лимит {whole(350_000)} в день до зарплаты 30-го"),
     ]
     short = replace(b, limit=-30_000, days_left=13)
     assert rich_today_line(short) == [
         heading("💸 Лимита на сегодня нет"),
-        para(f"до аванса 15-го не хватает {whole(390_000)}"),
+        para(f"до зарплаты 30-го не хватает {whole(390_000)}"),
     ]
 
 
