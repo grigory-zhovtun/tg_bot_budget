@@ -3,7 +3,7 @@
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from telegram.error import BadRequest
@@ -280,6 +280,30 @@ async def test_money_moved_into_income_suggests_setting_a_share_aside(
     await press(context, "fix:c:1")  # ДОХОДЫ
     text, _ = await press(context, "fix:s:0")  # зарплата
     assert "🛟 Отложите 10 % в подушку: 3 000 000 UZS (≈ $250)" in text
+
+
+async def test_money_moved_into_income_asks_its_month(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # опоздавшая часть ЗП по SMS приходит переводом — месяц спрашиваем при переносе
+    asked = MagicMock()
+    monkeypatch.setattr(fix, "ask_month", asked)
+    monkeypatch.setattr(fix, "income_prompt", AsyncMock())
+    context = chat([row(amount=-20_000_000.0, comment="SMS: зачисление")])
+    await command(context)
+    await press(context, "fix:c:1")  # ДОХОДЫ
+    query = SimpleNamespace(
+        data="fix:s:0", answer=AsyncMock(), edit_message_text=AsyncMock()
+    )
+    await fix.fix_button(
+        SimpleNamespace(callback_query=query, effective_chat=SimpleNamespace(id=42)),
+        context,
+    )
+    chat_id, rows, number = asked.call_args.args[1:]
+    assert (chat_id, number) == (42, 4190)
+    assert [(row.category, row.subcategory) for row in rows] == [
+        ("💰 ДОХОДЫ", "зарплата")
+    ]
 
 
 async def test_money_moved_into_income_asks_the_piggies(

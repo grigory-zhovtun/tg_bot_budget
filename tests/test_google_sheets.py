@@ -335,6 +335,24 @@ def test_a_month_mark_goes_into_the_comment_of_an_unchanged_row() -> None:
     assert len(service.sheet.values_batch) == 1
 
 
+def test_a_fact_row_is_read_back_as_it_is_now() -> None:
+    written = [
+        46301,
+        "🍔 ЕДА",
+        "кофе",
+        48000,
+        1,
+        "латте за октябрь",
+        "UZS",
+        "VISA 9090",
+    ]
+    ws = RangeWorksheet({"A4169:H4169": [written]})
+    service = make_service(ws)
+    assert service.fact_row_cells(4169) == written
+    ws.ranges["A4169:H4169"] = []  # строку удалили
+    assert service.fact_row_cells(4169) is None
+
+
 def test_recategorize_writes_group_subgroup_and_amount_of_an_unchanged_row() -> None:
     written = [46301, "🍔 ЕДА", "кофе", 48000, 1, "латте", "UZS", "VISA 9090 UZS"]
     ws = RangeWorksheet({"A4169:H4169": [written]})
