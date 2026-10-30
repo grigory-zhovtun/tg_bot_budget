@@ -1290,6 +1290,18 @@ class GoogleSheetsService:
         )
         return True
 
+    def fact_row_cells(self, number: int) -> list[Any] | None:
+        """Строка fact A:H как она в таблице сейчас (UNFORMATTED); строки нет — None."""
+        worksheet = self._worksheet(config.FACT_SHEET_NAME)
+        current = self._with_retry(
+            "Reading a fact row",
+            lambda: worksheet.get(
+                f"A{number}:H{number}",
+                value_render_option=ValueRenderOption.unformatted,
+            ),
+        )
+        return list(current[0]) if len(current) == 1 and current[0] else None
+
     def comment_row(self, number: int, row: SheetRow, comment: str) -> bool:
         """Новый комментарий F строки fact, если в таблице всё ещё она — для пометки
         месяца поступления «за октябрь»; поправили руками или сдвинулась — False."""

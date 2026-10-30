@@ -3,6 +3,8 @@
 from datetime import date
 from typing import Any
 
+import pytest
+
 from app.domain import Rates
 from app.services.analytics_service import transactions_frame
 from app.services.receipts import (
@@ -172,6 +174,22 @@ def test_a_mark_names_the_nearest_month_of_that_name() -> None:
 def test_only_a_whole_month_word_after_a_separate_за_is_a_mark() -> None:
     for comment in ("зарплата октябрь", "возврат за машину", "заказ ноябрь"):
         assert income_month(date(2026, 11, 3), comment) == NOVEMBER
+    # «из-за ноября» — не пометка: дефис перед «за»
+    assert income_month(date(2026, 10, 3), "задержка из-за ноября") == OCTOBER
+
+
+@pytest.mark.parametrize(
+    "comment",
+    [
+        "за октябрь 2000000",  # сумма, а не год
+        "аванс за октябрь 1500000 сум",
+        "ЗП за октябрь 7070",  # четыре цифры карты — год дальше чем на год от даты
+        "за октябрь 0000",
+    ],
+)
+def test_a_number_after_the_month_is_its_year_only_near_the_date(comment: str) -> None:
+    assert income_month(date(2026, 11, 3), comment) == OCTOBER
+    assert income_month(date(2026, 11, 3), "долг за май 5000") == date(2026, 5, 1)
 
 
 def test_the_status_follows_the_day_and_what_came() -> None:
