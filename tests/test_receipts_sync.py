@@ -8,6 +8,7 @@ from gspread.exceptions import WorksheetNotFound
 
 from app.services import receipts_sync
 from app.services.receipts_sync import (
+    COLUMN_ADVANCE_SUBSCRIPTIONS,
     COLUMN_SUBSCRIPTIONS,
     COLUMN_T,
     LIMIT_LABEL,
@@ -117,6 +118,29 @@ def test_the_subscriptions_until_the_salary_go_next_to_the_limit_cell() -> None:
     sync_receipts(sheets, date(2026, 10, 16))
     assert sheets.tabs["Oct 26"][4][COLUMN_SUBSCRIPTIONS] == 50_000
     assert sync_receipts(sheets, date(2026, 10, 16)) == 0  # не поменялось — не пишем
+
+
+NEWS = [
+    charge(date(2026, 8, 5), 30_000, "NEWS DAILY"),
+    charge(date(2026, 9, 5), 30_000, "NEWS DAILY"),
+]
+
+
+def test_the_subscriptions_until_the_advance_go_to_r_of_the_limit_row() -> None:
+    # 1-го в сроке аванс 15-го: подписки по день ЗП (5-е и 20-е) — в Q, по день аванса
+    # (только 5-е) — в R, для страховки формулы
+    sheets = Sheets(with_limit_row(), *CLOUD, *NEWS)
+    sync_receipts(sheets, date(2026, 10, 1))
+    row = sheets.tabs["Oct 26"][4]
+    assert (row[COLUMN_SUBSCRIPTIONS], row[COLUMN_ADVANCE_SUBSCRIPTIONS]) == (
+        80_000,
+        30_000,
+    )
+    # 16-го аванс пришёл — авансов в сроке нет, R пустая
+    after = Sheets(with_limit_row(), ADVANCE_PAID, *CLOUD, *NEWS)
+    after.tabs["Oct 26"][4][COLUMN_ADVANCE_SUBSCRIPTIONS] = "← подпись"
+    sync_receipts(after, date(2026, 10, 16))
+    assert after.tabs["Oct 26"][4][COLUMN_ADVANCE_SUBSCRIPTIONS] == ""
 
 
 def test_no_subscriptions_write_a_zero_and_no_limit_row_writes_nothing() -> None:

@@ -5,7 +5,8 @@
 дня включительно — как лимит «с утра» — и пишет в колонку T, сколько пришло по
 строке, в её валюте и со знаком. Формулы вкладки (P5, Q10) считают по колонке.
 Формула лимита (P5) — по сумам до зарплаты, как у бота; подписки она не найдёт —
-их сумму до зарплаты бот пишет в Q той же строки.
+их сумму по день зарплаты бот пишет в Q той же строки, а по день аванса, для
+страховки до аванса, — в R (авансов в сроке нет — R пустая).
 """
 
 import logging
@@ -36,6 +37,7 @@ LIMIT_LABEL = (
     "Лимит на сегодня"  # строка лимита в сводке блока: O — подпись, P — формула
 )
 COLUMN_SUBSCRIPTIONS = COLUMN_O + 2  # Q той строки: подписки до зарплаты для формулы
+COLUMN_ADVANCE_SUBSCRIPTIONS = COLUMN_O + 3  # R: подписки по день аванса — страховка
 
 
 def _cell(row: list[Any], column: int) -> Any:
@@ -78,15 +80,27 @@ def received_cells(
 
 
 def subscription_cells(
-    title: str, rows: list[list[Any]], subscriptions: float
+    title: str,
+    rows: list[list[Any]],
+    subscriptions: float,
+    advance: float | None = None,
 ) -> list[dict[str, Any]]:
-    """Q строки лимита — подписки до зарплаты; строки нет или число то же — ничего."""
+    """Q строки лимита — подписки по день зарплаты, R — по день аванса (None — пусто);
+    строки нет или числа те же — ничего."""
     for index, row in enumerate(rows):
         if str(_cell(row, COLUMN_O)).startswith(LIMIT_LABEL):
-            want = round(subscriptions, 2)
-            if _same(_cell(row, COLUMN_SUBSCRIPTIONS), want):
-                return []
-            return [{"range": f"'{title}'!Q{index + 1}", "values": [[want]]}]
+            wants = {
+                "Q": (COLUMN_SUBSCRIPTIONS, round(subscriptions, 2)),
+                "R": (
+                    COLUMN_ADVANCE_SUBSCRIPTIONS,
+                    "" if advance is None else round(advance, 2),
+                ),
+            }
+            return [
+                {"range": f"'{title}'!{letter}{index + 1}", "values": [[want]]}
+                for letter, (column, want) in wants.items()
+                if not _same(_cell(row, column), want)
+            ]
     return []
 
 
@@ -111,7 +125,9 @@ def sync_receipts(gs: GoogleSheetsService, today: date) -> int:
         logger.exception("Subscriptions for the limit cell failed")
         budget = None
     if budget is not None:
-        data += subscription_cells(title, rows, budget.subscriptions)
+        data += subscription_cells(
+            title, rows, budget.salary_subscriptions, budget.advance_subscriptions
+        )
     if data:
         gs.write_cells(data)
     return len(data)
