@@ -239,15 +239,19 @@ def build_dashboard(
     frozen_currency: str | None,
     records: Sequence[CalendarRecord] = (),
     cards: Sequence[CardBalance] = (),
+    previous: list[list[Any]] | None = None,
 ) -> Dashboard:
-    """Сводка по fact и вкладке месяца; без блока прогноза — без лимита и списка."""
+    """Сводка по fact и вкладке месяца; без блока прогноза — без лимита и списка.
+    previous — вкладка прошлого месяца: её недополученное — первым во «Впереди»."""
     spend, _ = plan_lines(rows)
     groups = group_plans(spend)
     spent = spent_groups(frame, today)
     missing = untracked(frame, rows, today)
     joined = categories(groups, spent)
     forecast = read_forecast(rows)
-    budget = day_budget(frame, rows, today, rates, frozen_currency, records)
+    budget = day_budget(
+        frame, rows, today, rates, frozen_currency, records, previous=previous
+    )
     if forecast is None or budget is None:
         return Dashboard(
             "no_forecast",

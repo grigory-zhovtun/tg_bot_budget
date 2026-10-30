@@ -32,6 +32,7 @@ from app.handlers import (
     cleanup,
     common,
     fix,
+    income_month,
     last_write,
     messages,
     month,
@@ -308,6 +309,7 @@ def build_application(
     app.add_handler(CallbackQueryHandler(last_write.button, pattern=r"^(last|card):"))
     app.add_handler(CallbackQueryHandler(statement_import.button, pattern=r"^import:"))
     app.add_handler(CallbackQueryHandler(piggy.piggy_button, pattern=r"^piggy:"))
+    app.add_handler(CallbackQueryHandler(income_month.month_button, pattern=r"^mon:"))
     app.add_handler(CallbackQueryHandler(settings.keyboards_button, pattern=r"^kb:"))
     app.add_handler(CallbackQueryHandler(transactions.transaction_button_handler))
     app.add_handler(

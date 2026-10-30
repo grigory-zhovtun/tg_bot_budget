@@ -26,6 +26,7 @@ from app.services.google_sheets import GoogleSheetsService, read_month_sheets
 if TYPE_CHECKING:
     from app.services.calendar import CalendarRecord
     from app.services.dashboard import Dashboard
+    from app.services.day_budget import ForecastItem
     from app.services.forecast import MonthForecast
     from app.services.piggy import Screen
     from app.services.savings import Savings
@@ -563,6 +564,32 @@ class AnalyticsService:
             logger.info("No plan sheet %s", sheet)
             return None
 
+    def _previous_rows(self, today: date) -> list[list[Any]] | None:
+        """Вкладка прошлого месяца — для переноса недополученных поступлений; None —
+        её нет или она не прочиталась (сообщение — без переноса)."""
+        sheet = month_title(today.replace(day=1) - timedelta(days=1))
+        try:
+            return self.gs_service.get_values(sheet)
+        except WorksheetNotFound:
+            return None
+        except Exception:
+            logger.warning("Last month's tab %s was not read: no carry-over", sheet)
+            return None
+
+    def last_months_rest(self, today: date) -> tuple["ForecastItem", ...]:
+        """Что прошлый месяц ещё ждёт на сейчас — для вопроса «за какой месяц?» после
+        поступления; вкладки прошлого месяца нет — ()."""
+        from app.services.day_budget import carried_items
+
+        previous = self._previous_rows(today)
+        if previous is None:
+            return ()
+        rates = self.gs_service.get_rates()
+        frame = transactions_frame(
+            self.gs_service.get_values(config.FACT_SHEET_NAME), rates
+        )
+        return carried_items(previous, frame, today.replace(day=1), today)
+
     def plan_report(self, today: date | None = None) -> Report:
         """/plan: план-факт текущего месяца по вкладке «Oct 26»."""
         today = today or local_today(config.ANALYTICS_TIMEZONE)
@@ -619,7 +646,13 @@ class AnalyticsService:
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
         budget = day_budget(
-            frame, rows, today, rates, config.FROZEN_CURRENCY, self._records()
+            frame,
+            rows,
+            today,
+            rates,
+            config.FROZEN_CURRENCY,
+            self._records(),
+            previous=self._previous_rows(today),
         )
         if budget is None:
             return (
@@ -668,6 +701,7 @@ class AnalyticsService:
         frame = transactions_frame(
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
+        # без вкладки прошлого месяца: перенос не трогает лимит в сумах
         budget = day_budget(
             frame, rows, today, rates, config.FROZEN_CURRENCY, self._records()
         )
@@ -723,7 +757,7 @@ class AnalyticsService:
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
         sheet = month_title(today)
-        sheets = read_month_sheets(self.gs_service, sheet, max_age)
+        sheets = read_month_sheets(self.gs_service, sheet, max_age, previous=True)
         if sheets.month is None:
             logger.info("No plan sheet %s", sheet)
             return None
@@ -742,6 +776,7 @@ class AnalyticsService:
             config.FROZEN_CURRENCY,
             read_calendar(sheets.calendar),
             cards,
+            previous=sheets.previous,
         )
 
     def savings(

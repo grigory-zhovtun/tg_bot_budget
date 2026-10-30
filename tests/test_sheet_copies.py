@@ -274,14 +274,18 @@ class MonthSheetsSource:
 
 
 def test_month_sheets_are_read_together_with_the_screen_max_age() -> None:
-    source = MonthSheetsSource({"Oct 26": [["План"]], "fact": FACT})
-    sheets = read_month_sheets(source, "Oct 26", max_age=120)
+    source = MonthSheetsSource(
+        {"Oct 26": [["План"]], "Sep 26": [["Сентябрь"]], "fact": FACT}
+    )
+    sheets = read_month_sheets(source, "Oct 26", max_age=120, previous=True)
     assert sheets.month == [["План"]]
+    assert sheets.previous == [["Сентябрь"]]  # для переноса недополученного
     assert sheets.fact == FACT
     assert sheets.rates.to_uzs == {"UZS": 1.0, "USD": 12500.0}
     assert sheets.calendar == [["ID"]]
     assert sorted(source.calls) == [
         ("Oct 26", 120),
+        ("Sep 26", 120),
         ("calendar", 120),
         ("fact", 120),
         ("rates", 120),
@@ -290,7 +294,52 @@ def test_month_sheets_are_read_together_with_the_screen_max_age() -> None:
 
 def test_without_the_month_tab_the_month_is_none() -> None:
     source = MonthSheetsSource({"fact": FACT})
-    assert read_month_sheets(source, "Nov 26").month is None
+    sheets = read_month_sheets(source, "Nov 26")
+    assert (sheets.month, sheets.previous) == (None, None)
+
+
+def test_january_carries_over_from_last_years_december() -> None:
+    source = MonthSheetsSource(
+        {"Jan 27": [["План"]], "Dec 26": [["Декабрь"]], "fact": FACT}
+    )
+    assert read_month_sheets(source, "Jan 27", previous=True).previous == [["Декабрь"]]
+
+
+def test_screens_without_the_carry_over_do_not_read_last_months_tab() -> None:
+    source = MonthSheetsSource(
+        {"Oct 26": [["План"]], "Sep 26": [["Сентябрь"]], "fact": FACT}
+    )
+    sheets = read_month_sheets(source, "Oct 26", calendar=False, previous=False)
+    assert sheets.previous is None
+    assert ("Sep 26", 0.0) not in source.calls
+
+
+class DownTab(MonthSheetsSource):
+    """Одна вкладка не отвечает: сбой сети, а не «вкладки нет»."""
+
+    def __init__(self, tabs: dict[str, list[list[Any]]], down: str) -> None:
+        super().__init__(tabs)
+        self.down = down
+
+    def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
+        if name == self.down:
+            raise ConnectionError("Google is down")
+        return super().get_values(name, max_age)
+
+
+def test_a_failed_read_of_last_months_tab_leaves_the_screen_without_carry_over(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    tabs = {"Oct 26": [["План"]], "Sep 26": [["Сентябрь"]], "fact": FACT}
+    sheets = read_month_sheets(DownTab(tabs, "Sep 26"), "Oct 26", previous=True)
+    assert (sheets.month, sheets.previous) == ([["План"]], None)
+    assert "Sep 26" in caplog.text
+
+
+def test_a_failed_read_of_the_month_tab_still_fails() -> None:
+    tabs = {"Oct 26": [["План"]], "Sep 26": [["Сентябрь"]], "fact": FACT}
+    with pytest.raises(ConnectionError):
+        read_month_sheets(DownTab(tabs, "Oct 26"), "Oct 26")
 
 
 def test_the_plan_screen_does_not_read_the_calendar() -> None:
@@ -301,8 +350,8 @@ def test_the_plan_screen_does_not_read_the_calendar() -> None:
 
 
 def test_sheets_are_read_at_the_same_time() -> None:
-    # все четыре чтения стоят у барьера одновременно — по очереди тест бы повис
-    barrier = threading.Barrier(4, timeout=5)
+    # все пять чтений стоят у барьера одновременно — по очереди тест бы повис
+    barrier = threading.Barrier(5, timeout=5)
 
     class Waiting(MonthSheetsSource):
         def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
@@ -317,7 +366,8 @@ def test_sheets_are_read_at_the_same_time() -> None:
             barrier.wait()
             return super().get_calendar(max_age)
 
-    sheets = read_month_sheets(Waiting({"Oct 26": [], "fact": FACT}), "Oct 26")
+    source = Waiting({"Oct 26": [], "fact": FACT})
+    sheets = read_month_sheets(source, "Oct 26", previous=True)
     assert sheets.fact == FACT
 
 

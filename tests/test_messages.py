@@ -3,7 +3,7 @@
 from itertools import count
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from telegram import ReplyKeyboardMarkup
@@ -605,6 +605,31 @@ async def test_an_income_asks_the_piggies_after_the_menu(
     assert (chat_id, user_id) == (update.effective_chat.id, update.effective_chat.id)
     assert [row.category for row in rows] == ["💰 ДОХОДЫ"]
     assert sent_before and sent_before[0] >= 1  # сводка с меню уже ушла
+
+
+async def test_an_income_asks_its_month_in_the_background(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    update, context, _ = make_chat("", {})
+    order: list[str] = []
+    question = MagicMock(side_effect=lambda *args: order.append("month"))
+    piggies = AsyncMock(side_effect=lambda *args: order.append("piggy"))
+    monkeypatch.setattr(messages, "ask_month", question)
+    monkeypatch.setattr(messages, "income_prompt", piggies)
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    salary = entry_row(
+        55_000.0, True, "", "VISA 7070 RUB", "💰 ДОХОДЫ", "зарплата", today
+    )
+    result = await messages.save_rows(
+        context, update.effective_chat, [salary], [], "app:11"
+    )
+    chat_id, rows, first = question.call_args.args[1:]
+    assert (chat_id, [row.currency for row in rows]) == (
+        update.effective_chat.id,
+        ["RUB"],
+    )
+    assert first == result.first  # номер строки fact — для пометки кнопкой
+    assert order == ["month", "piggy"]
 
 
 async def test_a_piggy_spending_reaches_the_app_answer(

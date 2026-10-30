@@ -3,12 +3,15 @@
 from datetime import date
 from typing import Any
 
+import pytest
+
 from app.domain import Rates
 from app.services.analytics_service import transactions_frame
 from app.services.receipts import (
     NOTHING,
     Line,
     Receipt,
+    income_month,
     match_receipts,
     receipt_status,
     remaining,
@@ -120,6 +123,73 @@ def test_transfers_refunds_and_the_opening_balance_do_not_count() -> None:
         income(15, 2_000_000, sub="нач остаток"),
     ]
     assert received(*rows) == {}
+
+
+NOVEMBER = date(2026, 11, 1)
+
+
+def marked(day: date, amount: float, comment: str, cur: str = "RUB") -> Any:
+    """Доход с комментарием: «за октябрь» в нём — к какому месяцу он относится."""
+    row = fact_row(day, "💰 ДОХОДЫ", "зарплата", amount, cur)
+    row[5] = comment
+    return row
+
+
+def month_of(*rows: Any, first: date, through: date) -> dict[int, Receipt]:
+    frame = transactions_frame([FACT_HEADER, *rows], RATES)
+    return match_receipts(frame, LINES, first, through)
+
+
+def test_an_income_marked_for_last_month_counts_there_and_not_here() -> None:
+    # остаток октябрьской ЗП пришёл 3 ноября с пометкой — он октябрю, не ноябрю
+    late = marked(date(2026, 11, 3), 55_000, "ЗП за октябрь")
+    assert month_of(late, first=NOVEMBER, through=date(2026, 11, 30)) == {}
+    found = month_of(late, first=OCTOBER, through=date(2026, 11, 30))
+    assert found[RUB_SALARY.row].received == 55_000
+
+
+def test_an_income_without_a_mark_belongs_to_the_month_of_its_date() -> None:
+    plain = marked(date(2026, 11, 3), 55_000, "")
+    found = month_of(plain, first=NOVEMBER, through=date(2026, 11, 30))
+    assert found[RUB_SALARY.row].received == 55_000
+    assert month_of(plain, first=OCTOBER, through=date(2026, 11, 30)) == {}
+
+
+def test_a_marked_income_after_through_does_not_count_yet() -> None:
+    late = marked(date(2026, 11, 3), 55_000, "за октябрь")
+    assert month_of(late, first=OCTOBER, through=date(2026, 11, 2)) == {}
+
+
+def test_a_mark_names_the_nearest_month_of_that_name() -> None:
+    assert income_month(date(2027, 1, 5), "за декабрь") == date(2026, 12, 1)
+    assert income_month(date(2026, 10, 30), "Аванс за ноябрь") == NOVEMBER
+    assert income_month(date(2026, 11, 3), "Зарплата за Октябрь 2025") == date(
+        2025, 10, 1
+    )
+    # полгода назад и вперёд — поровну: прошлый
+    assert income_month(date(2026, 11, 3), "за май") == date(2026, 5, 1)
+    assert income_month(date(2026, 11, 3), "") == NOVEMBER
+
+
+def test_only_a_whole_month_word_after_a_separate_за_is_a_mark() -> None:
+    for comment in ("зарплата октябрь", "возврат за машину", "заказ ноябрь"):
+        assert income_month(date(2026, 11, 3), comment) == NOVEMBER
+    # «из-за ноября» — не пометка: дефис перед «за»
+    assert income_month(date(2026, 10, 3), "задержка из-за ноября") == OCTOBER
+
+
+@pytest.mark.parametrize(
+    "comment",
+    [
+        "за октябрь 2000000",  # сумма, а не год
+        "аванс за октябрь 1500000 сум",
+        "ЗП за октябрь 7070",  # четыре цифры карты — год дальше чем на год от даты
+        "за октябрь 0000",
+    ],
+)
+def test_a_number_after_the_month_is_its_year_only_near_the_date(comment: str) -> None:
+    assert income_month(date(2026, 11, 3), comment) == OCTOBER
+    assert income_month(date(2026, 11, 3), "долг за май 5000") == date(2026, 5, 1)
 
 
 def test_the_status_follows_the_day_and_what_came() -> None:

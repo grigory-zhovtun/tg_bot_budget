@@ -45,6 +45,7 @@ from app.handlers.common import (
     sources_keyboard,
     track_message,
 )
+from app.handlers.income_month import ask_month
 from app.handlers.piggy import income_prompt, spend_note
 from app.handlers.receipts import mark_dirty
 from app.rich import Report, cents, heading, money_text, para, table, whole
@@ -655,6 +656,8 @@ async def save_rows(
     if rows and menu is not None:
         context.user_data[LAST_WRITE]["menu"] = (chat.id, menu.message_id)
     # «🐷» — отдельным сообщением под меню: копилки, что отложить с поступления
+    # к какому месяцу доход — фоном: его чтения Google ответ на запись не ждёт
+    ask_month(context, chat.id, rows, first)
     await income_prompt(context, chat.id, chat.id, rows)
     # «🐷 Из копилки…» — тоже своим сообщением; приложению — строкой ответа
     lines += await spend_note(context, chat.id, rows)

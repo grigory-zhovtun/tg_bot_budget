@@ -18,6 +18,11 @@
 Заморожено — карты в валюте заморозки (долларовая) без платежей в этой валюте,
 которые ещё впереди. Лимит эти деньги не тратит: он считает только сумы, а доллары
 входят в него, когда их обменяли на сумы.
+
+Перенос: поступления прошлого месяца, по которым пришло меньше 90 %, «Впереди»
+показывает первыми (carried_items). Остаток закрывают доходы с пометкой «за <прошлый
+месяц>» (receipts.income_month); сами строки денег не забирают: сверка строк месяца
+их не видит, срок лимита и деньги срока они не задают.
 """
 
 import calendar
@@ -367,6 +372,42 @@ def _ahead(
     return tuple(sorted(left, key=lambda item: item.day))
 
 
+def carried_items(
+    previous: list[list[Any]] | None, frame: pd.DataFrame, first: date, through: date
+) -> tuple[ForecastItem, ...]:
+    """Перенос: поступления прошлого месяца, по которым пришло меньше 90 %, ждут свой
+    остаток в месяце first — «<название> за <месяц>, остаток», день 1, сумма —
+    непришедшая часть в валюте строки. Сверка прошлого месяца — доходы его месяца
+    (по дате или пометке «за <месяц>») по through: доход с пометкой, пришедший уже в
+    этом месяце, или записанный позже с датой прошлого — уменьшает остаток. Из
+    позапрошлого месяца ничего не переносится, платежи не переносятся. Строки — −1,
+    −2, … по дням прошлого месяца: со строками вкладки не совпадут. previous —
+    вкладка прошлого месяца; её нет или в ней нет списка — ()."""
+    listed = read_forecast(previous) if previous is not None else None
+    if listed is None:
+        return ()
+    start = (first - timedelta(days=1)).replace(day=1)
+    receipts = match_receipts(frame, listed.items, start, through)
+    month = MONTHS_RU[start.month - 1]
+    found: list[ForecastItem] = []
+    for item in sorted(listed.items, key=lambda item: (item.day, item.row)):
+        if item.amount <= 0:
+            continue
+        rest = remaining(item, receipts.get(item.row, NOTHING))
+        if rest > 0:
+            found.append(
+                ForecastItem(
+                    f"{item.name} за {month}, остаток",
+                    1,
+                    rest,
+                    item.currency,
+                    item.uzs * rest / item.amount,
+                    -len(found) - 1,
+                )
+            )
+    return tuple(found)
+
+
 def day_budget(
     frame: pd.DataFrame,
     rows: list[list[Any]],
@@ -374,6 +415,7 @@ def day_budget(
     rates: Rates,
     frozen_currency: str | None,
     records: Sequence[CalendarRecord] = (),
+    previous: list[list[Any]] | None = None,
 ) -> DayBudget | None:
     """Лимит на сегодня по листу fact и вкладке месяца; None — во вкладке нет списка.
 
@@ -383,6 +425,8 @@ def day_budget(
     сверке с fact (services.receipts): к утру дня — для лимита и заморозки; на сейчас —
     для «Впереди» и трат дня. Прогноз по сумам — линия «по темпу» модели прогноза
     (services.forecast) с записями календаря records, как во вкладке «Календарь».
+    previous — вкладка прошлого месяца (None — её нет): её недополученные
+    поступления «Впереди» показывает первыми.
     """
     # recurring сам берёт отсюда MONTHS_PREPOSITIONAL и short
     from app.services.recurring import find_series, outside_list
@@ -403,6 +447,7 @@ def day_budget(
     series = outside_list(find_series(frame, today), items)
     month_end = first.replace(day=days)
     salaries, spare = _salaries(items)
+    carried = carried_items(previous, frame, first, today)
 
     def allowance_on(day: date) -> Allowance:
         """Лимит дня day: сумы на вечер накануне, авансы, платежи и дни до зарплаты."""
@@ -479,7 +524,7 @@ def day_budget(
         key=lambda line: line.fact - line.plan,
         reverse=True,
     )
-    left_now = _ahead(items, now)
+    left_now = (*carried, *_ahead(items, now))  # перенос — первым: его день 1
     history = tuple(
         DaySpend(day, _spent_on(frame, day, paid), allowance_on(day).limit)
         for day in (first + timedelta(days=k) for k in range(today.day))
@@ -500,7 +545,11 @@ def day_budget(
         frozen_change=change,
         frozen_uzs=frozen_uzs,
         frozen_currency=frozen_currency,
-        upcoming=left_now[:2],
+        # остатки прошлого месяца — сверх двух строк месяца: аванс и платежи видны
+        upcoming=(
+            *(item for item in left_now if item.row < 0),
+            *[item for item in left_now if item.row > 0][:2],
+        ),
         over_plan=tuple(over[:3]),
         runway=uzs_runway(
             currency_forecast(frame, (), items, today, "UZS", records=records),

@@ -49,8 +49,9 @@ export default function Ahead({ data }: { data: Dashboard }) {
           <h2 className="text-fact font-extrabold">Впереди</h2>
           <Items
             label="Платежи и поступления"
-            items={data.upcoming.map((item) => ({
-              key: `${item.day}-${item.name}`,
+            items={data.upcoming.map((item, index) => ({
+              // названия могут совпасть: два остатка прошлого месяца с одним именем
+              key: `${index}-${item.day}-${item.name}`,
               title: `${item.day < today ? "⏳ " : ""}${item.name}`,
               left: dayText(item.day),
               // цветом текста: на полосе зелёный и оранжевый не держат 7:1, смысл — в знаке

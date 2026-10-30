@@ -1,5 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Dashboard } from "../api";
 import { dashboardFixture } from "../mocks/fixtures";
 import { nb } from "../test/text";
@@ -36,6 +36,24 @@ describe("Ahead", () => {
       );
     }
     expect(screen.queryByText(/день прошёл/)).toBeNull();
+  });
+
+  it("keeps two rows with the same day and name apart", () => {
+    // две строки прошлого месяца с одним названием — обе «… за октябрь, остаток»
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const rest = {
+      name: "Фриланс за октябрь, остаток",
+      day: 1,
+      amount: 200,
+      currency: "USD",
+      uzs: 2_400_000,
+    };
+    show({ upcoming: [rest, { ...rest, amount: 300, uzs: 3_600_000 }] });
+    expect(items("Платежи и поступления")).toHaveLength(2);
+    expect(
+      errors.mock.calls.some((call) => String(call[0]).includes("same key")),
+    ).toBe(false);
+    errors.mockRestore();
   });
 
   it("marks a row that is late and explains the mark", () => {

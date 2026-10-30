@@ -15,6 +15,14 @@ from app.services.receipts_sync import (
     RECEIVED_HEADER,
     sync_receipts,
 )
+from tests.test_carry_over import (
+    HALF_PAID,
+    NOVEMBER_TAB,
+    OCTOBER_TAB,
+    marked_rubles,
+    rubles,
+)
+from tests.test_carry_over import RATES as CARRY_RATES
 from tests.test_day_budget import FACT_HEADER, OPENING, RATES, charge, fact_row, tab
 
 ADVANCE_PAID = fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000)
@@ -164,3 +172,34 @@ def test_a_broken_limit_does_not_stop_the_received_column(
     sheets = Sheets(with_limit_row(), ADVANCE_PAID, *CLOUD)
     assert sync_receipts(sheets, date(2026, 10, 16)) == 2  # T11 и T12 — как всегда
     assert sheets.column() == [RECEIVED_HEADER, 2_000_000, "", "", ""]
+
+
+class RubleSheets(Sheets):
+    """Вкладки месяцев в памяти и курсы с рублём."""
+
+    def __init__(self, tabs: dict[str, list[list[Any]]], *fact: list[Any]) -> None:
+        super().__init__(None, *fact)
+        self.tabs = {name: wide(rows) for name, rows in tabs.items()}
+
+    def get_rates(self) -> Any:
+        return CARRY_RATES
+
+
+def test_a_late_part_marked_for_last_month_stays_out_of_this_months_column() -> None:
+    came = (
+        HALF_PAID,
+        marked_rubles(date(2026, 11, 3), 55_000, "ЗП за октябрь"),
+        rubles(date(2026, 11, 3), 15_000),
+    )
+    sheets = RubleSheets({"Oct 26": OCTOBER_TAB, "Nov 26": NOVEMBER_TAB}, *came)
+    sync_receipts(sheets, date(2026, 11, 4))
+    # 55 000 с пометкой — октябрю: ноябрьской «ЗП Питер» — только 15 000; вкладка
+    # октября не меняется
+    november = sheets.tabs["Nov 26"]
+    assert [row[COLUMN_T] for row in november[10:14]] == [
+        RECEIVED_HEADER,
+        "",
+        15_000,
+        "",
+    ]
+    assert sheets.tabs["Oct 26"] == wide(OCTOBER_TAB)

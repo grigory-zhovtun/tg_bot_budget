@@ -35,6 +35,7 @@ from app.domain import (
 )
 from app.errors import user_message
 from app.handlers.common import LAST_WRITE, premium_icons
+from app.handlers.income_month import ask_month
 from app.handlers.piggy import income_prompt
 from app.handlers.receipts import mark_dirty
 from app.services.google_sheets import GoogleSheetsService
@@ -498,4 +499,6 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await _edit(query, verdict)
     chat = getattr(update, "effective_chat", None)
     if moved_in and chat is not None:
+        # опоздавшая часть ЗП по SMS приходит переводом — месяц спрашиваем здесь
+        ask_month(context, chat.id, [fixed], number)
         await income_prompt(context, chat.id, chat.id, [fixed])  # «🐷» под ответом

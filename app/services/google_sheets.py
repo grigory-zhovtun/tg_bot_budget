@@ -5,7 +5,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Protocol, TypeVar
@@ -68,7 +68,8 @@ SERIAL_ZERO = date(1899, 12, 30)
 PROFILE_MARK = "О НАС"
 MAX_PROFILE = 2000
 CALENDAR_TTL = 60.0  # секунд: лист «Календарь» перечитываем не чаще раза в минуту
-MONTH_SHEETS = 4  # вкладка месяца, курсы, fact и «Календарь» читаются одновременно
+# вкладка месяца, прошлого месяца, курсы, fact и «Календарь» читаются одновременно
+MONTH_SHEETS = 5
 CALENDAR_HEADER = [
     "ID",
     "Дата",
@@ -1289,6 +1290,47 @@ class GoogleSheetsService:
         )
         return True
 
+    def fact_row_cells(self, number: int) -> list[Any] | None:
+        """Строка fact A:H как она в таблице сейчас (UNFORMATTED); строки нет — None."""
+        worksheet = self._worksheet(config.FACT_SHEET_NAME)
+        current = self._with_retry(
+            "Reading a fact row",
+            lambda: worksheet.get(
+                f"A{number}:H{number}",
+                value_render_option=ValueRenderOption.unformatted,
+            ),
+        )
+        return list(current[0]) if len(current) == 1 and current[0] else None
+
+    def comment_row(self, number: int, row: SheetRow, comment: str) -> bool:
+        """Новый комментарий F строки fact, если в таблице всё ещё она — для пометки
+        месяца поступления «за октябрь»; поправили руками или сдвинулась — False."""
+        worksheet = self._worksheet(config.FACT_SHEET_NAME)
+        current = self._with_retry(
+            "Reading row to comment",
+            lambda: worksheet.get(
+                f"A{number}:H{number}",
+                value_render_option=ValueRenderOption.unformatted,
+            ),
+        )
+        if len(current) != 1 or not _same_row(current[0], row):
+            return False
+        self._with_retry(
+            "Commenting row",
+            lambda: self.sheet.values_batch_update(
+                {
+                    "valueInputOption": "RAW",
+                    "data": [
+                        {
+                            "range": f"{config.FACT_SHEET_NAME}!F{number}",
+                            "values": [[comment]],
+                        }
+                    ],
+                }
+            ),
+        )
+        return True
+
 
 class MonthSource(Protocol):
     """Откуда read_month_sheets берёт листы: GoogleSheetsService (в тестах — подделка)."""
@@ -1304,34 +1346,64 @@ class MonthSource(Protocol):
 
 @dataclass(frozen=True)
 class MonthSheets:
-    """Листы экранов Mini App: вкладка месяца (None — её нет), курсы, fact, «Календарь»."""
+    """Листы экранов Mini App: вкладка месяца (None — её нет), курсы, fact, «Календарь»
+    и вкладка прошлого месяца — для переноса недополученных поступлений (None — нет)."""
 
     month: list[list[Any]] | None
     rates: Rates
     fact: list[list[Any]]
     calendar: list[list[Any]] = field(default_factory=list)
+    previous: list[list[Any]] | None = None
+
+
+def _tab(read: Future[list[list[Any]]] | None) -> list[list[Any]] | None:
+    """Вкладка из чтения; None — её нет."""
+    try:
+        return read.result() if read is not None else None
+    except gspread.WorksheetNotFound:
+        return None
+
+
+def _optional_tab(
+    read: Future[list[list[Any]]] | None, title: str
+) -> list[list[Any]] | None:
+    """Вкладка прошлого месяца: нужна только для переноса. Не прочиталась — экран
+    без переноса, а не «таблица не ответила»."""
+    try:
+        return _tab(read)
+    except Exception:
+        logger.warning("Last month's tab %s was not read: no carry-over", title)
+        return None
 
 
 def read_month_sheets(
-    gs: MonthSource, title: str, max_age: float = 0.0, calendar: bool = True
+    gs: MonthSource,
+    title: str,
+    max_age: float = 0.0,
+    calendar: bool = True,
+    previous: bool = False,
 ) -> MonthSheets:
-    """Вкладка месяца, курсы, fact и «Календарь» — одновременно: каждое чтение ждёт
-    Google, а не процессор, и экран ждёт самое долгое из них, а не их сумму.
+    """Вкладка месяца, вкладка прошлого месяца, курсы, fact и «Календарь» —
+    одновременно: каждое чтение ждёт Google, а не процессор, и экран ждёт самое
+    долгое из них, а не их сумму.
 
-    max_age > 0 — годятся копии листов не старше стольких секунд.
+    max_age > 0 — годятся копии листов не старше стольких секунд. previous=True —
+    ещё вкладка прошлого месяца: её недополученное «Сводка» показывает во «Впереди».
     """
+    first = parse_month_title(title)
+    last = month_title(first - timedelta(days=1)) if first is not None else ""
     with ThreadPoolExecutor(max_workers=MONTH_SHEETS) as pool:
         month = pool.submit(gs.get_values, title, max_age)
+        before = (
+            pool.submit(gs.get_values, last, max_age) if previous and last else None
+        )
         rates = pool.submit(gs.get_rates, max_age)
         fact = pool.submit(gs.get_values, config.FACT_SHEET_NAME, max_age)
         records = pool.submit(gs.get_calendar, max_age) if calendar else None
-        try:
-            rows: list[list[Any]] | None = month.result()
-        except gspread.WorksheetNotFound:
-            rows = None
         return MonthSheets(
-            rows,
+            _tab(month),
             rates.result(),
             fact.result(),
             records.result() if records is not None else [],
+            _optional_tab(before, last),
         )
