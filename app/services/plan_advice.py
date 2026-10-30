@@ -21,7 +21,7 @@ from app import config
 from app.domain import Rates, merchant_key, month_title
 from app.services.analytics_service import MONTHS_RU, expenses, transactions_frame
 from app.services.calendar import read_calendar
-from app.services.day_budget import DayBudget, day_budget, until_text
+from app.services.day_budget import DayBudget, day_budget, runway_until, until_text
 from app.services.google_sheets import GoogleSheetsService
 from app.services.plan import (
     TOLERANCE,
@@ -182,15 +182,16 @@ def _now(budget: DayBudget, today: date) -> list[str]:
     runway = budget.runway
     if runway is not None:
         line = f"Сумы на картах и наличными: {_plain(runway.balance, 'UZS')} UZS; "
+        # срок — как у карточки «Сумы»: до зарплаты, которая ещё не пришла
+        until = runway_until(runway, today)
         if runway.short <= 0:
-            line += "до конца месяца хватит"
+            line += f"{until} хватит, останется ≈ {_plain(runway.left, 'UZS')} UZS"
         else:
             last = (
                 f"хватит до {runway.last_day:%d.%m}"
                 if runway.last_day is not None and runway.last_day >= today
                 else "уже закончились"
             )
-            until = f"до {runway.until:%d.%m}" if runway.until else "до конца месяца"
             need = (
                 f"обменять ≈ {_plain(runway.dollars, 'UZS')} USD"
                 if runway.dollars is not None

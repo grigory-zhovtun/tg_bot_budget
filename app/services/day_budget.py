@@ -731,22 +731,54 @@ def payday_on(budget: DayBudget) -> str:
     return _day_text(budget.payday, budget.today)
 
 
+def _payday_word(name: str) -> str:
+    """Срок задаёт аванс, когда основной зарплаты в списке нет, или страховка."""
+    return "аванса" if "аванс" in name.lower() else "зарплаты"
+
+
+def _horizon(payday: date | None, name: str, today: date) -> str:
+    """«до аванса 15-го», «до зарплаты 15 ноября», «до конца месяца»."""
+    if payday is None:
+        return "до конца месяца"
+    return f"до {_payday_word(name)} {_day_text(payday, today)}"
+
+
 def until_text(budget: DayBudget) -> str:
     """«до аванса 15-го», «до зарплаты 15 ноября», «до конца месяца»."""
-    if budget.payday is None:
+    return _horizon(budget.payday, budget.payday_name, budget.today)
+
+
+def allowance_until(allowance: Allowance, today: date) -> str:
+    """Срок лимита с завтра — как until_text: «до зарплаты 30 ноября»."""
+    return _horizon(allowance.payday, allowance.payday_name, today)
+
+
+def runway_until(runway: Runway, today: date) -> str:
+    """Срок «Сумы»: «до зарплаты 30-го», «до зарплаты сегодня» — её ждём сегодня,
+    «до конца месяца»."""
+    if runway.payday is None:
         return "до конца месяца"
-    word = "аванса" if "аванс" in budget.payday_name.lower() else "зарплаты"
-    return f"до {word} {payday_on(budget)}"
+    day = "сегодня" if runway.payday == today else _day_text(runway.payday, today)
+    return f"до {_payday_word(runway.payday_name)} {day}"
 
 
-def _money_line(budget: DayBudget, amount: Callable[[float], str] = whole) -> str:
-    """«на сумовых картах 7 200 000, аванс 15-го +2 000 000, платежи до 30-го 80 000»."""
-    line = f"на сумовых картах {amount(budget.sums)}"
-    if budget.advance_on is not None and round(budget.advances) > 0:
-        day = _day_text(budget.advance_on, budget.today)
-        line += f", аванс {day} +{amount(budget.advances)}"
-    if round(budget.bills) > 0:
-        line += f", платежи до {payday_on(budget)} {amount(budget.bills)}"
+def _money_line(
+    source: DayBudget | Allowance,
+    today: date,
+    amount: Callable[[float], str] = whole,
+    now: bool = False,
+) -> str:
+    """«на сумовых картах 7 200 000, аванс 15-го +2 000 000, платежи до 30-го 80 000»;
+    now — сумы на сейчас: лимит с завтра."""
+    line = f"на сумовых картах {'сейчас ' if now else ''}{amount(source.sums)}"
+    if source.advance_on is not None and round(source.advances) > 0:
+        day = _day_text(source.advance_on, today)
+        line += f", аванс {day} +{amount(source.advances)}"
+    if round(source.bills) > 0:
+        until = (
+            "конца месяца" if source.payday is None else _day_text(source.payday, today)
+        )
+        line += f", платежи до {until} {amount(source.bills)}"
     return line
 
 
@@ -763,46 +795,70 @@ def _plan_text(budget: DayBudget, amount: Callable[[float], str] = whole) -> str
     return f"✓ Ровно по плану {period}"
 
 
-def runway_line(runway: Runway, today: date) -> str:
-    """«💳 Сумы 2,00 млн — хватит до 18.10 · до 30.10 обменять ≈ $460»."""
-    head = f"💳 Сумы {short(runway.balance)}"
-    if runway.short <= 0:
-        return f"{head} — до конца месяца хватит"
+def _runway_when(runway: Runway, today: date) -> str:
+    """Когда сумы кончатся: «уже закончились», «хватит до 18.10»."""
     if runway.last_day is None or runway.last_day < today:
-        when = "уже закончились"
-    elif runway.last_day == today:
-        when = "хватит только на сегодня"
-    else:
-        when = f"хватит до {runway.last_day:%d.%m}"
-    target = f"до {runway.until:%d.%m}" if runway.until else "до конца месяца"
+        return "уже закончились"
+    if runway.last_day == today:
+        return "хватит только на сегодня"
+    return f"хватит до {runway.last_day:%d.%m}"
+
+
+def runway_line(runway: Runway, today: date) -> str:
+    """«💳 Сумы 7,60 млн — до зарплаты 30-го хватит, останется ≈ 5,90 млн» или
+    «💳 Сумы 2,00 млн — хватит до 18.10 · до зарплаты 30-го обменять ≈ $460»."""
+    head = f"💳 Сумы {short(runway.balance)}"
+    target = runway_until(runway, today)
+    if runway.short <= 0:
+        return f"{head} — {target} хватит, останется ≈ {short(runway.left)}"
     need = (
         f"обменять ≈ ${money(runway.dollars)}"
         if runway.dollars is not None
         else f"не хватит {short(runway.short)}"
     )
-    return f"{head} — {when} · {target} {need}"
+    return f"{head} — {_runway_when(runway, today)} · {target} {need}"
 
 
 def format_day_budget(budget: DayBudget, now: bool = False) -> str:
-    """Утреннее сообщение; now=True — для /today: ещё потрачено и осталось сегодня."""
+    """Утреннее сообщение; now=True — для /today: ещё потрачено и осталось сегодня, а
+    в день прихода зарплаты — лимит с завтра."""
     b = budget
     weekday = WEEKDAYS[b.today.weekday()].capitalize()
     lines = [f"☀️ {weekday}, {b.today.day} {MONTHS_GENITIVE[b.today.month - 1]}"]
     until = until_text(b)
-    if b.limit > 0:
-        lines.append(f"💸 Можно тратить в день {until}: {money(b.limit)} сум")
-    else:
+    tomorrow = b.tomorrow if now else None
+    if tomorrow is not None:
+        # утренний лимит устарел: сверх лимита дня не пишем, считаем с завтра
+        ahead = allowance_until(tomorrow, b.today)
+        if tomorrow.limit > 0:
+            lines.append(f"💸 С завтра можно {money(tomorrow.limit)} в день {ahead}")
+        else:
+            lines.append(
+                f"💸 Лимита на сегодня нет: {ahead} не хватает "
+                f"{money(-tomorrow.limit * tomorrow.days)}"
+            )
         lines.append(
-            f"💸 Лимита на сегодня нет: {until} не хватает "
-            f"{money(-b.limit * b.days_left)}"
+            f"   ✓ пришла ЗП {money(b.salary_came)}, "
+            f"потрачено сегодня {money(b.spent_today)}"
         )
-    if now:
-        left = max(b.limit, 0) - b.spent_today
-        rest = (
-            f"осталось {money(left)}" if left >= 0 else f"сверх лимита {money(-left)}"
-        )
-        lines.append(f"   потрачено {money(b.spent_today)} — {rest}")
-    lines.append(f"   {_money_line(b, money)}")
+        lines.append(f"   {_money_line(tomorrow, b.today, money, now=True)}")
+    else:
+        if b.limit > 0:
+            lines.append(f"💸 Можно тратить в день {until}: {money(b.limit)} сум")
+        else:
+            lines.append(
+                f"💸 Лимита на сегодня нет: {until} не хватает "
+                f"{money(-b.limit * b.days_left)}"
+            )
+        if now:
+            left = max(b.limit, 0) - b.spent_today
+            rest = (
+                f"осталось {money(left)}"
+                if left >= 0
+                else f"сверх лимита {money(-left)}"
+            )
+            lines.append(f"   потрачено {money(b.spent_today)} — {rest}")
+        lines.append(f"   {_money_line(b, b.today, money)}")
     plan = _plan_text(b, money)
     if plan is not None:
         lines.append(plan)
@@ -854,23 +910,44 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
 
 
 def _rich_runway(runway: Runway, today: date) -> list[str]:
-    """«💳 Сумы …»: хватит ли сумов и сколько долларов обменять."""
-    head = heading(f"💳 Сумы {whole(runway.balance)}")
+    """«💳 Сумы сейчас …»: хватит ли сумов до зарплаты и сколько долларов обменять;
+    «сейчас» — сумы с утра уже могли измениться."""
+    head = heading(f"💳 Сумы сейчас {whole(runway.balance)}")
+    target = runway_until(runway, today)
     if runway.short <= 0:
-        return [head, para("до конца месяца хватит")]
-    if runway.last_day is None or runway.last_day < today:
-        when = "уже закончились"
-    elif runway.last_day == today:
-        when = "хватит только на сегодня"
-    else:
-        when = f"хватит до {runway.last_day:%d.%m}"
-    target = f"до {runway.until:%d.%m}" if runway.until else "до конца месяца"
+        left = f"останется ≈{NBSP}{whole(runway.left)}"
+        return [head, para(f"✓ {target} хватит", left)]
     need = (
         f"обменять ≈{NBSP}{in_currency(runway.dollars, 'USD')}"
         if runway.dollars is not None
         else f"не хватит {whole(runway.short)}"
     )
-    return [head, para(when, f"{target} {need}")]
+    return [head, para(_runway_when(runway, today), f"{target} {need}")]
+
+
+def _rich_tomorrow(budget: DayBudget, tomorrow: Allowance) -> list[str]:
+    """/today в день прихода зарплаты: лимит с завтра по деньгам на сейчас."""
+    b = budget
+    ahead = allowance_until(tomorrow, b.today)
+    came = f"✓ пришла ЗП {whole(b.salary_came)}"
+    spent = f"потрачено сегодня {whole(b.spent_today)}"
+    sums = _money_line(tomorrow, b.today, now=True)
+    if tomorrow.limit <= 0:
+        short_by = whole(-tomorrow.limit * tomorrow.days)
+        return [
+            heading("💸 Лимита на сегодня нет", 2),
+            para(f"{ahead} не хватает {short_by}", came, spent, sums),
+        ]
+    return [
+        heading(f"💸 {whole(tomorrow.limit)} сум", 1),
+        para(
+            "можно в день с завтра",
+            f"{ahead}, {days_text(tomorrow.days)}",
+            came,
+            spent,
+            sums,
+        ),
+    ]
 
 
 def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
@@ -882,15 +959,20 @@ def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
     until = until_text(b)
     limit = f"лимит {whole(b.limit)} в день {until}"
     spent = f"потрачено {whole(b.spent_today)}"
-    if b.limit <= 0:
+    if now and b.tomorrow is not None:
+        blocks += _rich_tomorrow(b, b.tomorrow)
+    elif b.limit <= 0:
         lines = [f"{until} не хватает {whole(-b.limit * b.days_left)}"]
         if now:
             lines.append(f"потрачено сегодня {whole(b.spent_today)}")
-        blocks += [heading("💸 Лимита на сегодня нет", 2), para(*lines, _money_line(b))]
+        blocks += [
+            heading("💸 Лимита на сегодня нет", 2),
+            para(*lines, _money_line(b, b.today)),
+        ]
     elif not now:
         blocks += [
             heading(f"💸 {whole(b.limit)} сум", 1),
-            para(f"можно тратить в день {until}", _money_line(b)),
+            para(f"можно тратить в день {until}", _money_line(b, b.today)),
         ]
     elif b.spent_today <= b.limit:
         blocks += [
@@ -1005,7 +1087,21 @@ def rich_plan_status(line: PlanLine | None, subcategory: str, today: date) -> li
 
 
 def rich_today_line(budget: DayBudget) -> list[str]:
-    """Сколько ещё можно сегодня — после записи, блоками."""
+    """Сколько ещё можно сегодня — после записи, блоками; в день прихода зарплаты —
+    сколько с завтра: утренний лимит устарел."""
+    tomorrow = budget.tomorrow
+    if tomorrow is not None:
+        ahead = allowance_until(tomorrow, budget.today)
+        if tomorrow.limit <= 0:
+            short_by = whole(-tomorrow.limit * tomorrow.days)
+            return [
+                heading("💸 Лимита на сегодня нет"),
+                para(f"{ahead} не хватает {short_by}"),
+            ]
+        return [
+            heading(f"💸 С завтра можно {whole(tomorrow.limit)}"),
+            para(f"в день {ahead}"),
+        ]
     until = until_text(budget)
     if budget.limit <= 0:
         short_by = whole(-budget.limit * budget.days_left)
@@ -1026,7 +1122,17 @@ def rich_today_line(budget: DayBudget) -> list[str]:
 
 
 def today_line(budget: DayBudget) -> str:
-    """Сколько ещё можно сегодня — после каждой записи."""
+    """Сколько ещё можно сегодня — после каждой записи; в день прихода зарплаты —
+    сколько с завтра: утренний лимит устарел."""
+    tomorrow = budget.tomorrow
+    if tomorrow is not None:
+        ahead = allowance_until(tomorrow, budget.today)
+        if tomorrow.limit <= 0:
+            return (
+                f"💸 Лимита на сегодня нет: {ahead} не хватает "
+                f"{money(-tomorrow.limit * tomorrow.days)}"
+            )
+        return f"💸 С завтра можно {money(tomorrow.limit)} в день {ahead}"
     until = until_text(budget)
     if budget.limit <= 0:
         return (

@@ -22,6 +22,7 @@ from app.services.day_budget import (
     day_budget,
     format_day_budget,
     read_forecast,
+    today_line,
 )
 from app.services.receipts import match_receipts
 from app.services.recurring import find_series, outside_list
@@ -470,7 +471,7 @@ def test_morning_message() -> None:
         "⚠️ Сверх плана на 300 000 за 1 день",
         "Вчера: 400 000 при лимите 233 333 — больше на 166 667",
         "🧊 Заморожено: 600,00 USD ≈ 7,20 млн",
-        "💳 Сумы 4,60 млн — до конца месяца хватит",
+        "💳 Сумы 4,60 млн — до зарплаты 30-го хватит, останется ≈ 5,77 млн",
         "🔴 Сверх плана: инвентарь 720 000 из 500 000",
         "📅 Впереди: 15.10 Аванс +2,00 млн • 18.10 Квартплата −400 USD",
     ]
@@ -547,11 +548,11 @@ def test_a_one_off_record_keeps_its_payment_out_of_the_sums_pace() -> None:
     )
     day = date(2026, 10, 10)
     # без записи лагерь — обычная трата: темп 250 000 в день, до ЗП сумов не хватит
-    assert "💳 Сумы 1,50 млн — хватит до 23.10 · до 30.10 обменять ≈ $150" in (
+    assert "💳 Сумы 1,50 млн — хватит до 23.10 · до зарплаты 30-го обменять ≈ $150" in (
         plain.morning_brief(day).text.splitlines()
     )
     # платёж закрыл разовую запись календаря — в темп он не входит
-    assert "💳 Сумы 1,50 млн — до конца месяца хватит" in (
+    assert "💳 Сумы 1,50 млн — до зарплаты 30-го хватит, останется ≈ 3,50 млн" in (
         planned.morning_brief(day).text.splitlines()
     )
 
@@ -713,6 +714,50 @@ def test_without_a_main_salary_the_advance_runs_from_tomorrow() -> None:
         "Аванс",
     )
     assert (day.salary_came, day.salary_name) == (2_000_000, "Аванс")
+
+
+AFTER_SALARY = fact_row(date(2026, 10, 30), "🍔 ЕДА", "кафе", 300_000)
+
+
+def test_today_on_the_salary_day_speaks_of_tomorrow() -> None:
+    day = budget(
+        date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, SALARY_TODAY, AFTER_SALARY
+    )
+    # 18,7 млн на 31 день; сверх лимита дня не пишем — утренний лимит устарел
+    assert format_day_budget(day, now=True).splitlines()[1:4] == [
+        "💸 С завтра можно 603 226 в день до зарплаты 30 ноября",
+        "   ✓ пришла ЗП 10 000 000, потрачено сегодня 300 000",
+        "   на сумовых картах сейчас 16 700 000, аванс 15 ноября +2 000 000",
+    ]
+    # утро — прежнее: лимит с утра и сумы на вечер вчера
+    assert format_day_budget(day).splitlines()[1:3] == [
+        "💸 Можно тратить в день до зарплаты 30 ноября: 281 250 сум",
+        "   на сумовых картах 7 000 000, аванс 15 ноября +2 000 000",
+    ]
+
+
+def test_no_limit_from_tomorrow_keeps_the_no_limit_line() -> None:
+    spree = fact_row(date(2026, 10, 30), "🍔 ЕДА", "кафе", 20_000_000)
+    day = budget(date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, SALARY_TODAY, spree)
+    # сумы −3 млн: до аванса 15 ноября не хватает 3 млн на 16 дней
+    assert format_day_budget(day, now=True).splitlines()[1:4] == [
+        "💸 Лимита на сегодня нет: до аванса 15 ноября не хватает 3 000 000",
+        "   ✓ пришла ЗП 10 000 000, потрачено сегодня 20 000 000",
+        "   на сумовых картах сейчас -3 000 000",
+    ]
+    assert today_line(day) == (
+        "💸 Лимита на сегодня нет: до аванса 15 ноября не хватает 3 000 000"
+    )
+
+
+def test_a_record_on_the_salary_day_says_tomorrows_limit() -> None:
+    day = budget(
+        date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, SALARY_TODAY, AFTER_SALARY
+    )
+    assert today_line(day) == "💸 С завтра можно 603 226 в день до зарплаты 30 ноября"
+    # в другой день — как раньше
+    calm = budget(date(2026, 10, 29), ADVANCE_PAID, RENT_PAID)
+    assert today_line(calm).startswith("💸 На сегодня осталось")
 
 
 def test_a_payment_a_bit_off_its_sum_does_not_eat_the_day() -> None:

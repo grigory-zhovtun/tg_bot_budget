@@ -93,6 +93,25 @@ def test_today_line_blocks() -> None:
     ]
 
 
+def test_today_line_on_the_salary_day_speaks_of_tomorrow() -> None:
+    paid = [
+        fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000),
+        fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000),
+    ]
+    b = budget(date(2026, 10, 30), *paid, items=LIST)
+    assert b.tomorrow is not None
+    # вместо «Осталось на сегодня»: утренний лимит в этот день устарел
+    assert rich_today_line(b) == [
+        heading(f"💸 С завтра можно {whole(b.tomorrow.limit)}"),
+        para("в день до зарплаты 30 ноября"),
+    ]
+    short = replace(b, tomorrow=replace(b.tomorrow, limit=-50_000, days=31))
+    assert rich_today_line(short) == [
+        heading("💸 Лимита на сегодня нет"),
+        para(f"до зарплаты 30 ноября не хватает {whole(1_550_000)}"),
+    ]
+
+
 def test_write_feedback_keeps_the_lines_and_adds_blocks() -> None:
     cafe = fact_row(date(2026, 10, 2), "🍔 ЕДА", "кафе", 120_000)
     fact = [FACT_HEADER, *OPENING, cafe]
