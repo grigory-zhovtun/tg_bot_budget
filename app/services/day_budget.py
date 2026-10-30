@@ -49,7 +49,7 @@ from app.services.analytics_service import (
     money,
     plan_lines,
 )
-from app.services.calendar import CalendarRecord
+from app.services.calendar import CalendarRecord, calendar_state
 from app.services.forecast import currency_forecast
 from app.services.receipts import NOTHING, Receipt, closed, match_receipts, remaining
 from app.services.runway import Runway, horizon_runway
@@ -578,16 +578,33 @@ def day_budget(
         None,
     )
     tomorrow = allowance_on(today + timedelta(days=1)) if came else None
-    # «Сумы»: по дням срока от сумов сейчас — авансы, платежи и подписки в их дни
+    # «Сумы»: по дням срока от сумов сейчас — авансы, платежи и подписки в их дни,
+    # неоплаченные разовые записи «Календаря» — тоже, как в его линии «по темпу»
     sums_payday, sums_name = _sums_payday(salaries, now, today)
     end = sums_payday or month_end
     reach = end + timedelta(days=1)
+    planned = calendar_state(
+        frame,
+        records,
+        today,
+        end,
+        today,
+        frozenset(index for receipt in early.values() for index in receipt.operations),
+        paid,
+    )
     events = [
         *((due, amount) for due, amount, _ in _advance_days(spare, now, today, reach)),
         *((due, -amount) for due, amount in _bill_days(items, now, today, reach)),
         *(
             (due, -amount)
             for due, amount in _subscription_days(series, today, reach, now=True)
+        ),
+        *(
+            (occurrence.day, -occurrence.now)
+            for occurrence in planned.occurrences
+            if occurrence.record.repeat == "once"
+            and occurrence.record.currency == "UZS"
+            and occurrence.now > 0
         ),
     ]
     paced = currency_forecast(frame, (), items, today, "UZS", records=records)

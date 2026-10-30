@@ -557,6 +557,26 @@ def test_a_one_off_record_keeps_its_payment_out_of_the_sums_pace() -> None:
     )
 
 
+def test_a_one_off_record_in_sums_moves_the_sums_card() -> None:
+    # запланированная разовая трата — отток в свой день, как в линии «по темпу»
+    # «Календаря»: иначе «Сумы» скажут «хватит», а «Календарь» покажет минус
+    fact = [FACT_HEADER, *OPENING]
+    camp = ["k7f2qa", "05.10.2026", "нет", "", "👶 ДЕТИ", "лагерь", "UZS", 6_000_000,
+            "Лагерь", "Тест"]  # fmt: skip
+    plain = AnalyticsService(Sheets({"fact": fact, "Oct 26": tab()}))
+    planned = AnalyticsService(
+        Sheets({"fact": fact, "Oct 26": tab(), "Календарь": [CALENDAR_HEADER, camp]})
+    )
+    day = date(2026, 10, 2)
+    assert "💳 Сумы 5,00 млн — до зарплаты 30-го хватит, останется ≈ 7,00 млн" in (
+        plain.morning_brief(day).text.splitlines()
+    )
+    # 5 млн − лагерь 6 млн 5-го: хватит до 04.10, аванс 15-го закрывает минус
+    assert "💳 Сумы 5,00 млн — хватит до 04.10 · до зарплаты 30-го обменять ≈ $90" in (
+        planned.morning_brief(day).text.splitlines()
+    )
+
+
 def test_read_error_is_not_reported_as_a_missing_tab() -> None:
     class Flaky(Sheets):
         def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
