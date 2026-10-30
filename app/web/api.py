@@ -689,6 +689,9 @@ def dashboard_out(
         bills=budget.bills,
         until=until_text(budget),
         payday_on=payday_on(budget),
+        payday=budget.payday,
+        advances=budget.advances,
+        advance_on=budget.advance_on,
         frozen=frozen,
         groups=groups,
         daily=[

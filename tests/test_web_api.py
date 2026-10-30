@@ -351,6 +351,12 @@ def test_dashboard_numbers_come_from_the_month_tab() -> None:
     # лимит — по день ЗП 30-го: сумы на вечер вчера и аванс 15-го минус платежи по него
     assert (body["sums"], body["bills"], body["days_left"]) == (4_600_000, 0, 29)
     assert (body["until"], body["payday_on"]) == ("до зарплаты 30-го", "30-го")
+    # для таблицы «откуда»: аванс срока и день, по который лимит
+    assert (body["advances"], body["advance_on"], body["payday"]) == (
+        2_000_000,
+        "2026-10-15",
+        "2026-10-30",
+    )
     assert body["planned_balance"] is None  # старое приложение прячет «по плану»
     assert body["frozen"]["currency"] == "USD"
     assert body["groups"][0]["items"][0] == {

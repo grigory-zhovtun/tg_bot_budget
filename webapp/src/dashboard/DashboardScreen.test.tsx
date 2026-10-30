@@ -16,6 +16,30 @@ afterEach(() => {
 });
 
 describe("DashboardScreen", () => {
+  it("adds the advance to the money until the salary", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      until: "до зарплаты 30-го",
+      payday_on: "30-го",
+      payday: "2026-10-30",
+      advances: 3_000_000,
+      advance_on: "2026-10-15",
+      days_left: 21,
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    const source = await screen.findByRole("table", { name: "Откуда лимит" });
+    expect(
+      within(source)
+        .getAllByRole("row")
+        .map((row) => row.textContent?.replace(/\s/g, " ")),
+    ).toEqual([
+      "сумы утром2 800 000",
+      "аванс 15.10+3 000 000",
+      "платежи до 30.10−300 000",
+      "на 21 день5 500 000",
+    ]);
+  });
+
   it("opens on «Сегодня» with what is left today", async () => {
     render(<DashboardScreen api={fakeApi()} />);
     const today = await screen.findByRole("region", { name: "Можно сегодня" });
@@ -30,11 +54,17 @@ describe("DashboardScreen", () => {
       within(today).getByText("лимит 500 000 в день до аванса 15\u2011го"),
     ).toBeTruthy();
     expect(within(today).getByText("потрачено сегодня 120 000")).toBeTruthy();
+    // откуда лимит — таблицей: сумы утром, платежи до срока и деньги на его дни
+    const source = within(today).getByRole("table", { name: "Откуда лимит" });
     expect(
-      within(today).getByText(
-        "на сумовых картах 2 800 000, платежи до 15\u2011го 300 000",
-      ),
-    ).toBeTruthy();
+      within(source)
+        .getAllByRole("row")
+        .map((row) => row.textContent?.replace(/\s/g, " ")),
+    ).toEqual([
+      "сумы утром2 800 000",
+      "платежи до 15.10−300 000",
+      "на 5 дней2 500 000",
+    ]);
     // план — одной строкой, той же, что у графика «Траты»
     const plan = within(today).getByText("✓ Запас 1 100 000 за 9 дней");
     expect(plan.className).toContain("text-ok");

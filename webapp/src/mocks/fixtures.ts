@@ -65,6 +65,9 @@ export const dashboardFixture: Dashboard = {
   bills: 300_000,
   until: "до аванса 15-го",
   payday_on: "15-го",
+  payday: "2026-10-15",
+  advances: 0,
+  advance_on: null,
   frozen: { amount: 1000, currency: "USD", uzs: 12_000_000, change: -50 },
   groups: [
     {

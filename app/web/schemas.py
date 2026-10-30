@@ -257,6 +257,9 @@ class DashboardOut(ApiModel):
     bills: float | None = None  # платежи в сумах до дня перед зарплатой
     until: str | None = None  # «до зарплаты 30-го», «до аванса 15 ноября»
     payday_on: str | None = None  # «30-го», «15 ноября», «конца месяца»
+    payday: date | None = None  # день, по который лимит; None — конец месяца
+    advances: float | None = None  # авансы срока: прибавлены к деньгам лимита
+    advance_on: date | None = None  # первый из них; None — авансов в сроке нет
     frozen: FrozenOut | None = None
     groups: list[GroupPlanOut] = []
     daily: list[DayPointOut] = []  # для открытых до обновления версий приложения

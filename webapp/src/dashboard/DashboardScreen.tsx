@@ -1,10 +1,17 @@
 import { useCallback, useState } from "react";
 import type { Api, Dashboard } from "../api";
-import { inCurrency, longDay, money, moneyText, signedMoney } from "../format";
-import { monthName } from "../plan/months";
+import {
+  dayLabel,
+  inCurrency,
+  longDay,
+  money,
+  moneyText,
+  signedMoney,
+} from "../format";
+import { days, monthName } from "../plan/months";
 import { useResource, useStore } from "../store";
 import Ahead, { NoForecastNote } from "./Ahead";
-import { Big, Card, Fact, Good, Line, Warn } from "./blocks";
+import { Big, Card, Fact, Good, Line, Table, Warn } from "./blocks";
 import CardBalances from "./CardBalances";
 import CategoryChart from "./CategoryChart";
 import SectionSwitch from "./SectionSwitch";
@@ -27,13 +34,36 @@ function glued(text: string): string {
   return text.replace(/(\d)-/g, "$1\u2011");
 }
 
-/** «на сумовых картах X, платежи до 15-го Y» — из чего лимит до зарплаты. */
-function sumsLine(data: Dashboard): string | null {
+/** Откуда лимит — таблицей: сумы утром, аванс срока, платежи до его конца и деньги
+ * на его дни; числа — те же, что делит лимит. */
+function LimitSource({ data }: { data: Dashboard }) {
   if (data.sums === null) return null;
-  const line = `на сумовых картах ${money(data.sums)}`;
-  if (data.bills === null || Math.round(data.bills) <= 0) return line;
-  const until = glued(data.payday_on ?? "конца месяца");
-  return `${line}, платежи до ${until} ${money(data.bills)}`;
+  const advances = data.advances ?? 0;
+  const bills = data.bills ?? 0;
+  const rows = [["сумы утром", money(data.sums)]];
+  if (Math.round(advances) > 0 && data.advance_on) {
+    rows.push([
+      `аванс ${dayLabel(data.advance_on, data.today)}`,
+      `+${money(advances)}`,
+    ]);
+  }
+  if (Math.round(bills) > 0) {
+    const until = data.payday
+      ? dayLabel(data.payday, data.today)
+      : "конца месяца";
+    rows.push([`платежи до ${until}`, `−${money(bills)}`]);
+  }
+  if (data.days_left) {
+    rows.push([
+      `на ${days(data.days_left)}`,
+      money(data.sums + advances - bills),
+    ]);
+  }
+  return (
+    <div className="my-1">
+      <Table rows={rows} align="lr" label="Откуда лимит" />
+    </div>
+  );
 }
 
 /** Сколько можно сегодня — по деньгам до зарплаты, как утром в боте: главная цифра,
@@ -47,7 +77,6 @@ function Today({ data }: { data: Dashboard }) {
     return null;
   }
   const until = glued(data.until ?? "до конца месяца");
-  const sums = sumsLine(data);
   const pace = paceVerdict(data.spending, data.today, data.plan_per_day);
   const plan = pace && (
     <p
@@ -63,8 +92,8 @@ function Today({ data }: { data: Dashboard }) {
       <Card label="Можно сегодня">
         <p className="text-fact font-extrabold text-danger">⚠️ Лимита нет</p>
         <Line>{`${until} не хватает ${money(missing)}`}</Line>
+        <LimitSource data={data} />
         <Line>{`потрачено сегодня ${money(data.spent_today)}`}</Line>
-        {sums && <Line>{sums}</Line>}
         {plan}
       </Card>
     );
@@ -79,8 +108,8 @@ function Today({ data }: { data: Dashboard }) {
         <Line>можно потратить сегодня</Line>
       )}
       <Line>{`лимит ${money(data.limit)} в день ${until}`}</Line>
+      <LimitSource data={data} />
       <Line>{`потрачено сегодня ${money(data.spent_today)}`}</Line>
-      {sums && <Line>{sums}</Line>}
       {plan}
     </Card>
   );
