@@ -141,7 +141,12 @@ export const dashboardFixture: Dashboard = {
     short: 5_500_000,
     until: "2026-10-30",
     dollars: 460,
+    left: -5_500_000,
+    payday: "2026-10-30",
+    target: "до зарплаты 30-го",
   },
+  tomorrow: null,
+  salary_came: null,
   // по строкам fact: в «кафе» есть трата в долларах, которой вкладка не видит
   categories: [
     {

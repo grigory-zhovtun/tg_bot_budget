@@ -143,14 +143,29 @@ export interface Subscription {
   state: SubscriptionState;
 }
 
-/** Прогноз по сумам: когда кончатся и сколько долларов обменять до поступления. */
+/** «Сумы» до зарплаты: когда кончатся и сколько долларов обменять до неё. */
 export interface Runway {
-  balance: number;
+  balance: number; // сумы сейчас
   pace: number;
   last_day: string | null; // последний день, когда сумы ещё не в минусе
   short: number; // сколько сумов не хватит в самой низкой точке; 0 — хватает
-  until: string | null; // поступление, которое закроет минус; null — конец месяца
+  until: string | null; // день срока, если не хватает; null — конец месяца
   dollars: number | null; // сколько долларов обменять; null — нет курса
+  left?: number | null; // останется вечером в день срока; нет — старый ответ
+  payday?: string | null; // день срока; null — конец месяца
+  target?: string | null; // «до зарплаты 30-го», «до зарплаты сегодня»
+}
+
+/** Лимит с завтра в день прихода зарплаты: сумы сейчас, срок с завтра. */
+export interface Tomorrow {
+  limit: number;
+  days: number;
+  payday: string | null;
+  until: string; // «до зарплаты 30 ноября»
+  sums: number;
+  bills: number;
+  advances: number;
+  advance_on: string | null;
 }
 
 export interface Dashboard {
@@ -170,6 +185,8 @@ export interface Dashboard {
   payday: string | null; // день, по который лимит; null — конец месяца
   advances: number | null; // авансы срока: прибавлены к деньгам лимита
   advance_on: string | null; // первый из них; null — авансов в сроке нет
+  tomorrow?: Tomorrow | null; // день прихода зарплаты: лимит с завтра; иначе null
+  salary_came?: number | null; // сколько пришло по строке зарплаты в этот день
   frozen: {
     amount: number;
     currency: string;

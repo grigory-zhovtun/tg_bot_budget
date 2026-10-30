@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import type { Api, Dashboard } from "../api";
+import { useCallback, useState, type ReactNode } from "react";
+import type { Api, Dashboard, Tomorrow } from "../api";
 import {
   dayLabel,
   inCurrency,
@@ -34,35 +34,97 @@ function glued(text: string): string {
   return text.replace(/(\d)-/g, "$1\u2011");
 }
 
-/** Откуда лимит — таблицей: сумы утром, аванс срока, платежи до его конца и деньги
- * на его дни; числа — те же, что делит лимит. */
-function LimitSource({ data }: { data: Dashboard }) {
-  if (data.sums === null) return null;
-  const advances = data.advances ?? 0;
-  const bills = data.bills ?? 0;
-  const rows = [["сумы утром", money(data.sums)]];
-  if (Math.round(advances) > 0 && data.advance_on) {
+/** Деньги лимита: сумы, аванс срока, платежи до его конца и дни срока. */
+interface LimitMoney {
+  sums: number | null;
+  advances: number | null;
+  advance_on: string | null;
+  bills: number | null;
+  payday: string | null;
+  days: number | null;
+}
+
+interface LimitSourceProps {
+  source: LimitMoney;
+  today: string;
+  first: string; // «сумы утром» — лимит дня, «сумы сейчас» — лимит с завтра
+}
+
+/** Откуда лимит — таблицей: сумы, аванс срока, платежи до его конца и деньги на его
+ * дни; числа — те же, что делит лимит. */
+function LimitSource({ source, today, first }: LimitSourceProps) {
+  if (source.sums === null) return null;
+  const advances = source.advances ?? 0;
+  const bills = source.bills ?? 0;
+  const rows = [[first, money(source.sums)]];
+  if (Math.round(advances) > 0 && source.advance_on) {
     rows.push([
-      `аванс ${dayLabel(data.advance_on, data.today)}`,
+      `аванс ${dayLabel(source.advance_on, today)}`,
       `+${money(advances)}`,
     ]);
   }
   if (Math.round(bills) > 0) {
-    const until = data.payday
-      ? dayLabel(data.payday, data.today)
+    const until = source.payday
+      ? dayLabel(source.payday, today)
       : "конца месяца";
     rows.push([`платежи до ${until}`, `−${money(bills)}`]);
   }
-  if (data.days_left) {
+  if (source.days) {
     rows.push([
-      `на ${days(data.days_left)}`,
-      money(data.sums + advances - bills),
+      `на ${days(source.days)}`,
+      money(source.sums + advances - bills),
     ]);
   }
   return (
     <div className="my-1">
       <Table rows={rows} align="lr" label="Откуда лимит" />
     </div>
+  );
+}
+
+/** День прихода зарплаты: утренний лимит устарел — лимит с завтра по деньгам сейчас;
+ * «сверх лимита дня» не показываем. */
+function SalaryDay({
+  data,
+  tomorrow,
+  plan,
+}: {
+  data: Dashboard;
+  tomorrow: Tomorrow;
+  plan: ReactNode;
+}) {
+  const ahead = glued(tomorrow.until);
+  const came = <Good>{`Пришла ЗП ${money(data.salary_came ?? 0)}`}</Good>;
+  const source = (
+    <LimitSource source={tomorrow} today={data.today} first="сумы сейчас" />
+  );
+  const spent = (
+    <Line>{`потрачено сегодня ${money(data.spent_today ?? 0)}`}</Line>
+  );
+  if (tomorrow.limit <= 0) {
+    // и с зарплатой денег до срока не хватает — как обычный день без лимита
+    const missing = -tomorrow.limit * tomorrow.days;
+    return (
+      <Card label="Можно сегодня">
+        {came}
+        <p className="text-fact font-extrabold text-danger">⚠️ Лимита нет</p>
+        <Line>{`${ahead} не хватает ${money(missing)}`}</Line>
+        {source}
+        {spent}
+        {plan}
+      </Card>
+    );
+  }
+  return (
+    <Card label="Можно сегодня">
+      {came}
+      <Big>{`${money(tomorrow.limit)} сум`}</Big>
+      <Line>можно в день с завтра</Line>
+      <Line>{`${ahead}, ${days(tomorrow.days)}`}</Line>
+      {source}
+      {spent}
+      {plan}
+    </Card>
   );
 }
 
@@ -85,6 +147,20 @@ function Today({ data }: { data: Dashboard }) {
       {pace.text}
     </p>
   );
+  if (data.tomorrow) {
+    return <SalaryDay data={data} tomorrow={data.tomorrow} plan={plan} />;
+  }
+  const morning: LimitMoney = {
+    sums: data.sums,
+    advances: data.advances,
+    advance_on: data.advance_on,
+    bills: data.bills,
+    payday: data.payday,
+    days: data.days_left,
+  };
+  const source = (
+    <LimitSource source={morning} today={data.today} first="сумы утром" />
+  );
   if (data.limit <= 0) {
     // как /today: сумов до зарплаты не хватает даже на платежи — лимита на день нет
     const missing = -data.limit * (data.days_left ?? 1);
@@ -92,7 +168,7 @@ function Today({ data }: { data: Dashboard }) {
       <Card label="Можно сегодня">
         <p className="text-fact font-extrabold text-danger">⚠️ Лимита нет</p>
         <Line>{`${until} не хватает ${money(missing)}`}</Line>
-        <LimitSource data={data} />
+        {source}
         <Line>{`потрачено сегодня ${money(data.spent_today)}`}</Line>
         {plan}
       </Card>
@@ -108,7 +184,7 @@ function Today({ data }: { data: Dashboard }) {
         <Line>можно потратить сегодня</Line>
       )}
       <Line>{`лимит ${money(data.limit)} в день ${until}`}</Line>
-      <LimitSource data={data} />
+      {source}
       <Line>{`потрачено сегодня ${money(data.spent_today)}`}</Line>
       {plan}
     </Card>
@@ -131,40 +207,61 @@ function Frozen({ data }: { data: Dashboard }) {
   );
 }
 
-/** Когда при нынешнем темпе закончатся сумы и сколько долларов обменять. */
+/** Хватит ли сумов до зарплаты при нынешнем темпе и сколько долларов обменять;
+ * «сейчас» — сумы с утра уже могли измениться. */
 function Sums({ data }: { data: Dashboard }) {
   const runway = data.runway;
   if (!runway) return null;
-  let when = "";
-  if (runway.short > 0) {
-    if (runway.last_day === null || runway.last_day < data.today) {
-      when = "сумы уже закончились";
-    } else if (runway.last_day === data.today) {
-      when = "хватит только на сегодня";
-    } else {
-      when = `хватит до ${longDay(runway.last_day)}`;
+  const head = <Fact>{`💳 Сумы сейчас ${money(runway.balance)}`}</Fact>;
+  const pace = money(runway.pace);
+  // срок до зарплаты называет сервер; в старом ответе его нет — как раньше
+  const target =
+    runway.target != null
+      ? glued(runway.target)
+      : runway.until
+        ? `до ${longDay(runway.until)}`
+        : "до конца месяца";
+  if (runway.short <= 0) {
+    const left = runway.left ?? null;
+    if (left === null || runway.target == null) {
+      return (
+        <Card label="Сумы">
+          {head}
+          <Good>до конца месяца хватит</Good>
+          <Line>{`в день ≈ ${pace}`}</Line>
+          <Line>в среднем за 14 дней</Line>
+        </Card>
+      );
     }
+    return (
+      <Card label="Сумы">
+        {head}
+        <Good>{`${target} хватит`}</Good>
+        <Line>{`останется ≈ ${money(left)}`}</Line>
+        <Line>{`если тратить ≈ ${pace} в день,`}</Line>
+        <Line>как в среднем за 14 дней</Line>
+      </Card>
+    );
   }
-  const target = runway.until
-    ? `до ${longDay(runway.until)}`
-    : "до конца месяца";
+  let when: string;
+  if (runway.last_day === null || runway.last_day < data.today) {
+    when = "сумы уже закончились";
+  } else if (runway.last_day === data.today) {
+    when = "хватит только на сегодня";
+  } else {
+    when = `хватит до ${longDay(runway.last_day)}`;
+  }
   return (
     <Card label="Сумы">
-      <Fact>{`💳 Сумы ${money(runway.balance)}`}</Fact>
-      {runway.short <= 0 ? (
-        <Good>до конца месяца хватит</Good>
-      ) : (
-        <>
-          <Warn>{when}</Warn>
-          <Line>
-            {runway.dollars !== null
-              ? `${target} обменять ≈ ${inCurrency(runway.dollars, "USD")}`
-              : `${target} обменять`}
-          </Line>
-          <Line>{`не хватит ${money(runway.short)}`}</Line>
-        </>
-      )}
-      <Line>{`в день ≈ ${money(runway.pace)}`}</Line>
+      {head}
+      <Warn>{when}</Warn>
+      <Line>
+        {runway.dollars !== null
+          ? `${target} обменять ≈ ${inCurrency(runway.dollars, "USD")}`
+          : `${target} обменять`}
+      </Line>
+      <Line>{`не хватит ${money(runway.short)}`}</Line>
+      <Line>{`в день ≈ ${pace}`}</Line>
       <Line>в среднем за 14 дней</Line>
     </Card>
   );

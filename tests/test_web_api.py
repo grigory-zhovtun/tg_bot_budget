@@ -524,6 +524,7 @@ def test_dashboard_has_the_sums_forecast() -> None:
     spent = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000)
     found = build_dashboard(frame(spent), tab(), date(2026, 10, 2), RATES, "USD")
     body = dashboard_for(found).json()
+    # до ЗП 30-го: сумы сейчас, аванс 15-го и темп на 29 дней
     assert body["runway"] == {
         "balance": 4_600_000,
         "pace": 400_000 / 14,
@@ -531,7 +532,42 @@ def test_dashboard_has_the_sums_forecast() -> None:
         "short": 0,
         "until": None,
         "dollars": None,
+        "left": pytest.approx(4_600_000 + 2_000_000 - 29 * 400_000 / 14),
+        "payday": "2026-10-30",
+        "target": "до зарплаты 30-го",
     }
+
+
+SALARY_DAY = [
+    fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000),
+    fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000),
+    fact_row(date(2026, 10, 30), "🍔 ЕДА", "кафе", 300_000),
+]
+
+
+def test_dashboard_has_tomorrows_limit_on_the_salary_day() -> None:
+    found = build_dashboard(frame(*SALARY_DAY), tab(), date(2026, 10, 30), RATES, "USD")
+    body = dashboard_for(found).json()
+    assert body["tomorrow"] == {
+        "limit": pytest.approx(18_700_000 / 31),
+        "days": 31,
+        "payday": "2026-11-30",
+        "until": "до зарплаты 30 ноября",
+        "sums": 16_700_000,
+        "bills": 0,
+        "advances": 2_000_000,
+        "advance_on": "2026-11-15",
+    }
+    assert body["salary_came"] == 10_000_000
+    # ЗП пришла — «Сумы» до следующей
+    assert (body["runway"]["payday"], body["runway"]["target"]) == (
+        "2026-11-30",
+        "до зарплаты 30 ноября",
+    )
+    # на другой день — без лимита с завтра
+    found = build_dashboard(frame(*SALARY_DAY), tab(), date(2026, 10, 31), RATES, "USD")
+    body = dashboard_for(found).json()
+    assert (body["tomorrow"], body["salary_came"]) == (None, None)
 
 
 def test_the_dashboard_takes_copies_unless_asked_to_refresh() -> None:
