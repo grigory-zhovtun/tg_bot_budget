@@ -219,20 +219,35 @@ class FrozenOut(ApiModel):
     target: str = ""  # срок платежей, как у «Сумы»: «до зарплаты 30 ноября»
 
 
+class CushionStepOut(ApiModel):
+    """Ступень подушки: 1, 3 месяца или цель — сколько ещё до неё."""
+
+    months: int
+    short: float  # в валюте подушки, вверх до целых
+    short_uzs: float  # в сумах, целыми
+
+
 class CushionOut(ApiModel):
-    """Подушка безопасности: «Заморожено» в месяцах средних трат."""
+    """Подушка безопасности: «Заморожено» без копилок на сейчас в месяцах жизни."""
 
     amount: float  # в валюте подушки
     currency: str
     uzs: float
-    monthly: float  # средние траты в месяц за 3 полных месяца, сумы
-    months: float | None  # на сколько месяцев хватит; None — трат ещё нет
+    monthly: float  # месяц жизни: средние траты обязательных групп, сумы
+    months: float | None  # месяцев подушки, один знак вниз; None — трат ещё нет
     target_months: int
     short_uzs: float  # сколько не хватает до цели, сумы; 0 — цель достигнута
     short: float  # то же в валюте подушки
-    frozen: float | None = None  # «Заморожено» на вечер вчера
-    piggies: float = 0.0  # остатки копилок на вечер вчера, в валюте подушки
+    frozen: float | None = None  # «Заморожено» на сейчас
+    piggies: float = 0.0  # остатки копилок на сейчас, в валюте подушки
     over: float = 0.0  # на сколько копилки больше «Заморожено»
+    card: float = 0.0  # всего на картах в валюте подушки
+    payments: list[FrozenPaymentOut] = []  # платежи срока в этой валюте
+    lacking: float = 0.0  # копилок нет, а долларов на платежи не хватает
+    lacking_on: date | None = None  # день платежа, с которого не хватает
+    life_months: list[str] = []  # месяцы месяца жизни: «2026-07»
+    life_groups: list[str] = []  # обязательные группы справочника
+    steps: list[CushionStepOut] = []  # ступени, до которых ещё не дошли
 
 
 class SavingMonthOut(ApiModel):

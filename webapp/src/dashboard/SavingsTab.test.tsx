@@ -186,9 +186,18 @@ describe("SavingsTab", () => {
 
   it("shows the cushion without the money of the piggies", async () => {
     render(<SavingsTab api={fakeApi()} boot={null} />);
-    expect(await screen.findByText("заморожено 1 500 $")).toBeTruthy();
-    expect(screen.getByText("минус копилки 400 $")).toBeTruthy();
-    expect(screen.getByText("на вечер вчера")).toBeTruthy();
+    const table = await screen.findByRole("table", { name: "Расчёт подушки" });
+    expect(
+      within(table)
+        .getAllByRole("row")
+        .map((row) => row.textContent?.replace(/\s/g, " ")),
+    ).toEqual([
+      "доллары на карте1 900 $",
+      "Квартплата 18.10−400 $",
+      "копилки−400 $",
+      "подушка1 100 $",
+    ]);
+    expect(screen.queryByText("на вечер вчера")).toBeNull();
   });
 
   it("warns when the piggies hold more than the frozen money", async () => {
