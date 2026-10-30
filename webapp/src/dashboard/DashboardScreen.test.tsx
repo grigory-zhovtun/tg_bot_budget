@@ -11,6 +11,36 @@ async function show(user: ReturnType<typeof userEvent.setup>, name: string) {
   await user.click(await screen.findByRole("radio", { name }));
 }
 
+/** Строки карточки по порядку, пробелы внутри чисел — обычные. */
+function lines(card: HTMLElement): (string | undefined)[] {
+  return Array.from(card.querySelectorAll("p")).map((line) =>
+    line.textContent?.replace(/\s/g, " "),
+  );
+}
+
+/** Строки таблицы «Откуда лимит». */
+function sources(card: HTMLElement): (string | undefined)[] {
+  return within(within(card).getByRole("table", { name: "Откуда лимит" }))
+    .getAllByRole("row")
+    .map((row) => row.textContent?.replace(/\s/g, " "));
+}
+
+const SALARY_DAY = {
+  ...dashboardFixture,
+  left_today: -20_000, // утренний лимит устарел: «сверх лимита дня» не пишем
+  salary_came: 10_000_000,
+  tomorrow: {
+    limit: 612_903,
+    days: 31,
+    payday: "2026-11-10",
+    until: "до зарплаты 10 ноября",
+    sums: 16_700_000,
+    bills: 300_000,
+    advances: 2_000_000,
+    advance_on: "2026-10-25",
+  },
+};
+
 afterEach(() => {
   localStorage.clear();
 });
@@ -131,16 +161,120 @@ describe("DashboardScreen", () => {
   it("shows when the sums run out and how many dollars to exchange", async () => {
     render(<DashboardScreen api={fakeApi()} />);
     const sums = await screen.findByRole("region", { name: "Сумы" });
-    expect(within(sums).getByText("💳 Сумы 2 000 000").className).toContain(
-      "text-fact",
-    );
-    expect(within(sums).getByText("⚠️ хватит до 18 октября")).toBeTruthy();
     expect(
-      within(sums).getByText("до 30 октября обменять ≈ 460 $"),
-    ).toBeTruthy();
-    expect(within(sums).getByText("не хватит 5 500 000")).toBeTruthy();
-    expect(within(sums).getByText("в день ≈ 500 000")).toBeTruthy();
-    expect(within(sums).getByText("в среднем за 14 дней")).toBeTruthy();
+      within(sums).getByText("💳 Сумы сейчас 2 000 000").className,
+    ).toContain("text-fact");
+    // цель — до зарплаты, как у лимита
+    expect(lines(sums)).toEqual([
+      "💳 Сумы сейчас 2 000 000",
+      "⚠️ хватит до 18 октября",
+      "до зарплаты 30‑го обменять ≈ 460 $",
+      "не хватит 5 500 000",
+      "в день ≈ 500 000",
+      "в среднем за 14 дней",
+    ]);
+  });
+
+  it("says the sums last until the salary and what is left", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      runway: {
+        balance: 9_000_000,
+        pace: 100_000,
+        last_day: null,
+        short: 0,
+        until: null,
+        dollars: null,
+        left: 6_000_000,
+        payday: "2026-10-30",
+        target: "до зарплаты 30-го",
+      },
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    const sums = await screen.findByRole("region", { name: "Сумы" });
+    expect(lines(sums)).toEqual([
+      "💳 Сумы сейчас 9 000 000",
+      "✓ до зарплаты 30‑го хватит",
+      "останется ≈ 6 000 000",
+      "если тратить ≈ 100 000 в день,",
+      "как в среднем за 14 дней",
+    ]);
+    expect(
+      within(sums).getByText("✓ до зарплаты 30‑го хватит").className,
+    ).toContain("text-ok");
+  });
+
+  it("on the salary day counts the limit from tomorrow", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue(SALARY_DAY);
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    const today = await screen.findByRole("region", { name: "Можно сегодня" });
+    expect(lines(today)).toEqual([
+      "✓ Пришла ЗП 10 000 000",
+      "612 903 сум",
+      "можно в день с завтра",
+      "до зарплаты 10 ноября, 31 день",
+      "потрачено сегодня 120 000",
+      "✓ Запас 1 100 000 за 9 дней",
+    ]);
+    expect(within(today).getByText("612 903 сум").className).toContain(
+      "text-big",
+    );
+    // откуда лимит с завтра — сумы сейчас, аванс и платежи срока с завтра
+    expect(sources(today)).toEqual([
+      "сумы сейчас16 700 000",
+      "аванс 25.10+2 000 000",
+      "платежи до 10.11−300 000",
+      "на 31 день18 400 000",
+    ]);
+  });
+
+  it("on the salary day the daily chart says tomorrow's limit", async () => {
+    // «можно X в день» у графика — то же «с завтра», что в «Сегодня»
+    const user = userEvent.setup();
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue(SALARY_DAY);
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    await show(user, "Траты");
+    expect(screen.getByText("можно 612 903 в день")).toBeTruthy();
+  });
+
+  it("says the advance came when it stands in for the salary", async () => {
+    const dashboard = vi
+      .fn<Api["dashboard"]>()
+      .mockResolvedValue({ ...SALARY_DAY, came: "Пришёл аванс" });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    const today = await screen.findByRole("region", { name: "Можно сегодня" });
+    expect(lines(today)[0]).toBe("✓ Пришёл аванс 10 000 000");
+  });
+
+  it("on the salary day says when there is no limit from tomorrow either", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...SALARY_DAY,
+      tomorrow: {
+        ...SALARY_DAY.tomorrow,
+        limit: -50_000,
+        days: 16,
+        payday: "2026-10-25",
+        until: "до аванса 25-го",
+        sums: -500_000,
+        bills: 300_000,
+        advances: 0,
+        advance_on: null,
+      },
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    const today = await screen.findByRole("region", { name: "Можно сегодня" });
+    expect(lines(today)).toEqual([
+      "✓ Пришла ЗП 10 000 000",
+      "⚠️ Лимита нет",
+      "до аванса 25‑го не хватает 800 000",
+      "потрачено сегодня 120 000",
+      "✓ Запас 1 100 000 за 9 дней",
+    ]);
+    expect(sources(today)).toEqual([
+      "сумы сейчас−500 000",
+      "платежи до 25.10−300 000",
+      "на 16 дней−800 000",
+    ]);
   });
 
   it("shows how far today went over the limit", async () => {
@@ -177,19 +311,33 @@ describe("DashboardScreen", () => {
   });
 
   it("says when the sums last until the end of the month", async () => {
-    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
-      ...dashboardFixture,
-      runway: {
-        balance: 9_000_000,
-        pace: 100_000,
-        last_day: null,
-        short: 0,
-        until: null,
-        dollars: null,
-      },
-    });
+    // ответ сервера до срока «до зарплаты» — как раньше
+    const old = {
+      balance: 9_000_000,
+      pace: 100_000,
+      last_day: null,
+      short: 0,
+      until: null,
+      dollars: null,
+    };
+    const dashboard = vi
+      .fn<Api["dashboard"]>()
+      .mockResolvedValue({ ...dashboardFixture, runway: old });
+    const first = render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    expect(await screen.findByText("✓ до конца месяца хватит")).toBeTruthy();
+    expect(screen.queryByText(/останется/)).toBeNull();
+    first.unmount();
+    // строк зарплаты в списке нет — срок до конца месяца
+    const monthEnd = {
+      ...old,
+      left: 7_000_000,
+      payday: null,
+      target: "до конца месяца",
+    };
+    dashboard.mockResolvedValue({ ...dashboardFixture, runway: monthEnd });
     render(<DashboardScreen api={fakeApi({ dashboard })} />);
     expect(await screen.findByText("✓ до конца месяца хватит")).toBeTruthy();
+    expect(screen.getByText("останется ≈ 7 000 000")).toBeTruthy();
   });
 
   it("says how far the finished days went over the plan", async () => {

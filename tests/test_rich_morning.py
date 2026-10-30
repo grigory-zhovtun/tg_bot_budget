@@ -65,10 +65,11 @@ def test_morning_blocks_follow_the_mockup() -> None:
             f"⚠️ Вчера {whole(b.yesterday_spent)} из{NBSP}{whole(b.yesterday_limit)}"
         ),
         para(f"больше на {whole(b.yesterday_spent - b.yesterday_limit)}"),
-        heading(f"💳 Сумы {whole(b.runway.balance)}"),
+        heading(f"💳 Сумы сейчас {whole(b.runway.balance)}"),
     ]
     assert not any("Отстаём" in block or "по плану месяца" in block for block in blocks)
-    assert para("до конца месяца хватит") in blocks
+    left = f"останется ≈{NBSP}{whole(b.runway.left)}"
+    assert para("✓ до зарплаты 30-го хватит", left) in blocks
     frozen = in_currency(b.frozen, "USD", with_cents=True)
     assert heading(f"🧊 Заморожено {frozen}") in blocks
     over = [["инвентарь", whole(640_000), whole(500_000)]]
@@ -102,6 +103,46 @@ def test_today_shows_what_is_left_or_the_overspend() -> None:
         para(
             f"лимит {whole(over.limit)} в день до зарплаты 30-го",
             f"потрачено {whole(over.spent_today)}",
+        ),
+    ]
+
+
+SALARY_PAID = [
+    fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000),
+    fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000),
+]
+
+
+def test_today_on_the_salary_day_counts_from_tomorrow() -> None:
+    cafe = fact_row(date(2026, 10, 30), "🍔 ЕДА", "кафе", 300_000)
+    b = budget(date(2026, 10, 30), *SALARY_PAID, cafe, items=LIST)
+    assert b.tomorrow is not None
+    assert rich_day_budget(b, now=True)[1:3] == [
+        heading(f"💸 {whole(b.tomorrow.limit)} сум", 1),
+        para(
+            "можно в день с завтра",
+            "до зарплаты 30 ноября, 31 день",
+            f"✓ пришла ЗП {whole(10_000_000)}",
+            f"потрачено сегодня {whole(300_000)}",
+            f"на сумовых картах сейчас {whole(16_700_000)}, "
+            f"аванс 15 ноября +{whole(2_000_000)}",
+        ),
+    ]
+    # утро — прежнее: лимит с утра, сумы на вечер вчера
+    assert rich_day_budget(b)[1] == heading(f"💸 {whole(b.limit)} сум", 1)
+
+
+def test_no_limit_from_tomorrow_on_the_salary_day() -> None:
+    spree = fact_row(date(2026, 10, 30), "🍔 ЕДА", "кафе", 20_000_000)
+    b = budget(date(2026, 10, 30), *SALARY_PAID, spree, items=LIST)
+    # сумы −3 млн: и до аванса 15 ноября денег нет — лимита нет, сверх лимита не пишем
+    assert rich_day_budget(b, now=True)[1:3] == [
+        heading("💸 Лимита на сегодня нет", 2),
+        para(
+            f"до аванса 15 ноября не хватает {whole(3_000_000)}",
+            f"✓ пришла ЗП {whole(10_000_000)}",
+            f"потрачено сегодня {whole(20_000_000)}",
+            f"на сумовых картах сейчас {whole(-3_000_000)}",
         ),
     ]
 
@@ -152,10 +193,22 @@ def test_no_limit_goal_and_the_first_day() -> None:
 
 def test_runway_and_frozen_variants() -> None:
     b = budget(date(2026, 10, 2), items=LIST)
-    short = Runway(5_000_000, 0, date(2026, 10, 23), 1_000_000, date(2026, 10, 30), 370)
+    payday = date(2026, 10, 30)
+    short = Runway(
+        5_000_000, 0, date(2026, 10, 23), 1_000_000, payday, 370, -1e6, payday, "ЗП"
+    )
     blocks = rich_day_budget(replace(b, runway=short, frozen_change=-117.45))
-    exchange = f"до 30.10 обменять ≈{NBSP}{in_currency(370, 'USD')}"
+    # заголовок — «сейчас»: сумы с утра уже могли измениться
+    assert heading(f"💳 Сумы сейчас {whole(5_000_000)}") in blocks
+    exchange = f"до зарплаты 30-го обменять ≈{NBSP}{in_currency(370, 'USD')}"
     assert para("хватит до 23.10", exchange) in blocks
+    enough = replace(
+        short, last_day=None, short=0, until=None, dollars=None, left=400_000
+    )
+    today = replace(enough, payday=b.today)
+    assert para(
+        "✓ до зарплаты сегодня хватит", f"останется ≈{NBSP}{whole(400_000)}"
+    ) in (rich_day_budget(replace(b, runway=today)))
     change = in_currency(117.45, "USD", with_cents=True)
     assert (
         para(f"≈{NBSP}{whole(b.frozen_uzs)} сум", f"с 1-го числа −{change}") in blocks

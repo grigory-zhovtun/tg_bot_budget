@@ -148,9 +148,11 @@ def test_the_current_month_pace_and_money_come_from_the_dashboard() -> None:
     lines = advice_numbers(context(budget=budget, today=date(2026, 10, 2))).splitlines()
     assert "Потрачено за 1 дн.: 400000 UZS при плане 100000 UZS" in lines
     assert "Можно в день до зарплаты 30-го: 227586 UZS" in lines
-    assert any(
-        line.startswith("Сумы на картах и наличными: 4600000 UZS") for line in lines
-    )
+    # срок «Сумы» — тот же, что в «Сводке»: до зарплаты, а не до конца месяца
+    assert (
+        "Сумы на картах и наличными: 4600000 UZS; до зарплаты 30-го хватит, "
+        "останется ≈ 5771429 UZS"
+    ) in lines
 
 
 def test_apply_stays_only_for_editable_articles_with_a_sane_new_sum() -> None:

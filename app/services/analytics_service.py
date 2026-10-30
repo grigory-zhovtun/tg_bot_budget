@@ -674,8 +674,14 @@ class AnalyticsService:
         subcategories: list[str],
         icons: dict[str, str] | None = None,
         today: date | None = None,
+        *,
+        salary_day_only: bool = False,
     ) -> Feedback:
-        """После записи: статус каждой статьи месяца и сколько осталось на сегодня."""
+        """После записи: статус каждой статьи месяца и сколько осталось на сегодня.
+
+        salary_day_only — ответ на запись дохода: только «💸 С завтра можно …» в день
+        прихода зарплаты (спека 1.4), в другой день — ничего.
+        """
         from app.services.day_budget import (
             day_budget,
             plan_status,
@@ -705,6 +711,8 @@ class AnalyticsService:
         budget = day_budget(
             frame, rows, today, rates, config.FROZEN_CURRENCY, self._records()
         )
+        if salary_day_only and (budget is None or budget.tomorrow is None):
+            return Feedback(lines, blocks)
         if budget is not None:
             lines.append(today_line(budget))
             blocks += rich_today_line(budget)

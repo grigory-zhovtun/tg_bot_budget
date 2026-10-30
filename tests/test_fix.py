@@ -12,6 +12,7 @@ from app import config
 from app.domain import INCOME_GROUP, Rates, SheetRow
 from app.handlers import fix
 from app.handlers.common import LAST_WRITE
+from app.services.analytics_service import Feedback
 
 CATEGORIES = ["🍔 ЕДА", INCOME_GROUP, "🚧 РАЗНОЕ"]
 SUBCATEGORIES = {
@@ -304,6 +305,37 @@ async def test_money_moved_into_income_asks_its_month(
     assert [(row.category, row.subcategory) for row in rows] == [
         ("💰 ДОХОДЫ", "зарплата")
     ]
+
+
+async def test_money_moved_into_income_says_tomorrows_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # SMS о ЗП приходит переводом: перенесли в доходы — «с завтра» в ответе
+    monkeypatch.setattr(fix, "ask_month", MagicMock())
+    monkeypatch.setattr(fix, "income_prompt", AsyncMock())
+    calls: list[tuple[list[str], bool]] = []
+
+    class Analytics:
+        def write_feedback(
+            self,
+            subcategories: list[str],
+            icons: Any = None,
+            today: Any = None,
+            *,
+            salary_day_only: bool = False,
+        ) -> Feedback:
+            calls.append((subcategories, salary_day_only))
+            return Feedback(
+                ["💸 С завтра можно 600 000 в день до зарплаты 30 ноября"], []
+            )
+
+    context = chat([row(amount=-20_000_000.0, comment="SMS: зачисление")])
+    context.bot_data["analytics_service"] = Analytics()
+    await command(context)
+    await press(context, "fix:c:1")  # ДОХОДЫ
+    text, _ = await press(context, "fix:s:0")  # зарплата
+    assert calls == [([], True)]
+    assert "💸 С завтра можно 600 000 в день до зарплаты 30 ноября" in text
 
 
 async def test_money_moved_into_income_asks_the_piggies(

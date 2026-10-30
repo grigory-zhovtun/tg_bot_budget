@@ -41,7 +41,13 @@ from app.services.analytics_service import TRANSFERS_GROUP, SavingsTab, money
 from app.services.calendar import CalendarRecord, new_id, read_calendar, record_row
 from app.services.cards import CardBalance
 from app.services.dashboard import Dashboard
-from app.services.day_budget import payday_on, until_text
+from app.services.day_budget import (
+    allowance_until,
+    came_word,
+    payday_on,
+    runway_until,
+    until_text,
+)
 from app.services.forecast import DayArticle, Dip, Evening, MonthForecast, PastDay
 from app.services.piggy import (
     CLOSED,
@@ -152,6 +158,7 @@ from app.web.schemas import (
     SpentItemOut,
     SubcategoryOut,
     SubscriptionOut,
+    TomorrowOut,
     UntrackedOut,
     UserOut,
 )
@@ -220,6 +227,11 @@ CURRENCY_LOCKED = (
     "Валюту не поменять: в копилке есть движения. Закройте её и заведите новую"
 )
 KIND_TEXT = {"saved": SAVED, "spent": SPENT, "write_off": WRITE_OFF}
+
+
+def _capital(text: str) -> str:
+    """«пришла ЗП» → «Пришла ЗП»: str.capitalize() опустил бы «ЗП»."""
+    return text[:1].upper() + text[1:]
 
 
 def error_response(
@@ -666,6 +678,22 @@ def dashboard_out(
             short=r.short,
             until=r.until,
             dollars=r.dollars,
+            left=r.left,
+            payday=r.payday,
+            target=runway_until(r, budget.today),
+        )
+    tomorrow = None
+    if budget.tomorrow is not None:
+        t = budget.tomorrow
+        tomorrow = TomorrowOut(
+            limit=t.limit,
+            days=t.days,
+            payday=t.payday,
+            until=allowance_until(t, budget.today),
+            sums=t.sums,
+            bills=t.bills,
+            advances=t.advances,
+            advance_on=t.advance_on,
         )
     frozen = None
     if budget.frozen is not None and budget.frozen_currency:
@@ -693,6 +721,11 @@ def dashboard_out(
         payday=budget.payday,
         advances=budget.advances,
         advance_on=budget.advance_on,
+        tomorrow=tomorrow,
+        salary_came=budget.salary_came if tomorrow is not None else None,
+        came=(
+            _capital(came_word(budget.salary_name)) if tomorrow is not None else None
+        ),
         frozen=frozen,
         groups=groups,
         daily=[

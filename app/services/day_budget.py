@@ -15,6 +15,11 @@
 строка у графика «Траты». Ячейка лимита во вкладке месяца считает план до конца
 месяца — это другое число.
 
+С завтра: в день прихода зарплаты (её строка закрыта на сейчас, а к утру — нет)
+утренний лимит устарел — рядом считается лимит завтрашнего дня по деньгам на сейчас:
+сумы по сегодня, срок с завтра по следующую зарплату. Завтра 1-е число — строки
+вкладки на те же дни следующего месяца, ещё не пришедшие.
+
 Заморожено — карты в валюте заморозки (долларовая) без платежей в этой валюте,
 которые ещё впереди. Лимит эти деньги не тратит: он считает только сумы, а доллары
 входят в него, когда их обменяли на сумы.
@@ -44,10 +49,10 @@ from app.services.analytics_service import (
     money,
     plan_lines,
 )
-from app.services.calendar import CalendarRecord
-from app.services.forecast import currency_forecast
+from app.services.calendar import CalendarRecord, calendar_state
+from app.services.forecast import PACE_DAYS, currency_forecast
 from app.services.receipts import NOTHING, Receipt, closed, match_receipts, remaining
-from app.services.runway import Runway, uzs_runway
+from app.services.runway import Runway, horizon_runway
 
 COLUMN_O = 14  # блок прогноза: O название, P день, Q сумма, R валюта, S в сумах
 LIST_HEADER = "Поступления"  # «Поступления (+) и крупные платежи (−)»
@@ -95,6 +100,24 @@ class DaySpend:
 
 
 @dataclass(frozen=True)
+class Allowance:
+    """Лимит дня по деньгам: сумы и авансы минус платежи до зарплаты на дни по неё;
+    при страховке — по день аванса без него."""
+
+    limit: float
+    sums: float
+    bills: float
+    subscriptions: float  # часть bills: подписки вне списка
+    payday: date | None
+    payday_name: str
+    days: int
+    advances: float = 0.0  # авансы срока: прибавлены к деньгам
+    advance_on: date | None = None  # первый из них; None — авансов в сроке нет
+    salary_subscriptions: float = 0.0  # подписки по день основной зарплаты — Q5 вкладки
+    advance_subscriptions: float | None = None  # по день аванса — R5; None — его нет
+
+
+@dataclass(frozen=True)
 class DayBudget:
     today: date
     limit: (
@@ -129,24 +152,11 @@ class DayBudget:
     )
     payday_name: str = ""  # её строка списка: «Аванс», «ЗП»
     plan_gap: float | None = None  # траты дня с 1-го по вчера минус план; None — 1-е
-
-
-@dataclass(frozen=True)
-class Allowance:
-    """Лимит дня по деньгам: сумы и авансы минус платежи до зарплаты на дни по неё;
-    при страховке — по день аванса без него."""
-
-    limit: float
-    sums: float
-    bills: float
-    subscriptions: float  # часть bills: подписки вне списка
-    payday: date | None
-    payday_name: str
-    days: int
-    advances: float = 0.0  # авансы срока: прибавлены к деньгам
-    advance_on: date | None = None  # первый из них; None — авансов в сроке нет
-    salary_subscriptions: float = 0.0  # подписки по день основной зарплаты — Q5 вкладки
-    advance_subscriptions: float | None = None  # по день аванса — R5; None — его нет
+    # день прихода зарплаты: лимит с завтра по деньгам на сейчас (утренний устарел);
+    # None — зарплата сегодня не приходила
+    tomorrow: Allowance | None = None
+    salary_came: float = 0.0  # сколько пришло по закрывшейся сегодня строке
+    salary_name: str = ""  # её название
 
 
 def _number(value: Any) -> float | None:
@@ -282,33 +292,97 @@ def _payday(
     return _on(_next_month(first), salaries[0].day), salaries[0].name
 
 
+def came_word(name: str) -> str:
+    """«пришла ЗП»; аванс вместо основной зарплаты (правило 1.1) — «пришёл аванс»."""
+    if ADVANCE.search(name) and not MAIN_SALARY.search(name):
+        return "пришёл аванс"
+    return "пришла ЗП"
+
+
+def _sums_payday(
+    salaries: Sequence[ForecastItem], receipts: Mapping[int, Receipt], today: date
+) -> tuple[date | None, str]:
+    """Срок карточки «Сумы» — день следующей зарплаты, которая ещё не пришла: открытая
+    по сверке на сейчас строка salaries; сегодняшняя и опоздавшая, пока денег нет,
+    ждутся сегодня (как у заморозки), иначе утром в день зарплаты карточка просила бы
+    обменять доллары на месяц вперёд. В месяце открытых нет — первая из них в
+    следующем месяце; строк нет — (None, ""), конец месяца."""
+    if not salaries:
+        return None, ""
+    first = today.replace(day=1)
+    for item in salaries:
+        receipt = receipts.get(item.row, NOTHING)
+        if closed(item, receipt):
+            continue
+        due = _on(first, item.day)
+        if due < today and receipt.received:
+            continue  # опоздавшая с частью денег — как у лимита, ждём следующую
+        return max(due, today), item.name
+    return _on(_next_month(first), salaries[0].day), salaries[0].name
+
+
+def _advance_days(
+    advances: Sequence[ForecastItem],
+    receipts: Mapping[int, Receipt],
+    day: date,
+    until: date,
+) -> list[tuple[date, float, str]]:
+    """Авансы срока по дням — (день, сумма, название): строки аванса этого месяца с
+    днём от day и раньше until — их непришедшая часть, и они же в следующем месяце —
+    целиком. Аванс сегодня — в счёт: его день живём на то, что есть (страховка — этот
+    один день), и лимит не проседает на день; опоздавший — не в счёт, пока деньги не на
+    картах."""
+    first = day.replace(day=1)
+    later = _next_month(first)
+    found: list[tuple[date, float, str]] = []
+    for item in advances:
+        due = _on(first, item.day)
+        rest = remaining(item, receipts.get(item.row, NOTHING))
+        if day <= due < until and rest > 0:
+            found.append((due, rest, item.name))
+        due = _on(later, item.day)
+        if due < until:
+            found.append((due, item.amount, item.name))
+    return sorted(found)
+
+
 def _advances(
     advances: Sequence[ForecastItem],
     receipts: Mapping[int, Receipt],
     day: date,
     until: date,
 ) -> tuple[float, date | None, str]:
-    """Авансы срока: строки аванса этого месяца с днём от day и раньше until — их
-    непришедшая часть, и они же в следующем месяце — целиком; и первый из них. Аванс
-    сегодня — в счёт: его день живём на то, что есть (страховка — этот один день), и
-    лимит не проседает на день; опоздавший — не в счёт, пока деньги не на картах."""
-    first = day.replace(day=1)
-    later = _next_month(first)
-    total, found = 0.0, []
-    for item in advances:
-        due = _on(first, item.day)
-        rest = remaining(item, receipts.get(item.row, NOTHING))
-        if day <= due < until and rest > 0:
-            total += rest
-            found.append((due, item.name))
-        due = _on(later, item.day)
-        if due < until:
-            total += item.amount
-            found.append((due, item.name))
+    """Авансы срока одной суммой (_advance_days) и первый из них."""
+    found = _advance_days(advances, receipts, day, until)
     if not found:
         return 0.0, None, ""
-    on, name = min(found)
-    return total, on, name
+    on, name = min((due, name) for due, _, name in found)
+    return sum((amount for _, amount, _ in found), 0.0), on, name
+
+
+def _bill_days(
+    items: tuple[ForecastItem, ...],
+    receipts: Mapping[int, Receipt],
+    day: date,
+    until: date,
+) -> list[tuple[date, float]]:
+    """Платежи списка в сумах с day по день перед until — положительными суммами в свой
+    день: открытые строки с минусом в UZS, опоздавшие — днём day; в части срока в
+    следующем месяце — эти строки целиком."""
+    first = day.replace(day=1)
+    later = _next_month(first)
+    found: list[tuple[date, float]] = []
+    for item in items:
+        if item.amount >= 0 or item.currency != "UZS":
+            continue
+        receipt = receipts.get(item.row, NOTHING)
+        due = _on(first, item.day)
+        if due < until and not closed(item, receipt):
+            found.append((max(due, day), -remaining(item, receipt)))
+        due = _on(later, item.day)
+        if due < until:
+            found.append((due, -item.amount))
+    return sorted(found)
 
 
 def _list_bills(
@@ -317,40 +391,37 @@ def _list_bills(
     day: date,
     until: date,
 ) -> float:
-    """Платежи списка в сумах с day по день перед until: открытые строки с минусом в
-    UZS (и опоздавшие), в части срока в следующем месяце — эти строки целиком."""
-    first = day.replace(day=1)
-    later = _next_month(first)
-    total = 0.0
-    for item in items:
-        if item.amount >= 0 or item.currency != "UZS":
-            continue
-        receipt = receipts.get(item.row, NOTHING)
-        if _on(first, item.day) < until and not closed(item, receipt):
-            total -= remaining(item, receipt)
-        if until > later and _on(later, item.day) < until:
-            total -= item.amount
-    return total
+    """Платежи списка в сумах срока одной суммой (_bill_days)."""
+    return sum((amount for _, amount in _bill_days(items, receipts, day, until)), 0.0)
 
 
-def _subscriptions(series: Sequence[Any], day: date, until: date) -> float:
-    """Подписки в UZS с day по день перед until: не отменённые и ещё не списанные в
-    своём месяце до day."""
+def _subscription_days(
+    series: Sequence[Any], day: date, until: date, now: bool = False
+) -> list[tuple[date, float]]:
+    """Подписки в UZS с day по день перед until — в их ожидаемый день: не отменённые и
+    ещё не списанные в своём месяце до day; now — и в сам day: деньги на сейчас уже
+    без сегодняшнего списания."""
     first = day.replace(day=1)
     later = _next_month(first)
-    total = 0.0
+    found: list[tuple[date, float]] = []
     for one in series:
         if one.last.currency != "UZS" or one.lapsed(day):
             continue
         for month in (first, later):
             due = one.expected_on(month)
             charged = any(
-                (c.day.year, c.day.month) == (due.year, due.month) and c.day < day
+                (c.day.year, c.day.month) == (due.year, due.month)
+                and (c.day <= day if now else c.day < day)
                 for c in one.charges
             )
             if day <= due < until and not charged:
-                total += one.last.amount
-    return total
+                found.append((due, one.last.amount))
+    return sorted(found)
+
+
+def _subscriptions(series: Sequence[Any], day: date, until: date) -> float:
+    """Подписки в UZS срока одной суммой (_subscription_days)."""
+    return sum((amount for _, amount in _subscription_days(series, day, until)), 0.0)
 
 
 def _spent_on(frame: pd.DataFrame, day: date, paid: frozenset[int]) -> float:
@@ -423,8 +494,10 @@ def day_budget(
     минус платежи по день основной зарплаты в сумах, на дни по него включительно; денег
     до аванса меньше — по день аванса без него (страховка). Строки списка — по
     сверке с fact (services.receipts): к утру дня — для лимита и заморозки; на сейчас —
-    для «Впереди» и трат дня. Прогноз по сумам — линия «по темпу» модели прогноза
-    (services.forecast) с записями календаря records, как во вкладке «Календарь».
+    для «Впереди», трат дня и «Сумы». «Сумы» (services.runway) — по дням до
+    зарплаты, которая ещё не пришла: сумы сейчас, темп и траты сегодня — из модели
+    прогноза (services.forecast) с записями календаря records, авансы, платежи,
+    подписки и неоплаченные разовые записи в сумах — в их дни.
     previous — вкладка прошлого месяца (None — её нет): её недополученные
     поступления «Впереди» показывает первыми.
     """
@@ -450,8 +523,12 @@ def day_budget(
     carried = carried_items(previous, frame, first, today)
 
     def allowance_on(day: date) -> Allowance:
-        """Лимит дня day: сумы на вечер накануне, авансы, платежи и дни до зарплаты."""
-        receipts = match_receipts(frame, items, first, day - timedelta(days=1))
+        """Лимит дня day: сумы на вечер накануне, авансы, платежи и дни до зарплаты.
+        День следующего месяца (с завтра в последний день): его строки ещё не пришли —
+        сверка пустая, строки вкладки — те же дни следующего месяца целиком."""
+        receipts: Mapping[int, Receipt] = {}
+        if (day.year, day.month) == (first.year, first.month):
+            receipts = match_receipts(frame, items, first, day - timedelta(days=1))
         payday, name = _payday(salaries, receipts, day)
         # день зарплаты — тоже: её могут начислить и вечером
         until = (payday or month_end) + timedelta(days=1)
@@ -498,9 +575,51 @@ def day_budget(
 
     passed = yesterday.day if yesterday >= first else 0
     now_allowance = allowance_on(today)
-    morning = _ahead(items, match_receipts(frame, items, first, yesterday))
+    early = match_receipts(frame, items, first, yesterday)
+    morning = _ahead(items, early)
     now = match_receipts(frame, items, first, today)
     paid = frozenset(index for receipt in now.values() for index in receipt.operations)
+    # зарплата пришла сегодня: строка закрыта на сейчас, а к утру — нет; один приход
+    # может закрыть и две строки — пришло по всем
+    came_rows = [
+        item
+        for item in salaries
+        if closed(item, now.get(item.row, NOTHING))
+        and not closed(item, early.get(item.row, NOTHING))
+    ]
+    came = came_rows[0] if came_rows else None
+    tomorrow = allowance_on(today + timedelta(days=1)) if came else None
+    # «Сумы»: по дням срока от сумов сейчас — авансы, платежи и подписки в их дни,
+    # неоплаченные разовые записи «Календаря» — тоже, как в его линии «по темпу»
+    sums_payday, sums_name = _sums_payday(salaries, now, today)
+    end = sums_payday or month_end
+    reach = end + timedelta(days=1)
+    # как в «Календаре»: записи сумов, закрытие разовых — за PACE_DAYS дней назад
+    planned = calendar_state(
+        frame,
+        [record for record in records if record.currency == "UZS"],
+        today,
+        end,
+        today - timedelta(days=PACE_DAYS),
+        frozenset(index for receipt in early.values() for index in receipt.operations),
+        paid,
+    )
+    events = [
+        *((due, amount) for due, amount, _ in _advance_days(spare, now, today, reach)),
+        *((due, -amount) for due, amount in _bill_days(items, now, today, reach)),
+        *(
+            (due, -amount)
+            for due, amount in _subscription_days(series, today, reach, now=True)
+        ),
+        *(
+            (occurrence.day, -occurrence.now)
+            for occurrence in planned.occurrences
+            if occurrence.record.repeat == "once"
+            and occurrence.record.currency == "UZS"
+            and occurrence.now > 0
+        ),
+    ]
+    paced = currency_forecast(frame, (), items, today, "UZS", records=records)
 
     frozen, change, frozen_uzs = None, 0.0, 0.0
     rate = rates.to_uzs.get(frozen_currency) if frozen_currency else None
@@ -551,10 +670,22 @@ def day_budget(
             *[item for item in left_now if item.row > 0][:2],
         ),
         over_plan=tuple(over[:3]),
-        runway=uzs_runway(
-            currency_forecast(frame, (), items, today, "UZS", records=records),
+        runway=horizon_runway(
+            paced.now,
+            paced.per_day_pace,
+            # траты дня линии «по темпу»: повторы календаря в ней — обычные траты
+            paced.spent_today
+            + sum(
+                occurrence.covered
+                for occurrence in planned.occurrences
+                if occurrence.record.repeat != "once" and occurrence.day == today
+            ),
             today,
+            end,
+            events,
             rates,
+            sums_payday,
+            sums_name,
         ),
         history=history,
         ahead=left_now,
@@ -568,6 +699,9 @@ def day_budget(
         payday=now_allowance.payday,
         payday_name=now_allowance.payday_name,
         plan_gap=done - per_day * passed if passed else None,
+        tomorrow=tomorrow,
+        salary_came=sum(now[item.row].received for item in came_rows),
+        salary_name=came.name if came else "",
     )
 
 
@@ -627,22 +761,54 @@ def payday_on(budget: DayBudget) -> str:
     return _day_text(budget.payday, budget.today)
 
 
+def _payday_word(name: str) -> str:
+    """Срок задаёт аванс, когда основной зарплаты в списке нет, или страховка."""
+    return "аванса" if "аванс" in name.lower() else "зарплаты"
+
+
+def _horizon(payday: date | None, name: str, today: date) -> str:
+    """«до аванса 15-го», «до зарплаты 15 ноября», «до конца месяца»."""
+    if payday is None:
+        return "до конца месяца"
+    return f"до {_payday_word(name)} {_day_text(payday, today)}"
+
+
 def until_text(budget: DayBudget) -> str:
     """«до аванса 15-го», «до зарплаты 15 ноября», «до конца месяца»."""
-    if budget.payday is None:
+    return _horizon(budget.payday, budget.payday_name, budget.today)
+
+
+def allowance_until(allowance: Allowance, today: date) -> str:
+    """Срок лимита с завтра — как until_text: «до зарплаты 30 ноября»."""
+    return _horizon(allowance.payday, allowance.payday_name, today)
+
+
+def runway_until(runway: Runway, today: date) -> str:
+    """Срок «Сумы»: «до зарплаты 30-го», «до зарплаты сегодня» — её ждём сегодня,
+    «до конца месяца»."""
+    if runway.payday is None:
         return "до конца месяца"
-    word = "аванса" if "аванс" in budget.payday_name.lower() else "зарплаты"
-    return f"до {word} {payday_on(budget)}"
+    day = "сегодня" if runway.payday == today else _day_text(runway.payday, today)
+    return f"до {_payday_word(runway.payday_name)} {day}"
 
 
-def _money_line(budget: DayBudget, amount: Callable[[float], str] = whole) -> str:
-    """«на сумовых картах 7 200 000, аванс 15-го +2 000 000, платежи до 30-го 80 000»."""
-    line = f"на сумовых картах {amount(budget.sums)}"
-    if budget.advance_on is not None and round(budget.advances) > 0:
-        day = _day_text(budget.advance_on, budget.today)
-        line += f", аванс {day} +{amount(budget.advances)}"
-    if round(budget.bills) > 0:
-        line += f", платежи до {payday_on(budget)} {amount(budget.bills)}"
+def _money_line(
+    source: DayBudget | Allowance,
+    today: date,
+    amount: Callable[[float], str] = whole,
+    now: bool = False,
+) -> str:
+    """«на сумовых картах 7 200 000, аванс 15-го +2 000 000, платежи до 30-го 80 000»;
+    now — сумы на сейчас: лимит с завтра."""
+    line = f"на сумовых картах {'сейчас ' if now else ''}{amount(source.sums)}"
+    if source.advance_on is not None and round(source.advances) > 0:
+        day = _day_text(source.advance_on, today)
+        line += f", аванс {day} +{amount(source.advances)}"
+    if round(source.bills) > 0:
+        until = (
+            "конца месяца" if source.payday is None else _day_text(source.payday, today)
+        )
+        line += f", платежи до {until} {amount(source.bills)}"
     return line
 
 
@@ -659,46 +825,70 @@ def _plan_text(budget: DayBudget, amount: Callable[[float], str] = whole) -> str
     return f"✓ Ровно по плану {period}"
 
 
-def runway_line(runway: Runway, today: date) -> str:
-    """«💳 Сумы 2,00 млн — хватит до 18.10 · до 30.10 обменять ≈ $460»."""
-    head = f"💳 Сумы {short(runway.balance)}"
-    if runway.short <= 0:
-        return f"{head} — до конца месяца хватит"
+def _runway_when(runway: Runway, today: date) -> str:
+    """Когда сумы кончатся: «уже закончились», «хватит до 18.10»."""
     if runway.last_day is None or runway.last_day < today:
-        when = "уже закончились"
-    elif runway.last_day == today:
-        when = "хватит только на сегодня"
-    else:
-        when = f"хватит до {runway.last_day:%d.%m}"
-    target = f"до {runway.until:%d.%m}" if runway.until else "до конца месяца"
+        return "уже закончились"
+    if runway.last_day == today:
+        return "хватит только на сегодня"
+    return f"хватит до {runway.last_day:%d.%m}"
+
+
+def runway_line(runway: Runway, today: date) -> str:
+    """«💳 Сумы 7,60 млн — до зарплаты 30-го хватит, останется ≈ 5,90 млн» или
+    «💳 Сумы 2,00 млн — хватит до 18.10 · до зарплаты 30-го обменять ≈ $460»."""
+    head = f"💳 Сумы {short(runway.balance)}"
+    target = runway_until(runway, today)
+    if runway.short <= 0:
+        return f"{head} — {target} хватит, останется ≈ {short(runway.left)}"
     need = (
         f"обменять ≈ ${money(runway.dollars)}"
         if runway.dollars is not None
         else f"не хватит {short(runway.short)}"
     )
-    return f"{head} — {when} · {target} {need}"
+    return f"{head} — {_runway_when(runway, today)} · {target} {need}"
 
 
 def format_day_budget(budget: DayBudget, now: bool = False) -> str:
-    """Утреннее сообщение; now=True — для /today: ещё потрачено и осталось сегодня."""
+    """Утреннее сообщение; now=True — для /today: ещё потрачено и осталось сегодня, а
+    в день прихода зарплаты — лимит с завтра."""
     b = budget
     weekday = WEEKDAYS[b.today.weekday()].capitalize()
     lines = [f"☀️ {weekday}, {b.today.day} {MONTHS_GENITIVE[b.today.month - 1]}"]
     until = until_text(b)
-    if b.limit > 0:
-        lines.append(f"💸 Можно тратить в день {until}: {money(b.limit)} сум")
-    else:
+    tomorrow = b.tomorrow if now else None
+    if tomorrow is not None:
+        # утренний лимит устарел: сверх лимита дня не пишем, считаем с завтра
+        ahead = allowance_until(tomorrow, b.today)
+        if tomorrow.limit > 0:
+            lines.append(f"💸 С завтра можно {money(tomorrow.limit)} в день {ahead}")
+        else:
+            lines.append(
+                f"💸 Лимита на сегодня нет: {ahead} не хватает "
+                f"{money(-tomorrow.limit * tomorrow.days)}"
+            )
         lines.append(
-            f"💸 Лимита на сегодня нет: {until} не хватает "
-            f"{money(-b.limit * b.days_left)}"
+            f"   ✓ {came_word(b.salary_name)} {money(b.salary_came)}, "
+            f"потрачено сегодня {money(b.spent_today)}"
         )
-    if now:
-        left = max(b.limit, 0) - b.spent_today
-        rest = (
-            f"осталось {money(left)}" if left >= 0 else f"сверх лимита {money(-left)}"
-        )
-        lines.append(f"   потрачено {money(b.spent_today)} — {rest}")
-    lines.append(f"   {_money_line(b, money)}")
+        lines.append(f"   {_money_line(tomorrow, b.today, money, now=True)}")
+    else:
+        if b.limit > 0:
+            lines.append(f"💸 Можно тратить в день {until}: {money(b.limit)} сум")
+        else:
+            lines.append(
+                f"💸 Лимита на сегодня нет: {until} не хватает "
+                f"{money(-b.limit * b.days_left)}"
+            )
+        if now:
+            left = max(b.limit, 0) - b.spent_today
+            rest = (
+                f"осталось {money(left)}"
+                if left >= 0
+                else f"сверх лимита {money(-left)}"
+            )
+            lines.append(f"   потрачено {money(b.spent_today)} — {rest}")
+        lines.append(f"   {_money_line(b, b.today, money)}")
     plan = _plan_text(b, money)
     if plan is not None:
         lines.append(plan)
@@ -750,23 +940,44 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
 
 
 def _rich_runway(runway: Runway, today: date) -> list[str]:
-    """«💳 Сумы …»: хватит ли сумов и сколько долларов обменять."""
-    head = heading(f"💳 Сумы {whole(runway.balance)}")
+    """«💳 Сумы сейчас …»: хватит ли сумов до зарплаты и сколько долларов обменять;
+    «сейчас» — сумы с утра уже могли измениться."""
+    head = heading(f"💳 Сумы сейчас {whole(runway.balance)}")
+    target = runway_until(runway, today)
     if runway.short <= 0:
-        return [head, para("до конца месяца хватит")]
-    if runway.last_day is None or runway.last_day < today:
-        when = "уже закончились"
-    elif runway.last_day == today:
-        when = "хватит только на сегодня"
-    else:
-        when = f"хватит до {runway.last_day:%d.%m}"
-    target = f"до {runway.until:%d.%m}" if runway.until else "до конца месяца"
+        left = f"останется ≈{NBSP}{whole(runway.left)}"
+        return [head, para(f"✓ {target} хватит", left)]
     need = (
         f"обменять ≈{NBSP}{in_currency(runway.dollars, 'USD')}"
         if runway.dollars is not None
         else f"не хватит {whole(runway.short)}"
     )
-    return [head, para(when, f"{target} {need}")]
+    return [head, para(_runway_when(runway, today), f"{target} {need}")]
+
+
+def _rich_tomorrow(budget: DayBudget, tomorrow: Allowance) -> list[str]:
+    """/today в день прихода зарплаты: лимит с завтра по деньгам на сейчас."""
+    b = budget
+    ahead = allowance_until(tomorrow, b.today)
+    came = f"✓ {came_word(b.salary_name)} {whole(b.salary_came)}"
+    spent = f"потрачено сегодня {whole(b.spent_today)}"
+    sums = _money_line(tomorrow, b.today, now=True)
+    if tomorrow.limit <= 0:
+        short_by = whole(-tomorrow.limit * tomorrow.days)
+        return [
+            heading("💸 Лимита на сегодня нет", 2),
+            para(f"{ahead} не хватает {short_by}", came, spent, sums),
+        ]
+    return [
+        heading(f"💸 {whole(tomorrow.limit)} сум", 1),
+        para(
+            "можно в день с завтра",
+            f"{ahead}, {days_text(tomorrow.days)}",
+            came,
+            spent,
+            sums,
+        ),
+    ]
 
 
 def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
@@ -778,15 +989,20 @@ def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
     until = until_text(b)
     limit = f"лимит {whole(b.limit)} в день {until}"
     spent = f"потрачено {whole(b.spent_today)}"
-    if b.limit <= 0:
+    if now and b.tomorrow is not None:
+        blocks += _rich_tomorrow(b, b.tomorrow)
+    elif b.limit <= 0:
         lines = [f"{until} не хватает {whole(-b.limit * b.days_left)}"]
         if now:
             lines.append(f"потрачено сегодня {whole(b.spent_today)}")
-        blocks += [heading("💸 Лимита на сегодня нет", 2), para(*lines, _money_line(b))]
+        blocks += [
+            heading("💸 Лимита на сегодня нет", 2),
+            para(*lines, _money_line(b, b.today)),
+        ]
     elif not now:
         blocks += [
             heading(f"💸 {whole(b.limit)} сум", 1),
-            para(f"можно тратить в день {until}", _money_line(b)),
+            para(f"можно тратить в день {until}", _money_line(b, b.today)),
         ]
     elif b.spent_today <= b.limit:
         blocks += [
@@ -901,7 +1117,21 @@ def rich_plan_status(line: PlanLine | None, subcategory: str, today: date) -> li
 
 
 def rich_today_line(budget: DayBudget) -> list[str]:
-    """Сколько ещё можно сегодня — после записи, блоками."""
+    """Сколько ещё можно сегодня — после записи, блоками; в день прихода зарплаты —
+    сколько с завтра: утренний лимит устарел."""
+    tomorrow = budget.tomorrow
+    if tomorrow is not None:
+        ahead = allowance_until(tomorrow, budget.today)
+        if tomorrow.limit <= 0:
+            short_by = whole(-tomorrow.limit * tomorrow.days)
+            return [
+                heading("💸 Лимита на сегодня нет"),
+                para(f"{ahead} не хватает {short_by}"),
+            ]
+        return [
+            heading(f"💸 С завтра можно {whole(tomorrow.limit)}"),
+            para(f"в день {ahead}"),
+        ]
     until = until_text(budget)
     if budget.limit <= 0:
         short_by = whole(-budget.limit * budget.days_left)
@@ -922,7 +1152,17 @@ def rich_today_line(budget: DayBudget) -> list[str]:
 
 
 def today_line(budget: DayBudget) -> str:
-    """Сколько ещё можно сегодня — после каждой записи."""
+    """Сколько ещё можно сегодня — после каждой записи; в день прихода зарплаты —
+    сколько с завтра: утренний лимит устарел."""
+    tomorrow = budget.tomorrow
+    if tomorrow is not None:
+        ahead = allowance_until(tomorrow, budget.today)
+        if tomorrow.limit <= 0:
+            return (
+                f"💸 Лимита на сегодня нет: {ahead} не хватает "
+                f"{money(-tomorrow.limit * tomorrow.days)}"
+            )
+        return f"💸 С завтра можно {money(tomorrow.limit)} в день {ahead}"
     until = until_text(budget)
     if budget.limit <= 0:
         return (

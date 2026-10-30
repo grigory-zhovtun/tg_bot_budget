@@ -230,14 +230,30 @@ class SavingsOut(ApiModel):
 
 
 class RunwayOut(ApiModel):
-    """Прогноз по сумам: когда кончатся и сколько долларов обменять до поступления."""
+    """«Сумы» до зарплаты: когда кончатся и сколько долларов обменять до неё."""
 
     balance: float
     pace: float
     last_day: date | None
     short: float
-    until: date | None
+    until: date | None  # день срока, если не хватает
     dollars: float | None
+    left: float | None = None  # останется вечером в день срока
+    payday: date | None = None  # день срока; None — конец месяца
+    target: str | None = None  # «до зарплаты 30-го», «до зарплаты сегодня»
+
+
+class TomorrowOut(ApiModel):
+    """Лимит с завтра в день прихода зарплаты: сумы сейчас, срок с завтра."""
+
+    limit: float
+    days: int
+    payday: date | None
+    until: str  # «до зарплаты 30 ноября»
+    sums: float
+    bills: float
+    advances: float
+    advance_on: date | None
 
 
 class DashboardOut(ApiModel):
@@ -261,6 +277,10 @@ class DashboardOut(ApiModel):
     payday: date | None = None  # день, по который лимит; None — конец месяца
     advances: float | None = None  # авансы срока: прибавлены к деньгам лимита
     advance_on: date | None = None  # первый из них; None — авансов в сроке нет
+    # день прихода зарплаты: лимит с завтра и сколько пришло по строке; иначе None
+    tomorrow: TomorrowOut | None = None
+    salary_came: float | None = None
+    came: str | None = None  # «Пришла ЗП» или «Пришёл аванс» — вместе с tomorrow
     frozen: FrozenOut | None = None
     groups: list[GroupPlanOut] = []
     daily: list[DayPointOut] = []  # для открытых до обновления версий приложения
