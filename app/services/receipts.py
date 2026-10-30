@@ -4,9 +4,11 @@
 валюта. Поступления — по плану месяца, без окна: доходы валюты с 1-го числа по
 порядку дней заполняют строки этой валюты по порядку их дней — первую до её суммы,
 что сверх — следующую, что сверх последней — последнюю. Так зарплата, пришедшая
-частями и раньше своего дня, засчитывается ей. Платёж закрывает одна трата той же
-валюты на сумму плана ± PAYMENT_TOLERANCE с дня строки − EARLY_DAYS. Строка закрыта,
-когда пришло DONE_SHARE плана; иначе впереди — недостающая часть.
+частями и раньше своего дня, засчитывается ей. Перед строками месяца в очереди
+валюты стоят остатки поступлений прошлого месяца (перенос, day_budget.carried_items):
+доходы сначала закрывают их. Платёж закрывает одна трата той же валюты на сумму
+плана ± PAYMENT_TOLERANCE с дня строки − EARLY_DAYS. Строка закрыта, когда пришло
+DONE_SHARE плана; иначе впереди — недостающая часть.
 """
 
 import calendar
@@ -64,11 +66,18 @@ def _opens(first: date, line: ListLine) -> date:
 
 
 def match_receipts(
-    frame: pd.DataFrame, lines: Sequence[ListLine], first: date, through: date
+    frame: pd.DataFrame,
+    lines: Sequence[ListLine],
+    first: date,
+    through: date,
+    carried: Sequence[ListLine] = (),
 ) -> dict[int, Receipt]:
     """Что пришло по строкам списка месяца first — по операциям с first по through.
 
-    Ключ — строка вкладки; строк, по которым ничего не пришло, в ответе нет.
+    carried — остатки поступлений прошлого месяца: доходы валюты заполняют их раньше
+    строк месяца, в том порядке, в каком они даны (по дням прошлого месяца). Ключ —
+    строка вкладки, у перенесённых — отрицательная; строк, по которым ничего не
+    пришло, в ответе нет.
     """
     month = frame[(frame["day"] >= first) & (frame["day"] <= through)]
     found: dict[int, Receipt] = {}
@@ -83,9 +92,11 @@ def match_receipts(
 
     got = income(month)
     got = got[got["amount"] > 0].sort_values("day", kind="stable")
-    for currency in sorted({line.currency for line in lines if line.amount > 0}):
-        queue = sorted(
-            (line for line in lines if line.amount > 0 and line.currency == currency),
+    left = [line for line in carried if line.amount > 0]
+    incomes = [line for line in lines if line.amount > 0]
+    for currency in sorted({line.currency for line in [*left, *incomes]}):
+        queue = [line for line in left if line.currency == currency] + sorted(
+            (line for line in incomes if line.currency == currency),
             key=lambda line: (line.day, line.row),
         )
         room = {line.row: float(line.amount) for line in queue}

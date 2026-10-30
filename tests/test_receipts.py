@@ -122,6 +122,38 @@ def test_transfers_refunds_and_the_opening_balance_do_not_count() -> None:
     assert received(*rows) == {}
 
 
+# остатки поступлений прошлого месяца (перенос): день 1, строки −1, −2, … по его дням
+LEFT_SALARY = Line(-1, 1, 55_000, "RUB")
+LEFT_BONUS = Line(-2, 1, 30_000, "RUB")
+
+
+def carried(*rows: Any, left: tuple[Line, ...] = (LEFT_SALARY,)) -> dict[int, Receipt]:
+    frame = transactions_frame([FACT_HEADER, *rows], RATES)
+    return match_receipts(frame, LINES, OCTOBER, date(2026, 10, 31), left)
+
+
+def test_last_months_remainder_is_filled_before_the_months_line() -> None:
+    found = carried(income(3, 70_000, "RUB"))
+    # перенос — под своей отрицательной строкой, чтобы не совпасть со строкой вкладки
+    assert sorted(found) == [LEFT_SALARY.row, RUB_SALARY.row]
+    assert found[LEFT_SALARY.row].received == 55_000
+    assert remaining(LEFT_SALARY, found[LEFT_SALARY.row]) == 0
+    assert found[RUB_SALARY.row].received == 15_000  # строке месяца — что сверх
+
+
+def test_remainders_are_filled_in_the_order_they_are_given() -> None:
+    # все в день 1: порядок — дни прошлого месяца, как их дал перенос
+    found = carried(income(3, 60_000, "RUB"), left=(LEFT_SALARY, LEFT_BONUS))
+    assert found[LEFT_SALARY.row].received == 55_000
+    assert found[LEFT_BONUS.row].received == 5_000
+    assert RUB_SALARY.row not in found
+
+
+def test_a_remainder_waits_only_for_its_own_currency() -> None:
+    found = carried(income(15, 2_000_000))
+    assert found == received(income(15, 2_000_000))
+
+
 def test_the_status_follows_the_day_and_what_came() -> None:
     assert receipt_status(ADVANCE, NOTHING, date(2026, 10, 15)) == "future"
     assert receipt_status(ADVANCE, NOTHING, date(2026, 10, 16)) == "waiting"
