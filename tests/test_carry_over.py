@@ -375,6 +375,14 @@ def test_the_month_plan_list_leaves_a_part_marked_for_october_out() -> None:
     assert 13 not in loaded.receipts  # «ЗП Питер» ноября: 55 000 — октябрю
 
 
+def test_last_months_rest_for_the_question_after_an_income() -> None:
+    rest = AnalyticsService(Sheets(BOTH)).last_months_rest(NOW)
+    assert [(item.name, item.amount) for item in rest] == [
+        ("ЗП Питер за октябрь, остаток", 55_000)
+    ]
+    assert AnalyticsService(Sheets({"fact": FACT})).last_months_rest(NOW) == ()
+
+
 def test_the_advisor_sees_last_months_rest_ahead() -> None:
     gathered = gather_advice(
         Sheets(BOTH),

@@ -26,6 +26,7 @@ from app.services.google_sheets import GoogleSheetsService, read_month_sheets
 if TYPE_CHECKING:
     from app.services.calendar import CalendarRecord
     from app.services.dashboard import Dashboard
+    from app.services.day_budget import ForecastItem
     from app.services.forecast import MonthForecast
     from app.services.piggy import Screen
     from app.services.savings import Savings
@@ -574,6 +575,20 @@ class AnalyticsService:
         except Exception:
             logger.warning("Last month's tab %s was not read: no carry-over", sheet)
             return None
+
+    def last_months_rest(self, today: date) -> tuple["ForecastItem", ...]:
+        """Что прошлый месяц ещё ждёт на сейчас — для вопроса «за какой месяц?» после
+        поступления; вкладки прошлого месяца нет — ()."""
+        from app.services.day_budget import carried_items
+
+        previous = self._previous_rows(today)
+        if previous is None:
+            return ()
+        rates = self.gs_service.get_rates()
+        frame = transactions_frame(
+            self.gs_service.get_values(config.FACT_SHEET_NAME), rates
+        )
+        return carried_items(previous, frame, today.replace(day=1), today)
 
     def plan_report(self, today: date | None = None) -> Report:
         """/plan: план-факт текущего месяца по вкладке «Oct 26»."""
