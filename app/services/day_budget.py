@@ -44,7 +44,17 @@ from typing import Any
 import pandas as pd
 
 from app.domain import INCOME_GROUP, Rates
-from app.rich import NBSP, heading, in_currency, para, percent, signed, table, whole
+from app.rich import (
+    NBSP,
+    heading,
+    in_currency,
+    money_text,
+    para,
+    percent,
+    signed,
+    table,
+    whole,
+)
 from app.services.analytics_service import (
     MONTHS_RU,
     SERIAL_ZERO,
@@ -795,11 +805,6 @@ def _pair(fact: float, plan: float) -> str:
     return f"{money(fact)} из {money(plan)}"
 
 
-def _cents(value: float) -> str:
-    """«1 234,56»."""
-    return f"{value:,.2f}".replace(",", " ").replace(".", ",")
-
-
 def _item_amount(item: ForecastItem) -> str:
     """«+2,00 млн», «−400 USD»."""
     sign = "+" if item.amount > 0 else "−"
@@ -866,6 +871,52 @@ def runway_until(runway: Runway, today: date) -> str:
         return "до конца месяца"
     day = "сегодня" if runway.payday == today else _day_text(runway.payday, today)
     return f"до {_payday_word(runway.payday_name)} {day}"
+
+
+def frozen_until(budget: DayBudget) -> str:
+    """Срок платежей «Заморожено» — тот же, что у «Сумы»: «до зарплаты 30-го»,
+    «до зарплаты сегодня» (её ждём сегодня), «до конца месяца»."""
+    if budget.runway is None:
+        return "до конца месяца"
+    return runway_until(budget.runway, budget.today)
+
+
+def _frozen_lines(budget: DayBudget) -> tuple[str, str | None, list[str]] | None:
+    """«Заморожено» для утра и /today: заголовок «🧊 Заморожено X $», «не трогаем:
+    подушка, копилки» (копилки прочитаны, иначе None) и строки под ним —
+    предупреждение и платежи срока; заморозку не считаем — None."""
+    b = budget
+    if b.frozen is None or not b.frozen_currency:
+        return None
+    code = b.frozen_currency
+    cushion, over, lacking = frozen_split(b.frozen, b.piggies or 0.0)
+    keeps = None
+    if b.piggies is not None:
+        keeps = (
+            f"не трогаем: подушка {money_text(cushion, code)}, "
+            f"копилки {money_text(b.piggies, code)}"
+        )
+    lines: list[str] = []
+    if over > 0:
+        lines.append(
+            f"⚠️ копилки больше карты на {money_text(over, code)} — отложите разницу "
+            "или поправьте копилки"
+        )
+    if lacking > 0:
+        day = short_on(b.frozen_total, b.frozen_payments)
+        until = f" до {_day_text(day, b.today)}" if day is not None else ""
+        lines.append(
+            f"⚠️ долларов не хватает на платежи — купите {money_text(lacking, code)}"
+            f"{until}"
+        )
+    if b.frozen_payments:
+        lines.append(f"на платежи {frozen_until(b)}:")
+        lines += [
+            f"{payment.name} {_day_text(payment.day, b.today)} — "
+            f"{money_text(payment.amount, code)}"
+            for payment in b.frozen_payments
+        ]
+    return f"🧊 Заморожено {money_text(b.frozen, code)}", keeps, lines
 
 
 def _money_line(
@@ -983,11 +1034,11 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
             f"Вчера: {money(b.yesterday_spent)} при лимите {money(allowed)} — {verdict}"
         )
 
-    if b.frozen is not None:
-        lines.append(
-            f"🧊 Заморожено: {_cents(b.frozen)} {b.frozen_currency} "
-            f"≈ {short(b.frozen_uzs)}"
-        )
+    frozen = _frozen_lines(b)
+    if frozen is not None:
+        head, keeps, below = frozen
+        lines.append(f"{head} — {keeps}" if keeps else head)
+        lines += [f"   {line}" for line in below]
     if b.runway is not None:
         lines.append(runway_line(b.runway, b.today))
     if b.goal > 0:
@@ -1107,12 +1158,13 @@ def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
 
     if b.runway is not None:
         blocks += _rich_runway(b.runway, b.today)
-    if b.frozen is not None:
-        frozen = in_currency(b.frozen, str(b.frozen_currency), with_cents=True)
-        blocks += [
-            heading(f"🧊 Заморожено {frozen}"),
-            para(f"≈{NBSP}{whole(b.frozen_uzs)} сум"),
-        ]
+    frozen = _frozen_lines(b)
+    if frozen is not None:
+        head, keeps, below = frozen
+        blocks.append(heading(head))
+        body = [keeps, *below] if keeps else below
+        if body:
+            blocks.append(para(*body))
     if b.goal > 0:
         if b.goal > b.growth:
             reason: tuple[str, ...] = (f"больше плановой экономии {whole(b.growth)}",)

@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from app.domain import Rates
+from app.rich import money_text
 from app.services.analytics_service import transactions_frame
 from app.services.day_budget import day_budget, format_day_budget, runway_line
 from app.services.runway import Runway, horizon_runway
@@ -242,6 +243,9 @@ def test_the_line_follows_the_frozen_money_in_the_morning_message() -> None:
     assert budget is not None and budget.runway is not None
     lines = format_day_budget(budget).splitlines()
     frozen = next(i for i, text in enumerate(lines) if text.startswith("🧊"))
-    assert lines[frozen + 1] == (
-        "💳 Сумы 5,00 млн — до зарплаты 30-го хватит, останется ≈ 7,00 млн"
-    )
+    # сразу после строк платежей «Заморожено»: подпись срока и квартплата 18-го
+    assert lines[frozen + 1 : frozen + 4] == [
+        "   на платежи до зарплаты 30-го:",
+        f"   Квартплата 18-го — {money_text(400, 'USD')}",
+        "💳 Сумы 5,00 млн — до зарплаты 30-го хватит, останется ≈ 7,00 млн",
+    ]

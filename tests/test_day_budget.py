@@ -10,7 +10,7 @@ from gspread.exceptions import WorksheetNotFound
 
 from app.domain import Rates
 from app.handlers import analytics
-from app.rich import Report
+from app.rich import Report, money_text
 from app.services.analytics_service import (
     AnalyticsService,
     money,
@@ -511,7 +511,9 @@ def test_morning_message() -> None:
         "   на сумовых картах 4 600 000, аванс 15-го +2 000 000",
         "⚠️ Сверх плана на 300 000 за 1 день",
         "Вчера: 400 000 при лимите 233 333 — больше на 166 667",
-        "🧊 Заморожено: 600,00 USD ≈ 7,20 млн",
+        f"🧊 Заморожено {money_text(600, 'USD')}",
+        "   на платежи до зарплаты 30-го:",
+        f"   Квартплата 18-го — {money_text(400, 'USD')}",
         "💳 Сумы 4,60 млн — до зарплаты 30-го хватит, останется ≈ 5,77 млн",
         "🔴 Сверх плана: инвентарь 720 000 из 500 000",
         "📅 Впереди: 15.10 Аванс +2,00 млн • 18.10 Квартплата −400 USD",

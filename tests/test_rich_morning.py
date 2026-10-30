@@ -10,15 +10,29 @@ import pytest
 
 from app import config
 from app.handlers import analytics
-from app.rich import NBSP, Report, heading, in_currency, para, signed, table, whole
+from app.rich import (
+    NBSP,
+    Report,
+    heading,
+    in_currency,
+    money_text,
+    para,
+    signed,
+    table,
+    whole,
+)
 from app.services.analytics_service import AnalyticsService
 from app.services.day_budget import format_day_budget, rich_day_budget
 from app.services.recurring import find_series, rich_morning_lines
 from app.services.runway import Runway
 from tests.test_day_budget import (
+    ADVANCE_PAID,
     FACT_HEADER,
+    ITEMS,
     OPENING,
     OVERSPENT,
+    RENT_PAID,
+    SALARY_TODAY,
     Sheets,
     budget,
     fact_row,
@@ -49,6 +63,10 @@ MUSIC = [
 ]
 
 
+def usd(amount: float) -> str:
+    return money_text(amount, "USD")
+
+
 def test_morning_blocks_follow_the_mockup() -> None:
     b = budget(date(2026, 10, 2), OVERSPENT, inventory_fact=640_000, items=LIST)
     blocks = rich_day_budget(b)
@@ -70,8 +88,10 @@ def test_morning_blocks_follow_the_mockup() -> None:
     assert not any("Отстаём" in block or "по плану месяца" in block for block in blocks)
     left = f"останется ≈{NBSP}{whole(b.runway.left)}"
     assert para("✓ до зарплаты 30-го хватит", left) in blocks
-    frozen = in_currency(b.frozen, "USD", with_cents=True)
-    assert heading(f"🧊 Заморожено {frozen}") in blocks
+    at = blocks.index(heading(f"🧊 Заморожено {usd(b.frozen)}"))
+    assert blocks[at + 1] == para(
+        "на платежи до зарплаты 30-го:", f"Аренда & Ко 18-го — {usd(420)}"
+    )
     over = [["инвентарь", whole(640_000), whole(500_000)]]
     assert table(over, "lrr", HEAD) in blocks
     # короткий список строками: таблица с датой и названием не влезает в телефон
@@ -211,6 +231,47 @@ def test_runway_and_frozen_variants() -> None:
     ) in (rich_day_budget(replace(b, runway=today)))
     # «с 1-го числа ±X» убрана: она смешивала обмен, взносы и платежи
     assert not any("с 1-го числа" in block for block in blocks)
+
+
+def test_the_morning_says_what_the_frozen_money_keeps() -> None:
+    b = replace(budget(date(2026, 10, 10)), piggies=500)
+    keeps = f"подушка {usd(100)}, копилки {usd(500)}"
+    lines = format_day_budget(b).splitlines()
+    at = lines.index(f"🧊 Заморожено {usd(600)} — не трогаем: {keeps}")
+    assert lines[at + 1 : at + 3] == [
+        "   на платежи до зарплаты 30-го:",
+        f"   Квартплата 18-го — {usd(400)}",
+    ]
+    blocks = rich_day_budget(b)
+    at = blocks.index(heading(f"🧊 Заморожено {usd(600)}"))
+    assert blocks[at + 1] == para(
+        f"не трогаем: {keeps}",
+        "на платежи до зарплаты 30-го:",
+        f"Квартплата 18-го — {usd(400)}",
+    )
+    assert not any("с 1-го числа" in block for block in blocks)
+
+
+def test_a_payment_of_next_month_names_its_month() -> None:
+    b = budget(date(2026, 10, 31), ADVANCE_PAID, RENT_PAID, SALARY_TODAY)
+    assert f"   Квартплата 18 ноября — {usd(400)}" in format_day_budget(b).splitlines()
+
+
+def test_the_frozen_line_says_what_to_do_when_it_does_not_add_up() -> None:
+    over = replace(budget(date(2026, 10, 10)), piggies=700)
+    assert (
+        f"   ⚠️ копилки больше карты на {usd(100)} — отложите разницу или "
+        "поправьте копилки"
+    ) in format_day_budget(over).splitlines()
+    short = budget(date(2026, 10, 10), items=[*ITEMS, ("Курсы", 25, -1_000, "USD")])
+    lines = format_day_budget(short).splitlines()
+    at = lines.index(f"🧊 Заморожено {usd(-400)}")  # копилок не читали: без разбивки
+    assert lines[at + 1 : at + 5] == [
+        f"   ⚠️ долларов не хватает на платежи — купите {usd(400)} до 25-го",
+        "   на платежи до зарплаты 30-го:",
+        f"   Квартплата 18-го — {usd(400)}",
+        f"   Курсы 25-го — {usd(1_000)}",
+    ]
 
 
 def test_due_subscriptions_are_short_lines() -> None:
