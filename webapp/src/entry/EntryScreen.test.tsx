@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -24,8 +25,12 @@ import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
 import { nb } from "../test/text";
 import EntryScreen from "./EntryScreen";
+import { enqueue, readOutbox, writeOutbox } from "./outbox";
 
 type User = ReturnType<typeof userEvent.setup>;
+
+// повторы без пауз: тесты не ждут 2 и 5 секунд
+const noWait = () => Promise.resolve();
 
 function renderEntry(api: Api, onCatalogChanged: () => void = vi.fn()): void {
   render(
@@ -33,6 +38,7 @@ function renderEntry(api: Api, onCatalogChanged: () => void = vi.fn()): void {
       api={api}
       boot={bootstrapFixture}
       onCatalogChanged={onCatalogChanged}
+      wait={noWait}
     />,
   );
 }
@@ -54,6 +60,17 @@ function tilePlan(name: string): string | null {
   return note ? (note.textContent ?? "") : null;
 }
 
+function sentLike(id: string): ExpenseInput {
+  return {
+    entry_id: id,
+    source: "VISA 9090 UZS",
+    category: "🍔 ЕДА",
+    subcategory: "кофе",
+    amount: "48000",
+    comment: "",
+  };
+}
+
 function sent(api: Api, call = 0): ExpenseInput {
   const input = vi.mocked(api.addExpense).mock.calls[call]?.[0];
   if (!input) throw new Error("addExpense was not called");
@@ -63,6 +80,8 @@ function sent(api: Api, call = 0): ExpenseInput {
 describe("EntryScreen", () => {
   afterEach(() => {
     vi.useRealTimers();
+    writeOutbox([]);
+    localStorage.clear();
   });
 
   it("records an expense and comes back to the groups", async () => {
@@ -113,7 +132,7 @@ describe("EntryScreen", () => {
     expect(sent(api).day).toBe("2026-10-09");
   });
 
-  it("keeps the input and the entry id when the sheet is down", async () => {
+  it("sends again by itself with the same entry id when the sheet is down", async () => {
     const addExpense = vi
       .fn<Api["addExpense"]>()
       .mockRejectedValueOnce(
@@ -129,13 +148,78 @@ describe("EntryScreen", () => {
     renderEntry(api);
     await fillCoffee(user);
     await user.click(screen.getByRole("button", { name: /Записать/ }));
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "Таблица не ответила — попробуйте ещё раз",
-    );
-    await user.click(
-      screen.getByRole("button", { name: /Записать 48\s000 UZS/ }),
-    );
+    expect(await screen.findByText(/✅ 48 000 UZS/)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(sent(api, 1).entry_id).toBe(sent(api, 0).entry_id);
+  });
+
+  it("keeps the expense on the phone when there is no connection", async () => {
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(
+        new ApiError(0, "network", "Нет связи с сервером — проверьте интернет"),
+      );
+    const api = fakeApi({ addExpense });
+    const user = userEvent.setup();
+    renderEntry(api);
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    expect(
+      await screen.findByText(
+        "📤 Сохранено на телефоне — отправлю, когда будет связь",
+      ),
+    ).toBeTruthy();
+    expect(addExpense).toHaveBeenCalledTimes(3);
+    const queue = screen.getByRole("region", { name: "Не отправлено" });
+    expect(queue.textContent).toContain("📤 Не отправлено: 1");
+    expect(queue.textContent?.replace(/\s/g, " ")).toContain(
+      "кофе 48 000 UZS, сегодня",
+    );
+    // форма — снова с групп; дата в очереди — сегодня по боту
+    expect(screen.getByRole("button", { name: "ЕДА" })).toBeTruthy();
+    expect(readOutbox()[0]?.entry.day).toBe(bootstrapFixture.today);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("sends the queue when the phone is back online", async () => {
+    enqueue({
+      entry: { ...sentLike("q1"), day: bootstrapFixture.today },
+      title: "кофе 48 000 UZS",
+    });
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValueOnce(new ApiError(0, "network", "Нет связи"))
+      .mockResolvedValueOnce(writtenFixture);
+    renderEntry(fakeApi({ addExpense }));
+    await waitFor(() => expect(addExpense).toHaveBeenCalledTimes(1));
+    expect(
+      screen.getByRole("region", { name: "Не отправлено" }).textContent,
+    ).toContain("📤 Не отправлено: 1");
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(await screen.findByText("✅ Отправлено из очереди: 1")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Не отправлено" })).toBeNull();
+    expect(addExpense.mock.calls[1]?.[0].entry_id).toBe("q1");
+  });
+
+  it("shows what the server refused and lets it go", async () => {
+    enqueue({
+      entry: { ...sentLike("q2"), day: "2026-08-01" },
+      title: "кофе 48 000 UZS",
+    });
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(
+        new ApiError(422, "validation", "Дата вне окна", { day: "старая" }),
+      );
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    const queue = await screen.findByRole("region", { name: "Не отправлено" });
+    expect(await within(queue).findByText("⚠️ Дата вне окна")).toBeTruthy();
+    await user.click(within(queue).getByRole("button", { name: "Удалить" }));
+    expect(screen.queryByRole("region", { name: "Не отправлено" })).toBeNull();
+    expect(readOutbox()).toEqual([]);
   });
 
   it("sends one request when the button is tapped twice", async () => {
@@ -471,9 +555,7 @@ describe("EntryScreen", () => {
   it("writes an error at 17 px", async () => {
     const addExpense = vi
       .fn<Api["addExpense"]>()
-      .mockRejectedValue(
-        new ApiError(503, "sheets_unavailable", "Таблица не ответила"),
-      );
+      .mockRejectedValue(new ApiError(400, "bad_amount", "Сумма не читается"));
     const user = userEvent.setup();
     renderEntry(fakeApi({ addExpense }));
     await fillCoffee(user);
