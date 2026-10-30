@@ -277,7 +277,7 @@ def test_month_sheets_are_read_together_with_the_screen_max_age() -> None:
     source = MonthSheetsSource(
         {"Oct 26": [["План"]], "Sep 26": [["Сентябрь"]], "fact": FACT}
     )
-    sheets = read_month_sheets(source, "Oct 26", max_age=120)
+    sheets = read_month_sheets(source, "Oct 26", max_age=120, previous=True)
     assert sheets.month == [["План"]]
     assert sheets.previous == [["Сентябрь"]]  # для переноса недополученного
     assert sheets.fact == FACT
@@ -302,7 +302,7 @@ def test_january_carries_over_from_last_years_december() -> None:
     source = MonthSheetsSource(
         {"Jan 27": [["План"]], "Dec 26": [["Декабрь"]], "fact": FACT}
     )
-    assert read_month_sheets(source, "Jan 27").previous == [["Декабрь"]]
+    assert read_month_sheets(source, "Jan 27", previous=True).previous == [["Декабрь"]]
 
 
 def test_screens_without_the_carry_over_do_not_read_last_months_tab() -> None:
@@ -331,7 +331,7 @@ def test_a_failed_read_of_last_months_tab_leaves_the_screen_without_carry_over(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     tabs = {"Oct 26": [["План"]], "Sep 26": [["Сентябрь"]], "fact": FACT}
-    sheets = read_month_sheets(DownTab(tabs, "Sep 26"), "Oct 26")
+    sheets = read_month_sheets(DownTab(tabs, "Sep 26"), "Oct 26", previous=True)
     assert (sheets.month, sheets.previous) == ([["План"]], None)
     assert "Sep 26" in caplog.text
 
@@ -366,7 +366,8 @@ def test_sheets_are_read_at_the_same_time() -> None:
             barrier.wait()
             return super().get_calendar(max_age)
 
-    sheets = read_month_sheets(Waiting({"Oct 26": [], "fact": FACT}), "Oct 26")
+    source = Waiting({"Oct 26": [], "fact": FACT})
+    sheets = read_month_sheets(source, "Oct 26", previous=True)
     assert sheets.fact == FACT
 
 

@@ -319,6 +319,22 @@ def test_undo_deletes_rows_only_if_they_are_unchanged() -> None:
     assert len(service.sheet.batch) == 1
 
 
+def test_a_month_mark_goes_into_the_comment_of_an_unchanged_row() -> None:
+    written = [46301, "🍔 ЕДА", "кофе", 48000, 1, "латте", "UZS", "VISA 9090 UZS"]
+    ws = RangeWorksheet({"A4169:H4169": [written]})
+    service = make_service(ws)
+    assert service.comment_row(4169, ROW, "латте за октябрь")
+    assert service.sheet.values_batch == [
+        {
+            "valueInputOption": "RAW",
+            "data": [{"range": "fact!F4169", "values": [["латте за октябрь"]]}],
+        }
+    ]
+    ws.ranges["A4169:H4169"] = [[*written[:5], "другой", *written[6:]]]
+    assert service.comment_row(4169, ROW, "латте за октябрь") is False
+    assert len(service.sheet.values_batch) == 1
+
+
 def test_recategorize_writes_group_subgroup_and_amount_of_an_unchanged_row() -> None:
     written = [46301, "🍔 ЕДА", "кофе", 48000, 1, "латте", "UZS", "VISA 9090 UZS"]
     ws = RangeWorksheet({"A4169:H4169": [written]})

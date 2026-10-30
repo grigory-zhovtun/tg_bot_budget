@@ -9,6 +9,7 @@ from app.services.receipts import (
     NOTHING,
     Line,
     Receipt,
+    income_month,
     match_receipts,
     receipt_status,
     remaining,
@@ -122,36 +123,55 @@ def test_transfers_refunds_and_the_opening_balance_do_not_count() -> None:
     assert received(*rows) == {}
 
 
-# остатки поступлений прошлого месяца (перенос): день 1, строки −1, −2, … по его дням
-LEFT_SALARY = Line(-1, 1, 55_000, "RUB")
-LEFT_BONUS = Line(-2, 1, 30_000, "RUB")
+NOVEMBER = date(2026, 11, 1)
 
 
-def carried(*rows: Any, left: tuple[Line, ...] = (LEFT_SALARY,)) -> dict[int, Receipt]:
+def marked(day: date, amount: float, comment: str, cur: str = "RUB") -> Any:
+    """Доход с комментарием: «за октябрь» в нём — к какому месяцу он относится."""
+    row = fact_row(day, "💰 ДОХОДЫ", "зарплата", amount, cur)
+    row[5] = comment
+    return row
+
+
+def month_of(*rows: Any, first: date, through: date) -> dict[int, Receipt]:
     frame = transactions_frame([FACT_HEADER, *rows], RATES)
-    return match_receipts(frame, LINES, OCTOBER, date(2026, 10, 31), left)
+    return match_receipts(frame, LINES, first, through)
 
 
-def test_last_months_remainder_is_filled_before_the_months_line() -> None:
-    found = carried(income(3, 70_000, "RUB"))
-    # перенос — под своей отрицательной строкой, чтобы не совпасть со строкой вкладки
-    assert sorted(found) == [LEFT_SALARY.row, RUB_SALARY.row]
-    assert found[LEFT_SALARY.row].received == 55_000
-    assert remaining(LEFT_SALARY, found[LEFT_SALARY.row]) == 0
-    assert found[RUB_SALARY.row].received == 15_000  # строке месяца — что сверх
+def test_an_income_marked_for_last_month_counts_there_and_not_here() -> None:
+    # остаток октябрьской ЗП пришёл 3 ноября с пометкой — он октябрю, не ноябрю
+    late = marked(date(2026, 11, 3), 55_000, "ЗП за октябрь")
+    assert month_of(late, first=NOVEMBER, through=date(2026, 11, 30)) == {}
+    found = month_of(late, first=OCTOBER, through=date(2026, 11, 30))
+    assert found[RUB_SALARY.row].received == 55_000
 
 
-def test_remainders_are_filled_in_the_order_they_are_given() -> None:
-    # все в день 1: порядок — дни прошлого месяца, как их дал перенос
-    found = carried(income(3, 60_000, "RUB"), left=(LEFT_SALARY, LEFT_BONUS))
-    assert found[LEFT_SALARY.row].received == 55_000
-    assert found[LEFT_BONUS.row].received == 5_000
-    assert RUB_SALARY.row not in found
+def test_an_income_without_a_mark_belongs_to_the_month_of_its_date() -> None:
+    plain = marked(date(2026, 11, 3), 55_000, "")
+    found = month_of(plain, first=NOVEMBER, through=date(2026, 11, 30))
+    assert found[RUB_SALARY.row].received == 55_000
+    assert month_of(plain, first=OCTOBER, through=date(2026, 11, 30)) == {}
 
 
-def test_a_remainder_waits_only_for_its_own_currency() -> None:
-    found = carried(income(15, 2_000_000))
-    assert found == received(income(15, 2_000_000))
+def test_a_marked_income_after_through_does_not_count_yet() -> None:
+    late = marked(date(2026, 11, 3), 55_000, "за октябрь")
+    assert month_of(late, first=OCTOBER, through=date(2026, 11, 2)) == {}
+
+
+def test_a_mark_names_the_nearest_month_of_that_name() -> None:
+    assert income_month(date(2027, 1, 5), "за декабрь") == date(2026, 12, 1)
+    assert income_month(date(2026, 10, 30), "Аванс за ноябрь") == NOVEMBER
+    assert income_month(date(2026, 11, 3), "Зарплата за Октябрь 2025") == date(
+        2025, 10, 1
+    )
+    # полгода назад и вперёд — поровну: прошлый
+    assert income_month(date(2026, 11, 3), "за май") == date(2026, 5, 1)
+    assert income_month(date(2026, 11, 3), "") == NOVEMBER
+
+
+def test_only_a_whole_month_word_after_a_separate_за_is_a_mark() -> None:
+    for comment in ("зарплата октябрь", "возврат за машину", "заказ ноябрь"):
+        assert income_month(date(2026, 11, 3), comment) == NOVEMBER
 
 
 def test_the_status_follows_the_day_and_what_came() -> None:

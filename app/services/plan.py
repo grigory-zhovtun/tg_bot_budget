@@ -28,7 +28,6 @@ from app.services.day_budget import (
     GOAL_LABEL,
     LIST_HEADER,
     TABLE_HEADER,
-    carried_items,
     short,
 )
 from app.services.google_sheets import GoogleSheetsService, read_month_sheets
@@ -715,24 +714,16 @@ def load_plan(
 
     max_age > 0 — годятся копии листов не старше стольких секунд.
     """
-    first = today.replace(day=1)
-    current = title == month_title(first)  # у следующего месяца ещё ничего не пришло
-    sheets = read_month_sheets(gs, title, max_age, calendar=False, previous=current)
+    sheets = read_month_sheets(gs, title, max_age, calendar=False)
     if sheets.month is None:
         return None
     rates = sheets.rates
     frame = transactions_frame(sheets.fact, rates)
     plan = read_plan(sheets.month)
-    # строки месяца — после остатков прошлого (перенос); сами остатки в список не идут
+    first = today.replace(day=1)
     receipts = (
-        match_receipts(
-            frame,
-            list_lines(plan),
-            first,
-            today,
-            carried_items(sheets.previous, frame, first),
-        )
-        if current
+        match_receipts(frame, list_lines(plan), first, today)
+        if title == month_title(first)
         else {}
     )
     return LoadedPlan(plan, rates, article_history(frame, today), receipts)

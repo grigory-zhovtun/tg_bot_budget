@@ -607,6 +607,31 @@ async def test_an_income_asks_the_piggies_after_the_menu(
     assert sent_before and sent_before[0] >= 1  # сводка с меню уже ушла
 
 
+async def test_an_income_asks_its_month_before_the_piggies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    update, context, _ = make_chat("", {})
+    order: list[str] = []
+    question = AsyncMock(side_effect=lambda *args: order.append("month"))
+    piggies = AsyncMock(side_effect=lambda *args: order.append("piggy"))
+    monkeypatch.setattr(messages, "month_question", question)
+    monkeypatch.setattr(messages, "income_prompt", piggies)
+    today = local_today(config.ANALYTICS_TIMEZONE)
+    salary = entry_row(
+        55_000.0, True, "", "VISA 7070 RUB", "💰 ДОХОДЫ", "зарплата", today
+    )
+    result = await messages.save_rows(
+        context, update.effective_chat, [salary], [], "app:11"
+    )
+    chat_id, rows, first = question.await_args.args[1:]
+    assert (chat_id, [row.currency for row in rows]) == (
+        update.effective_chat.id,
+        ["RUB"],
+    )
+    assert first == result.first  # номер строки fact — для пометки кнопкой
+    assert order == ["month", "piggy"]
+
+
 async def test_a_piggy_spending_reaches_the_app_answer(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
