@@ -5,7 +5,7 @@ import os
 import re
 import time
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any, Protocol, TypeVar
@@ -68,7 +68,8 @@ SERIAL_ZERO = date(1899, 12, 30)
 PROFILE_MARK = "О НАС"
 MAX_PROFILE = 2000
 CALENDAR_TTL = 60.0  # секунд: лист «Календарь» перечитываем не чаще раза в минуту
-MONTH_SHEETS = 4  # вкладка месяца, курсы, fact и «Календарь» читаются одновременно
+# вкладка месяца, прошлого месяца, курсы, fact и «Календарь» читаются одновременно
+MONTH_SHEETS = 5
 CALENDAR_HEADER = [
     "ID",
     "Дата",
@@ -1304,34 +1305,48 @@ class MonthSource(Protocol):
 
 @dataclass(frozen=True)
 class MonthSheets:
-    """Листы экранов Mini App: вкладка месяца (None — её нет), курсы, fact, «Календарь»."""
+    """Листы экранов Mini App: вкладка месяца (None — её нет), курсы, fact, «Календарь»
+    и вкладка прошлого месяца — для переноса недополученных поступлений (None — нет)."""
 
     month: list[list[Any]] | None
     rates: Rates
     fact: list[list[Any]]
     calendar: list[list[Any]] = field(default_factory=list)
+    previous: list[list[Any]] | None = None
+
+
+def _tab(read: Future[list[list[Any]]] | None) -> list[list[Any]] | None:
+    """Вкладка из чтения; None — её нет."""
+    try:
+        return read.result() if read is not None else None
+    except gspread.WorksheetNotFound:
+        return None
 
 
 def read_month_sheets(
     gs: MonthSource, title: str, max_age: float = 0.0, calendar: bool = True
 ) -> MonthSheets:
-    """Вкладка месяца, курсы, fact и «Календарь» — одновременно: каждое чтение ждёт
-    Google, а не процессор, и экран ждёт самое долгое из них, а не их сумму.
+    """Вкладка месяца, вкладка прошлого месяца, курсы, fact и «Календарь» —
+    одновременно: каждое чтение ждёт Google, а не процессор, и экран ждёт самое
+    долгое из них, а не их сумму.
 
     max_age > 0 — годятся копии листов не старше стольких секунд.
     """
+    first = parse_month_title(title)
     with ThreadPoolExecutor(max_workers=MONTH_SHEETS) as pool:
         month = pool.submit(gs.get_values, title, max_age)
+        previous = (
+            pool.submit(gs.get_values, month_title(first - timedelta(days=1)), max_age)
+            if first is not None
+            else None
+        )
         rates = pool.submit(gs.get_rates, max_age)
         fact = pool.submit(gs.get_values, config.FACT_SHEET_NAME, max_age)
         records = pool.submit(gs.get_calendar, max_age) if calendar else None
-        try:
-            rows: list[list[Any]] | None = month.result()
-        except gspread.WorksheetNotFound:
-            rows = None
         return MonthSheets(
-            rows,
+            _tab(month),
             rates.result(),
             fact.result(),
             records.result() if records is not None else [],
+            _tab(previous),
         )

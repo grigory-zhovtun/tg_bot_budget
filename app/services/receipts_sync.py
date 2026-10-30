@@ -4,6 +4,9 @@
 Бот сверяет строки списка с fact (services.receipts) по операциям до вчерашнего
 дня включительно — как лимит «с утра» — и пишет в колонку T, сколько пришло по
 строке, в её валюте и со знаком. Формулы вкладки (P5, Q10) считают по колонке.
+Остатки поступлений прошлого месяца (перенос) сверка закрывает первыми, а в T
+идут только строки этого месяца — то, что им досталось после остатков: в лист
+перенос не пишется, и копии вкладок его дальше не тащат.
 Формула лимита (P5) — по сумам до зарплаты, как у бота; подписки она не найдёт —
 их сумму по день зарплаты бот пишет в Q той же строки, а по день аванса, для
 страховки до аванса, — в R (авансов в сроке нет — R пустая).
@@ -23,6 +26,7 @@ from app.services.day_budget import (
     GOAL_LABEL,
     LIST_HEADER,
     TABLE_HEADER,
+    carried_items,
     day_budget,
     read_forecast,
 )
@@ -117,10 +121,19 @@ def sync_receipts(gs: GoogleSheetsService, today: date) -> int:
     rates = gs.get_rates()
     frame = transactions_frame(gs.get_values(config.FACT_SHEET_NAME), rates)
     first = today.replace(day=1)
-    receipts = match_receipts(frame, forecast.items, first, today - timedelta(days=1))
+    try:
+        previous: list[list[Any]] | None = gs.get_values(
+            month_title(first - timedelta(days=1))
+        )
+    except WorksheetNotFound:  # первый месяц учёта — переносить нечего
+        previous = None
+    carried = carried_items(previous, frame, first)
+    receipts = match_receipts(
+        frame, forecast.items, first, today - timedelta(days=1), carried
+    )
     data = received_cells(title, rows, receipts)
     try:
-        budget = day_budget(frame, rows, today, rates, None)
+        budget = day_budget(frame, rows, today, rates, None, previous=previous)
     except Exception:  # сбой лимита не должен остановить «Пришло к утру»
         logger.exception("Subscriptions for the limit cell failed")
         budget = None

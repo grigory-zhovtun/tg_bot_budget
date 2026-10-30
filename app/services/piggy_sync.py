@@ -157,7 +157,14 @@ def sync_piggy(
         rows, journal = gs.get_piggy(0.0)
         book = read_book(rows, journal, currencies, groups, subcategories)
     budget = (
-        day_budget(frame, sheets.month, today, rates, config.FROZEN_CURRENCY)
+        day_budget(
+            frame,
+            sheets.month,
+            today,
+            rates,
+            config.FROZEN_CURRENCY,
+            previous=sheets.previous,
+        )
         if sheets.month is not None
         else None
     )

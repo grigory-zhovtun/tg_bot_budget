@@ -28,6 +28,7 @@ from app.services.day_budget import (
     GOAL_LABEL,
     LIST_HEADER,
     TABLE_HEADER,
+    carried_items,
     short,
 )
 from app.services.google_sheets import GoogleSheetsService, read_month_sheets
@@ -721,8 +722,15 @@ def load_plan(
     frame = transactions_frame(sheets.fact, rates)
     plan = read_plan(sheets.month)
     first = today.replace(day=1)
+    # строки месяца — после остатков прошлого (перенос); сами остатки в список не идут
     receipts = (
-        match_receipts(frame, list_lines(plan), first, today)
+        match_receipts(
+            frame,
+            list_lines(plan),
+            first,
+            today,
+            carried_items(sheets.previous, frame, first),
+        )
         if title == month_title(first)
         else {}
     )

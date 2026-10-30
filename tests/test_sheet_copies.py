@@ -274,14 +274,18 @@ class MonthSheetsSource:
 
 
 def test_month_sheets_are_read_together_with_the_screen_max_age() -> None:
-    source = MonthSheetsSource({"Oct 26": [["План"]], "fact": FACT})
+    source = MonthSheetsSource(
+        {"Oct 26": [["План"]], "Sep 26": [["Сентябрь"]], "fact": FACT}
+    )
     sheets = read_month_sheets(source, "Oct 26", max_age=120)
     assert sheets.month == [["План"]]
+    assert sheets.previous == [["Сентябрь"]]  # для переноса недополученного
     assert sheets.fact == FACT
     assert sheets.rates.to_uzs == {"UZS": 1.0, "USD": 12500.0}
     assert sheets.calendar == [["ID"]]
     assert sorted(source.calls) == [
         ("Oct 26", 120),
+        ("Sep 26", 120),
         ("calendar", 120),
         ("fact", 120),
         ("rates", 120),
@@ -290,7 +294,15 @@ def test_month_sheets_are_read_together_with_the_screen_max_age() -> None:
 
 def test_without_the_month_tab_the_month_is_none() -> None:
     source = MonthSheetsSource({"fact": FACT})
-    assert read_month_sheets(source, "Nov 26").month is None
+    sheets = read_month_sheets(source, "Nov 26")
+    assert (sheets.month, sheets.previous) == (None, None)
+
+
+def test_january_carries_over_from_last_years_december() -> None:
+    source = MonthSheetsSource(
+        {"Jan 27": [["План"]], "Dec 26": [["Декабрь"]], "fact": FACT}
+    )
+    assert read_month_sheets(source, "Jan 27").previous == [["Декабрь"]]
 
 
 def test_the_plan_screen_does_not_read_the_calendar() -> None:
@@ -301,8 +313,8 @@ def test_the_plan_screen_does_not_read_the_calendar() -> None:
 
 
 def test_sheets_are_read_at_the_same_time() -> None:
-    # все четыре чтения стоят у барьера одновременно — по очереди тест бы повис
-    barrier = threading.Barrier(4, timeout=5)
+    # все пять чтений стоят у барьера одновременно — по очереди тест бы повис
+    barrier = threading.Barrier(5, timeout=5)
 
     class Waiting(MonthSheetsSource):
         def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:

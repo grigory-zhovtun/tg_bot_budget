@@ -376,15 +376,23 @@ def gather_advice(
     current = today.replace(day=1)
     current_rows = rows if first == current else _rows(gs, month_title(current))
     months = full_months(today, HISTORY_MONTHS)
-    old_plans: dict[date, dict[str, float]] = {}
-    for month in months[-3:]:
-        if (old := _rows(gs, month_title(month))) is not None:
-            old_plans[month] = {a.key: a.plan for a in read_plan(old).articles}
+    old_tabs = {month: _rows(gs, month_title(month)) for month in months[-3:]}
+    old_plans = {
+        month: {a.key: a.plan for a in read_plan(old).articles}
+        for month, old in old_tabs.items()
+        if old is not None
+    }
     budget = None
     if current_rows is not None:
         records = read_calendar(gs.get_calendar())
         budget = day_budget(
-            frame, current_rows, today, rates, config.FROZEN_CURRENCY, records
+            frame,
+            current_rows,
+            today,
+            rates,
+            config.FROZEN_CURRENCY,
+            records,
+            previous=old_tabs[months[-1]],  # прошлый месяц: перенос недополученного
         )
     draft = applied(plan, changes)
     recent = months[-PURCHASE_MONTHS:]

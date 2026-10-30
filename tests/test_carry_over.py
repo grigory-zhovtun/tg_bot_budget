@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from app.domain import Rates
-from app.services.analytics_service import transactions_frame
+from app.services.analytics_service import AnalyticsService, transactions_frame
 from app.services.day_budget import (
     DayBudget,
     ForecastItem,
@@ -16,7 +16,10 @@ from app.services.day_budget import (
     format_day_budget,
 )
 from app.services.forecast import month_forecast
+from app.services.plan import PlanChanges, load_plan
+from app.services.plan_advice import gather_advice
 from tests.test_day_budget import FACT_HEADER, OPENING, fact_row, tab
+from tests.test_day_budget import Sheets as DaySheets
 
 RATES = Rates({"UZS": 1.0, "USD": 12_000.0, "RUB": 150.0})
 NOVEMBER = date(2026, 11, 1)
@@ -221,3 +224,99 @@ def test_the_calendar_gets_no_new_events_and_waits_for_the_whole_line() -> None:
     assert [(event.name, event.amount) for event in rubles_line.events] == [
         ("ЗП Питер", 100_000)
     ]
+
+
+class Sheets(DaySheets):
+    """Листы в памяти, курсы с рублём."""
+
+    def get_rates(self, max_age: float = 0.0) -> Rates:
+        self.ages.append(max_age)
+        return RATES
+
+    def get_advisor_profile(self) -> str:
+        return ""
+
+
+FACT = [FACT_HEADER, *OPENING, HALF_PAID]
+BOTH = {"fact": FACT, "Oct 26": OCTOBER_TAB, "Nov 26": NOVEMBER_TAB}
+
+
+def test_the_morning_message_reads_last_months_tab() -> None:
+    service = AnalyticsService(Sheets(BOTH))
+    assert (
+        "📅 Впереди: ⏳ 01.11 ЗП Питер за октябрь, остаток +55 000 RUB • "
+        "15.11 Аванс +2,00 млн"
+    ) in service.morning_brief(date(2026, 11, 3)).text.splitlines()
+    # вкладки октября нет — как раньше: впереди только ноябрьские строки
+    alone = AnalyticsService(Sheets({"fact": FACT, "Nov 26": NOVEMBER_TAB}))
+    assert "📅 Впереди: 15.11 Аванс +2,00 млн • 28.11 ЗП Питер +100 000 RUB" in (
+        alone.morning_brief(date(2026, 11, 3)).text.splitlines()
+    )
+
+
+SHORT_SALARY = [
+    FACT_HEADER,
+    *OPENING,
+    fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 5_000_000),
+    fact_row(date(2026, 11, 10), "💰 ДОХОДЫ", "зарплата", 2_000_000),
+]
+
+
+def test_the_reply_to_a_record_counts_the_advance_still_ahead() -> None:
+    sheets = Sheets(
+        {"fact": SHORT_SALARY, "Oct 26": OCTOBER_SALARY, "Nov 26": NOVEMBER_TAB}
+    )
+    feedback = AnalyticsService(sheets).write_feedback(
+        ["кафе"], today=date(2026, 11, 11)
+    )
+    # 12 млн сумов и аванс 15-го 2 млн на 20 дней по ЗП 30-го
+    assert feedback.lines[-1] == "💸 На сегодня осталось 700 000 из 700 000"
+
+
+def test_the_summary_screen_reads_last_months_tab() -> None:
+    found = AnalyticsService(Sheets(BOTH)).dashboard(date(2026, 11, 3))
+    assert found is not None
+    assert [(item.name, item.amount) for item in found.upcoming][:2] == [
+        ("ЗП Питер за октябрь, остаток", 55_000),
+        ("Аванс", 2_000_000),
+    ]
+
+
+PAID_REST = [*FACT, rubles(date(2026, 11, 4), 55_000)]
+
+
+def test_the_calendar_screen_waits_for_the_whole_line() -> None:
+    sheets = Sheets({**BOTH, "fact": PAID_REST})
+    found = AnalyticsService(sheets).forecast(date(2026, 11, 5), ["RUB"])
+    assert found is not None
+    [rubles_line] = found.currencies
+    assert [(event.name, event.amount) for event in rubles_line.events] == [
+        ("ЗП Питер", 100_000)
+    ]
+
+
+def test_the_month_plan_list_matches_after_last_months_rest() -> None:
+    loaded = load_plan(Sheets({**BOTH, "fact": PAID_REST}), "Nov 26", date(2026, 11, 5))
+    assert loaded is not None
+    assert 13 not in loaded.receipts  # «ЗП Питер» ноября: 55 000 — октябрю
+    alone = load_plan(
+        Sheets({"fact": PAID_REST, "Nov 26": NOVEMBER_TAB}),
+        "Nov 26",
+        date(2026, 11, 5),
+    )
+    assert alone is not None and alone.receipts[13].received == 55_000
+
+
+def test_the_advisor_sees_the_limit_with_last_months_rest() -> None:
+    sheets = Sheets(
+        {"fact": SHORT_SALARY, "Oct 26": OCTOBER_SALARY, "Nov 26": NOVEMBER_TAB}
+    )
+    gathered = gather_advice(
+        sheets,
+        NOVEMBER,
+        date(2026, 11, 11),
+        lambda plan: PlanChanges(),
+        {"💰 ДОХОДЫ": ["зарплата"]},
+    )
+    assert gathered.context is not None and gathered.context.budget is not None
+    assert gathered.context.budget.advances == 2_000_000

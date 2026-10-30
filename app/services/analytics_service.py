@@ -563,6 +563,15 @@ class AnalyticsService:
             logger.info("No plan sheet %s", sheet)
             return None
 
+    def _previous_rows(self, today: date) -> list[list[Any]] | None:
+        """Вкладка прошлого месяца — для переноса недополученных поступлений; None —
+        её нет."""
+        sheet = month_title(today.replace(day=1) - timedelta(days=1))
+        try:
+            return self.gs_service.get_values(sheet)
+        except WorksheetNotFound:
+            return None
+
     def plan_report(self, today: date | None = None) -> Report:
         """/plan: план-факт текущего месяца по вкладке «Oct 26»."""
         today = today or local_today(config.ANALYTICS_TIMEZONE)
@@ -619,7 +628,13 @@ class AnalyticsService:
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
         budget = day_budget(
-            frame, rows, today, rates, config.FROZEN_CURRENCY, self._records()
+            frame,
+            rows,
+            today,
+            rates,
+            config.FROZEN_CURRENCY,
+            self._records(),
+            previous=self._previous_rows(today),
         )
         if budget is None:
             return (
@@ -669,7 +684,13 @@ class AnalyticsService:
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
         budget = day_budget(
-            frame, rows, today, rates, config.FROZEN_CURRENCY, self._records()
+            frame,
+            rows,
+            today,
+            rates,
+            config.FROZEN_CURRENCY,
+            self._records(),
+            previous=self._previous_rows(today),
         )
         if budget is not None:
             lines.append(today_line(budget))
@@ -742,6 +763,7 @@ class AnalyticsService:
             config.FROZEN_CURRENCY,
             read_calendar(sheets.calendar),
             cards,
+            previous=sheets.previous,
         )
 
     def savings(
@@ -774,7 +796,14 @@ class AnalyticsService:
         rates = sheets.rates
         frame = transactions_frame(sheets.fact, rates)
         book = read_book(piggies, journal, set(currencies), list(groups), subcategories)
-        budget = day_budget(frame, sheets.month, today, rates, config.FROZEN_CURRENCY)
+        budget = day_budget(
+            frame,
+            sheets.month,
+            today,
+            rates,
+            config.FROZEN_CURRENCY,
+            previous=sheets.previous,
+        )
         screen = savings_screen(
             book,
             frame,
@@ -797,7 +826,7 @@ class AnalyticsService:
         max_age > 0 — годятся копии листов не старше стольких секунд.
         """
         from app.services.calendar import read_calendar
-        from app.services.day_budget import read_forecast
+        from app.services.day_budget import carried_items, read_forecast
         from app.services.forecast import month_forecast
         from app.services.plan import read_plan
 
@@ -817,6 +846,7 @@ class AnalyticsService:
             sheets.rates,
             currencies,
             read_calendar(sheets.calendar),
+            carried=carried_items(sheets.previous, frame, today.replace(day=1)),
         )
 
     def weekly_digest(self, today: date | None = None) -> Report:
