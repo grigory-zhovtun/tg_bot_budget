@@ -816,7 +816,8 @@ class AnalyticsService:
         piggies, journal = self.gs_service.get_piggy(max_age)
         rates = sheets.rates
         frame = transactions_frame(sheets.fact, rates)
-        book = read_book(piggies, journal, set(currencies), list(groups), subcategories)
+        catalog = list(groups)
+        book = read_book(piggies, journal, set(currencies), catalog, subcategories)
         budget = day_budget(frame, sheets.month, today, rates, config.FROZEN_CURRENCY)
         screen = savings_screen(
             book,
@@ -829,6 +830,7 @@ class AnalyticsService:
             config.CUSHION_MONTHS,
             percent=percent,
             order=order,
+            groups=catalog,
         )
         return SavingsTab(screen, month_savings(frame, today), rates)
 

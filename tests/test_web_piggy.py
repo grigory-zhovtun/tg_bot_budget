@@ -169,6 +169,7 @@ class PiggyAnalytics:
             6,
             percent=percent,
             order=order,
+            groups=groups,
         )
         return SavingsTab(screen, month_savings(found, today), RATES)
 

@@ -19,14 +19,20 @@ import pandas as pd
 
 from app.domain import INCOME_GROUP, Rates
 from app.services.analytics_service import TRANSFERS_GROUP, expenses, income, to_day
-from app.services.day_budget import DayBudget, read_forecast
+from app.services.day_budget import DayBudget, frozen_split, read_forecast
 from app.services.google_sheets import (
     PIGGY_JOURNAL_HEADER,
     PIGGY_LIST_HEADER,
     PIGGY_WIDTH,
 )
 from app.services.plan import read_plan
-from app.services.savings import Cushion, month_savings, monthly_spending
+from app.services.savings import (
+    Cushion,
+    life_groups,
+    life_month,
+    month_savings,
+    monthly_spending,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -618,8 +624,8 @@ class Screen:
     piggies: tuple[PiggyState, ...]  # по сроку, долгие цели, потом строки с ошибкой
     plan: tuple[MonthPlan, ...]
     cushion: Cushion | None  # «Заморожено» за вычетом копилок
-    frozen: float | None  # «Заморожено» на вечер вчера
-    envelopes: float  # остатки копилок на вечер вчера, в валюте заморозки
+    frozen: float | None  # «Заморожено» на сейчас
+    envelopes: float  # остатки открытых копилок на сейчас, в валюте заморозки
     over: float  # на сколько копилки больше «Заморожено»
     share_to: str  # куда идёт доля 10 % в этом месяце: cushion | split | goals
     enough: Enough | None
@@ -667,6 +673,21 @@ def money_day(rows: list[list[Any]] | None) -> int | None:
     found = read_forecast(rows) if rows else None
     days = [item.day for item in found.items if item.amount > 0] if found else []
     return max(days, default=None)
+
+
+def piggies_total(
+    book: Book, found: Mapping[str, Balance], rates: Rates, currency: str
+) -> float:
+    """Остатки открытых копилок (found — balances на дату) в currency по курсу
+    таблицы, до цента: деньги копилок лежат на карте заморозки вместе с подушкой."""
+    return round(
+        sum(
+            rates.convert(found[piggy.id].left, piggy.currency, currency) or 0.0
+            for piggy in book.piggies
+            if piggy.closed is None and piggy.id in found
+        ),
+        2,
+    )
 
 
 def _income(rows: list[list[Any]] | None) -> float:
@@ -878,16 +899,17 @@ def savings_screen(
     *,
     percent: float | None = None,
     order: Sequence[str] | None = None,
+    groups: Collection[str],
 ) -> Screen:
     """«Накопления» (раздел «Плана»): копилки, план взносов на год, подушка и «хватает ли».
 
     share — процент с поступлений по умолчанию; Q1 листа его заменяет, а percent и
-    order — предпросмотр окон «Процент» и «Порядок» (ничего не пишется)."""
+    order — предпросмотр окон «Процент» и «Порядок» (ничего не пишется). groups —
+    справочник групп бота: из него обязательные группы месяца жизни подушки."""
     month = today.replace(day=1)
     before = month - timedelta(days=1)
     start = balances(book, frame, rates, before)  # план месяца — от остатков на 1-е
     now = balances(book, frame, rates, today)
-    night = balances(book, frame, rates, today - timedelta(days=1))
     open_piggies = [piggy for piggy in book.piggies if piggy.closed is None]
     valid = [piggy for piggy in open_piggies if piggy.id and not piggy.error]
     scheduled = [
@@ -989,7 +1011,8 @@ def savings_screen(
         math.ceil(step / base * 100 - 1e-9) / 100 if base > 0 and step > 1e-6 else None
     )
 
-    # доля 10 %: по подушке на 1-е число, дальше подушка растёт на свою часть
+    # доля 10 %: по подушке на 1-е число, дальше подушка растёт на свою часть; до
+    # этапа 4 — в месяцах всех трат, как раньше: план посреди месяца не двигается
     monthly = monthly_spending(frame, today)
     currency = budget.frozen_currency if budget is not None else None
     frozen_rate = rates.to_uzs.get(currency or "", 0.0)
@@ -1001,11 +1024,7 @@ def savings_screen(
         and currency
         and frozen_rate
     ):
-        envelopes_start = sum(
-            rates.convert(start[piggy.id].left, piggy.currency, currency) or 0.0
-            for piggy in open_piggies
-            if piggy.id in start
-        )
+        envelopes_start = piggies_total(book, start, rates, currency)
         cushion_uzs = (budget.frozen_start - envelopes_start) * frozen_rate
     collected_goals = {
         piggy.id: start[piggy.id].collected * rates.to_uzs.get(piggy.currency, 0.0)
@@ -1147,20 +1166,27 @@ def savings_screen(
         )
     )
 
-    # подушка — на вечер вчера, как «Заморожено»
+    # подушка — на сейчас, как «Заморожено»: без копилок, в месяцах жизни
     cushion, envelopes, over = None, 0.0, 0.0
     frozen = budget.frozen if budget is not None else None
-    if frozen is not None and currency and frozen_rate:
-        envelopes = sum(
-            rates.convert(night[piggy.id].left, piggy.currency, currency) or 0.0
-            for piggy in open_piggies
-            if piggy.id in night
-        )
-        amount = frozen - envelopes
-        over = max(-amount, 0.0)
-        kept = max(amount, 0.0)
+    if budget is not None and frozen is not None and currency and frozen_rate:
+        envelopes = piggies_total(book, now, rates, currency)
+        kept, over, lacking = frozen_split(frozen, envelopes)
+        life = life_month(frame, today, life_groups(groups))
         cushion = Cushion(
-            kept, currency, kept * frozen_rate, frozen_rate, monthly, cushion_months
+            kept,
+            currency,
+            kept * frozen_rate,
+            frozen_rate,
+            life.amount,
+            cushion_months,
+            frozen=frozen,
+            card=budget.frozen_total,
+            payments=budget.frozen_payments,
+            piggies=envelopes,
+            over=over,
+            lacking=lacking,
+            life=life,
         )
     yearly = {
         (piggy.group or "", piggy.subcategory or "")
