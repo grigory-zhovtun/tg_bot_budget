@@ -4,8 +4,6 @@
 from datetime import date
 from typing import Any
 
-import pytest
-
 from app.domain import Rates
 from app.services.analytics_service import AnalyticsService, transactions_frame
 from app.services.day_budget import (
@@ -80,13 +78,23 @@ def test_an_income_recorded_later_with_last_months_date_lowers_the_rest() -> Non
 def test_rows_go_minus_one_minus_two_by_last_months_days() -> None:
     october = listed(
         ("ЗП Питер", 28, 100_000, "RUB"),
-        ("Возврат долга", 5, 1_000_000, "UZS"),
+        ("Возврат долга", 5, 500, "USD"),
     )
     found = carried_items(october, facts(), NOVEMBER)
     assert [(item.name, item.row) for item in found] == [
         ("Возврат долга за октябрь, остаток", -1),
         ("ЗП Питер за октябрь, остаток", -2),
     ]
+
+
+def test_incomes_in_sums_do_not_carry_over() -> None:
+    # строки в сумах задают срок и деньги лимита: их остаток не ждём
+    october = listed(
+        ("Возврат долга", 5, 1_000_000, "UZS"),
+        ("ЗП", 30, 10_000_000, "UZS"),
+    )
+    came = facts(fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 5_000_000))
+    assert carried_items(october, came, NOVEMBER) == ()
 
 
 def test_without_last_months_tab_or_its_list_nothing_carries_over() -> None:
@@ -143,68 +151,47 @@ def test_the_remainder_is_filled_before_this_months_line() -> None:
 
 
 OCTOBER_SALARY = listed(("ЗП", 30, 10_000_000, "UZS"))
+SHORT_OCTOBER = fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 8_000_000)
 
 
-def test_a_carried_salary_in_sums_does_not_set_the_limits_horizon() -> None:
-    # октябрьская ЗП пришла наполовину: остаток с днём 1 — прочее поступление, а не
-    # зарплата: 30 ноября, когда ноябрьской ЗП ещё нет, срок — до ЗП 30 декабря
-    october = facts(fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 5_000_000))
-    day = day_budget(
-        october,
-        NOVEMBER_TAB,
-        date(2026, 11, 30),
-        RATES,
-        "USD",
-        previous=OCTOBER_SALARY,
-    )
-    assert day is not None
-    assert (day.payday, day.payday_name) == (date(2026, 12, 30), "ЗП")
-    assert day.ahead[0].name == "ЗП за октябрь, остаток"
-
-
-def test_this_months_advance_waits_while_last_months_salary_is_short() -> None:
-    # 2 млн 10 ноября закрывают остаток октябрьской ЗП, а не аванс 15-го: аванс ещё
-    # впереди и входит в деньги срока
+def test_this_months_salary_closes_its_line_when_last_months_came_short() -> None:
+    # октябрьская ЗП пришла на 80 %, ноябрьская пришла 28-го, раньше своего дня:
+    # она закрывает свою строку — срок до ЗП 30 декабря, а не 2 дня до 30 ноября
     came = facts(
-        fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 5_000_000),
-        fact_row(date(2026, 11, 10), "💰 ДОХОДЫ", "зарплата", 2_000_000),
+        SHORT_OCTOBER,
+        fact_row(date(2026, 11, 15), "💰 ДОХОДЫ", "аванс", 2_000_000),
+        fact_row(date(2026, 11, 28), "💰 ДОХОДЫ", "зарплата", 10_000_000),
     )
     day = day_budget(
-        came,
-        NOVEMBER_TAB,
-        date(2026, 11, 11),
-        RATES,
-        "USD",
-        previous=OCTOBER_SALARY,
+        came, NOVEMBER_TAB, date(2026, 11, 29), RATES, "USD", previous=OCTOBER_SALARY
     )
-    assert day is not None
-    assert (day.advances, day.advance_on) == (2_000_000, date(2026, 11, 15))
-    assert [(item.name, item.amount) for item in day.ahead][:2] == [
-        ("ЗП за октябрь, остаток", 3_000_000),
-        ("Аванс", 2_000_000),
-    ]
+    alone = day_budget(came, NOVEMBER_TAB, date(2026, 11, 29), RATES, "USD")
+    assert day is not None and alone is not None
+    assert (day.payday, day.payday_name) == (date(2026, 12, 30), "ЗП")
+    assert (day.limit, day.days_left, day.advances) == (
+        alone.limit,
+        alone.days_left,
+        alone.advances,
+    )
 
 
-DEBT = listed(("Возврат долга", 5, 1_000_000, "UZS"))
 PACE = [
     fact_row(date(2026, 10, 20 + k), "🍔 ЕДА", "кафе", 300_000) for k in range(12)
 ] + [fact_row(date(2026, 11, k), "🍔 ЕДА", "кафе", 300_000) for k in (1, 2)]
+
+
+DEBT = listed(("Возврат долга", 5, 1_000_000, "UZS"))
 DEBT_BACK = fact_row(date(2026, 11, 2), "💰 ДОХОДЫ", "возврат долга", 1_000_000)
 
 
-def test_the_sums_card_waits_for_the_whole_advance() -> None:
-    # долг вернули 2 ноября — он закрыл октябрьский остаток, аванс 15-го ждём целиком:
-    # сумы 1,8 млн, 300 000 в день — к 29-му −6,3 млн и аванс +2 млн
-    day = day_budget(
-        facts(*PACE, DEBT_BACK),
-        NOVEMBER_TAB,
-        date(2026, 11, 3),
-        RATES,
-        "USD",
-        previous=DEBT,
-    )
-    assert day is not None and day.runway is not None
-    assert day.runway.short == pytest.approx(4_300_000)
+def test_the_sums_card_does_not_change_with_last_months_tab() -> None:
+    # октябрьский долг в сумах не переносится: вернувшийся 2 ноября закрывает
+    # строки ноября, как без вкладки октября
+    came = facts(*PACE, DEBT_BACK)
+    day = day_budget(came, NOVEMBER_TAB, date(2026, 11, 3), RATES, "USD", previous=DEBT)
+    alone = day_budget(came, NOVEMBER_TAB, date(2026, 11, 3), RATES, "USD")
+    assert day is not None and alone is not None
+    assert day.runway is not None and day.runway == alone.runway
 
 
 def test_the_calendar_gets_no_new_events_and_waits_for_the_whole_line() -> None:
@@ -227,7 +214,15 @@ def test_the_calendar_gets_no_new_events_and_waits_for_the_whole_line() -> None:
 
 
 class Sheets(DaySheets):
-    """Листы в памяти, курсы с рублём."""
+    """Листы в памяти, курсы с рублём; read — какие вкладки читали."""
+
+    def __init__(self, tabs: dict[str, list[list[Any]]]) -> None:
+        super().__init__(tabs)
+        self.read: list[str] = []
+
+    def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
+        self.read.append(name)
+        return super().get_values(name, max_age)
 
     def get_rates(self, max_age: float = 0.0) -> Rates:
         self.ages.append(max_age)
@@ -254,23 +249,15 @@ def test_the_morning_message_reads_last_months_tab() -> None:
     )
 
 
-SHORT_SALARY = [
-    FACT_HEADER,
-    *OPENING,
-    fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 5_000_000),
-    fact_row(date(2026, 11, 10), "💰 ДОХОДЫ", "зарплата", 2_000_000),
-]
-
-
-def test_the_reply_to_a_record_counts_the_advance_still_ahead() -> None:
-    sheets = Sheets(
-        {"fact": SHORT_SALARY, "Oct 26": OCTOBER_SALARY, "Nov 26": NOVEMBER_TAB}
-    )
+def test_the_reply_to_a_record_does_not_read_last_months_tab() -> None:
+    # ответ на запись — статусы статей и лимит в сумах: переносу в них нечего менять,
+    # а лишнее чтение Google — лишние секунды на каждую запись
+    sheets = Sheets(BOTH)
     feedback = AnalyticsService(sheets).write_feedback(
-        ["кафе"], today=date(2026, 11, 11)
+        ["кафе"], today=date(2026, 11, 3)
     )
-    # 12 млн сумов и аванс 15-го 2 млн на 20 дней по ЗП 30-го
-    assert feedback.lines[-1] == "💸 На сегодня осталось 700 000 из 700 000"
+    assert feedback.lines[-1].startswith("💸 На сегодня осталось")
+    assert "Oct 26" not in sheets.read
 
 
 def test_the_summary_screen_reads_last_months_tab() -> None:
@@ -307,16 +294,13 @@ def test_the_month_plan_list_matches_after_last_months_rest() -> None:
     assert alone is not None and alone.receipts[13].received == 55_000
 
 
-def test_the_advisor_sees_the_limit_with_last_months_rest() -> None:
-    sheets = Sheets(
-        {"fact": SHORT_SALARY, "Oct 26": OCTOBER_SALARY, "Nov 26": NOVEMBER_TAB}
-    )
+def test_the_advisor_sees_last_months_rest_ahead() -> None:
     gathered = gather_advice(
-        sheets,
+        Sheets(BOTH),
         NOVEMBER,
-        date(2026, 11, 11),
+        date(2026, 11, 3),
         lambda plan: PlanChanges(),
         {"💰 ДОХОДЫ": ["зарплата"]},
     )
     assert gathered.context is not None and gathered.context.budget is not None
-    assert gathered.context.budget.advances == 2_000_000
+    assert gathered.context.budget.ahead[0].name == "ЗП Питер за октябрь, остаток"

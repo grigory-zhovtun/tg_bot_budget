@@ -683,14 +683,9 @@ class AnalyticsService:
         frame = transactions_frame(
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
+        # без вкладки прошлого месяца: перенос не трогает лимит в сумах
         budget = day_budget(
-            frame,
-            rows,
-            today,
-            rates,
-            config.FROZEN_CURRENCY,
-            self._records(),
-            previous=self._previous_rows(today),
+            frame, rows, today, rates, config.FROZEN_CURRENCY, self._records()
         )
         if budget is not None:
             lines.append(today_line(budget))
