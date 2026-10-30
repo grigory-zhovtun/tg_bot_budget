@@ -346,11 +346,11 @@ def test_dashboard_numbers_come_from_the_month_tab() -> None:
     found = build_dashboard(frame(spent), tab(), date(2026, 10, 2), RATES, "USD")
     body = dashboard_for(found).json()
     assert body["status"] == "ok"
-    assert body["limit"] == pytest.approx(4_600_000 / 14)  # тот же расчёт, что /today
+    assert body["limit"] == pytest.approx(6_600_000 / 29)  # тот же расчёт, что /today
     assert body["left_today"] == pytest.approx(body["limit"] - body["spent_today"])
-    # лимит — по день аванса 15-го: сумы на вечер вчера минус платежи по него
-    assert (body["sums"], body["bills"], body["days_left"]) == (4_600_000, 0, 14)
-    assert (body["until"], body["payday_on"]) == ("до аванса 15-го", "15-го")
+    # лимит — по день ЗП 30-го: сумы на вечер вчера и аванс 15-го минус платежи по него
+    assert (body["sums"], body["bills"], body["days_left"]) == (4_600_000, 0, 29)
+    assert (body["until"], body["payday_on"]) == ("до зарплаты 30-го", "30-го")
     assert body["planned_balance"] is None  # старое приложение прячет «по плану»
     assert body["frozen"]["currency"] == "USD"
     assert body["groups"][0]["items"][0] == {
@@ -372,8 +372,8 @@ def test_dashboard_has_spending_and_limit_by_day() -> None:
     found = build_dashboard(frame(spent), tab(), date(2026, 10, 2), RATES, "USD")
     body = dashboard_for(found).json()
     assert body["spending"] == [
-        {"day": "2026-10-01", "spent": 400_000, "limit": pytest.approx(5_000_000 / 15)},
-        {"day": "2026-10-02", "spent": 0, "limit": pytest.approx(4_600_000 / 14)},
+        {"day": "2026-10-01", "spent": 400_000, "limit": pytest.approx(7_000_000 / 30)},
+        {"day": "2026-10-02", "spent": 0, "limit": pytest.approx(6_600_000 / 29)},
     ]
 
 

@@ -1,11 +1,15 @@
 """Лимит на день — по деньгам до зарплаты, план — одной строкой.
 
-Лимит: сумы на вечер вчера (все строки fact в UZS — карты и наличные) минус платежи
-в сумах по день ближайшей зарплаты в сумах, на дни по него включительно: зарплату
-могут начислить и вечером, её день живём на то, что есть. Зарплата — открытая
-к утру строка жёлтого списка (колонки O:S вкладки месяца) с плюсом в UZS и словом
-«аванс», «ЗП» или «зарплата» в названии, позже сегодня; после последней в месяце —
-первая такая строка в следующем месяце; таких строк нет — до конца месяца. Платежи —
+Лимит: сумы на вечер вчера (все строки fact в UZS — карты и наличные) плюс авансы
+срока минус платежи в сумах по день основной зарплаты, на дни по него включительно:
+зарплату могут начислить и вечером, её день живём на то, что есть. Основная
+зарплата — открытая к утру строка жёлтого списка (колонки O:S вкладки месяца) с
+плюсом в UZS и словом «ЗП» или «зарплата» (без «аванс») в названии, позже сегодня;
+после последней в месяце — первая такая строка в следующем месяце; таких строк нет —
+срок задаёт аванс, как раньше; нет и его — до конца месяца. Авансы срока — открытые
+строки с «аванс» позже сегодня (непришедшая часть) и они же в следующем месяце
+(целиком). Страховка: деньги аванса до его дня не тратим — если до аванса денег
+меньше, чем на ровный лимит, лимит считается по день аванса без него. Платежи —
 открытые строки с минусом в UZS и подписки в сумах вне списка, ещё не списанные в
 своём месяце. План — траты дня с 1-го по вчера против плана месяца в день × дни, как
 строка у графика «Траты». Ячейка лимита во вкладке месяца считает план до конца
@@ -49,9 +53,11 @@ WEEKDAYS = ("понедельник", "вторник", "среда", "четв�
 MONTHS_PREPOSITIONAL = ("январе", "феврале", "марте", "апреле", "мае", "июне", "июле",
                         "августе", "сентябре", "октябре", "ноябре", "декабре")  # fmt: skip
 NEAR_PLAN = 0.8  # с этой доли плана статья жёлтая
-# строка списка — зарплата, до которой лимит: возврат долга и прочие поступления
-# срок не задают, их деньги попадут в сумы, когда придут
-SALARY = re.compile(r"аванс|зарплат|(?<![а-яё])зп(?![а-яё])", re.IGNORECASE)
+# строка списка — основная зарплата, до которой лимит, и аванс, который прибавляется к
+# деньгам срока: возврат долга и прочие поступления срок не задают, их деньги попадут
+# в сумы, когда придут
+MAIN_SALARY = re.compile(r"зарплат|(?<![а-яё])зп(?![а-яё])", re.IGNORECASE)
+ADVANCE = re.compile(r"аванс", re.IGNORECASE)
 MONTHS_GENITIVE = ("января", "февраля", "марта", "апреля", "мая", "июня", "июля",
                    "августа", "сентября", "октября", "ноября", "декабря")  # fmt: skip
 
@@ -109,6 +115,10 @@ class DayBudget:
     sums: float = 0.0  # сумы на вечер вчера: строки fact в UZS — карты и наличные
     bills: float = 0.0  # платежи в сумах по день зарплаты включительно
     subscriptions: float = 0.0  # из них подписки: формула вкладки их не найдёт
+    advances: float = 0.0  # авансы срока: прибавлены к деньгам
+    advance_on: date | None = None  # первый из них; None — авансов в сроке нет
+    salary_subscriptions: float = 0.0  # подписки по день основной зарплаты — Q5 вкладки
+    advance_subscriptions: float | None = None  # по день аванса — R5; None — его нет
     payday: date | None = (
         None  # зарплата в сумах, до которой лимит; None — конец месяца
     )
@@ -127,6 +137,10 @@ class Allowance:
     payday: date | None
     payday_name: str
     days: int
+    advances: float = 0.0  # авансы срока: прибавлены к деньгам
+    advance_on: date | None = None  # первый из них; None — авансов в сроке нет
+    salary_subscriptions: float = 0.0  # подписки по день основной зарплаты — Q5 вкладки
+    advance_subscriptions: float | None = None  # по день аванса — R5; None — его нет
 
 
 def _number(value: Any) -> float | None:
@@ -225,21 +239,33 @@ def _sums(frame: pd.DataFrame, through: date) -> float:
     return _balance(frame[frame["currency"] == "UZS"], through, "amount")
 
 
-def _payday(
-    items: tuple[ForecastItem, ...], receipts: Mapping[int, Receipt], day: date
-) -> tuple[date | None, str]:
-    """Ближайшая зарплата в сумах позже day: открытая к утру строка списка с плюсом в
-    UZS и словом зарплаты в названии (SALARY); в месяце нет — первая такая строка в
-    следующем месяце; строк нет — (None, ""). Зарплата сегодня или опоздавшая — не в
-    счёт, пока деньги не на картах."""
-    salaries = sorted(
-        (
-            item
-            for item in items
-            if item.amount > 0 and item.currency == "UZS" and SALARY.search(item.name)
-        ),
-        key=lambda item: (item.day, item.row),
+def _salaries(
+    items: tuple[ForecastItem, ...],
+) -> tuple[list[ForecastItem], list[ForecastItem]]:
+    """Строки основной зарплаты и аванса в сумах по дням; основной нет — срок задают
+    строки аванса, а прибавлять к деньгам нечего."""
+
+    def ordered(found: Callable[[ForecastItem], bool]) -> list[ForecastItem]:
+        sums = (item for item in items if item.amount > 0 and item.currency == "UZS")
+        return sorted(
+            (item for item in sums if found(item)),
+            key=lambda item: (item.day, item.row),
+        )
+
+    advances = ordered(lambda item: bool(ADVANCE.search(item.name)))
+    mains = ordered(
+        lambda item: bool(MAIN_SALARY.search(item.name))
+        and not ADVANCE.search(item.name)
     )
+    return (mains, advances) if mains else (advances, [])
+
+
+def _payday(
+    salaries: Sequence[ForecastItem], receipts: Mapping[int, Receipt], day: date
+) -> tuple[date | None, str]:
+    """Ближайшая зарплата в сумах позже day: открытая к утру строка salaries; в месяце
+    нет — первая из них в следующем месяце; строк нет — (None, ""). Зарплата сегодня
+    или опоздавшая — не в счёт, пока деньги не на картах."""
     if not salaries:
         return None, ""
     first = day.replace(day=1)
@@ -248,6 +274,34 @@ def _payday(
         if due > day and not closed(item, receipts.get(item.row, NOTHING)):
             return due, item.name
     return _on(_next_month(first), salaries[0].day), salaries[0].name
+
+
+def _advances(
+    advances: Sequence[ForecastItem],
+    receipts: Mapping[int, Receipt],
+    day: date,
+    until: date,
+) -> tuple[float, date | None, str]:
+    """Авансы срока: строки аванса этого месяца с днём позже day и раньше until — их
+    непришедшая часть, и они же в следующем месяце — целиком; и первый из них. Аванс
+    сегодня или опоздавший — не в счёт, пока деньги не на картах, как зарплата."""
+    first = day.replace(day=1)
+    later = _next_month(first)
+    total, found = 0.0, []
+    for item in advances:
+        due = _on(first, item.day)
+        rest = remaining(item, receipts.get(item.row, NOTHING))
+        if day < due < until and rest > 0:
+            total += rest
+            found.append((due, item.name))
+        due = _on(later, item.day)
+        if due < until:
+            total += item.amount
+            found.append((due, item.name))
+    if not found:
+        return 0.0, None, ""
+    on, name = min(found)
+    return total, on, name
 
 
 def _list_bills(
@@ -345,19 +399,53 @@ def day_budget(
     plan_end = opening + sum(item.uzs for item in items) - per_day * days
     series = outside_list(find_series(frame, today), items)
     month_end = first.replace(day=days)
+    salaries, spare = _salaries(items)
 
     def allowance_on(day: date) -> Allowance:
-        """Лимит дня day: сумы на вечер накануне, платежи и дни до зарплаты."""
+        """Лимит дня day: сумы на вечер накануне, авансы, платежи и дни до зарплаты."""
         receipts = match_receipts(frame, items, first, day - timedelta(days=1))
-        payday, name = _payday(items, receipts, day)
+        payday, name = _payday(salaries, receipts, day)
         # день зарплаты — тоже: её могут начислить и вечером
         until = (payday or month_end) + timedelta(days=1)
         sums = _sums(frame, day - timedelta(days=1))
+        advances, advance_on, advance_name = _advances(spare, receipts, day, until)
         subscriptions = _subscriptions(series, day, until)
         bills = _list_bills(items, receipts, day, until) + subscriptions
         spread = (until - day).days
+        allowance = Allowance(
+            (sums + advances - bills) / spread,
+            sums,
+            bills,
+            subscriptions,
+            payday,
+            name,
+            spread,
+            advances,
+            advance_on,
+            subscriptions,
+        )
+        if advance_on is None:
+            return allowance
+        # страховка: деньги аванса до его дня не тратим, его день живём на то, что есть
+        guard_until = advance_on + timedelta(days=1)
+        guard_subscriptions = _subscriptions(series, day, guard_until)
+        guard_bills = (
+            _list_bills(items, receipts, day, guard_until) + guard_subscriptions
+        )
+        guard_days = (guard_until - day).days
+        guard = (sums - guard_bills) / guard_days
+        if guard >= allowance.limit:
+            return replace(allowance, advance_subscriptions=guard_subscriptions)
         return Allowance(
-            (sums - bills) / spread, sums, bills, subscriptions, payday, name, spread
+            guard,
+            sums,
+            guard_bills,
+            guard_subscriptions,
+            advance_on,
+            advance_name,
+            guard_days,
+            salary_subscriptions=subscriptions,
+            advance_subscriptions=guard_subscriptions,
         )
 
     passed = yesterday.day if yesterday >= first else 0
@@ -421,6 +509,10 @@ def day_budget(
         sums=now_allowance.sums,
         bills=now_allowance.bills,
         subscriptions=now_allowance.subscriptions,
+        advances=now_allowance.advances,
+        advance_on=now_allowance.advance_on,
+        salary_subscriptions=now_allowance.salary_subscriptions,
+        advance_subscriptions=now_allowance.advance_subscriptions,
         payday=now_allowance.payday,
         payday_name=now_allowance.payday_name,
         plan_gap=done - per_day * passed if passed else None,
