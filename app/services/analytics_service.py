@@ -565,11 +565,14 @@ class AnalyticsService:
 
     def _previous_rows(self, today: date) -> list[list[Any]] | None:
         """Вкладка прошлого месяца — для переноса недополученных поступлений; None —
-        её нет."""
+        её нет или она не прочиталась (сообщение — без переноса)."""
         sheet = month_title(today.replace(day=1) - timedelta(days=1))
         try:
             return self.gs_service.get_values(sheet)
         except WorksheetNotFound:
+            return None
+        except Exception:
+            logger.warning("Last month's tab %s was not read: no carry-over", sheet)
             return None
 
     def plan_report(self, today: date | None = None) -> Report:
@@ -783,7 +786,10 @@ class AnalyticsService:
         from app.services.savings import month_savings
 
         sheet = month_title(today)
-        sheets = read_month_sheets(self.gs_service, sheet, max_age, calendar=False)
+        # «Накоплениям» нужна только заморозка — переносу в ней нечего менять
+        sheets = read_month_sheets(
+            self.gs_service, sheet, max_age, calendar=False, previous=False
+        )
         if sheets.month is None:
             logger.info("No plan sheet %s", sheet)
             return None
@@ -791,14 +797,7 @@ class AnalyticsService:
         rates = sheets.rates
         frame = transactions_frame(sheets.fact, rates)
         book = read_book(piggies, journal, set(currencies), list(groups), subcategories)
-        budget = day_budget(
-            frame,
-            sheets.month,
-            today,
-            rates,
-            config.FROZEN_CURRENCY,
-            previous=sheets.previous,
-        )
+        budget = day_budget(frame, sheets.month, today, rates, config.FROZEN_CURRENCY)
         screen = savings_screen(
             book,
             frame,

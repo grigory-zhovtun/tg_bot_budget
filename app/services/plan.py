@@ -715,13 +715,14 @@ def load_plan(
 
     max_age > 0 — годятся копии листов не старше стольких секунд.
     """
-    sheets = read_month_sheets(gs, title, max_age, calendar=False)
+    first = today.replace(day=1)
+    current = title == month_title(first)  # у следующего месяца ещё ничего не пришло
+    sheets = read_month_sheets(gs, title, max_age, calendar=False, previous=current)
     if sheets.month is None:
         return None
     rates = sheets.rates
     frame = transactions_frame(sheets.fact, rates)
     plan = read_plan(sheets.month)
-    first = today.replace(day=1)
     # строки месяца — после остатков прошлого (перенос); сами остатки в список не идут
     receipts = (
         match_receipts(
@@ -731,7 +732,7 @@ def load_plan(
             today,
             carried_items(sheets.previous, frame, first),
         )
-        if title == month_title(first)
+        if current
         else {}
     )
     return LoadedPlan(plan, rates, article_history(frame, today), receipts)

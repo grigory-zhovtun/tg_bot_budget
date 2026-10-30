@@ -14,6 +14,7 @@ from app.services.day_budget import (
     format_day_budget,
 )
 from app.services.forecast import month_forecast
+from app.services.google_sheets import PIGGY_JOURNAL_HEADER, PIGGY_LIST_HEADER
 from app.services.plan import PlanChanges, load_plan
 from app.services.plan_advice import gather_advice
 from tests.test_day_budget import FACT_HEADER, OPENING, fact_row, tab
@@ -132,7 +133,7 @@ def test_last_months_remainder_is_ahead_first() -> None:
     # день 1 прошёл, а денег нет — «⏳», как у любой строки, чей день прошёл
     assert (
         "📅 Впереди: ⏳ 01.11 ЗП Питер за октябрь, остаток +55 000 RUB • "
-        "15.11 Аванс +2,00 млн"
+        "15.11 Аванс +2,00 млн • 28.11 ЗП Питер +100 000 RUB"
     ) in format_day_budget(day).splitlines()
 
 
@@ -213,16 +214,57 @@ def test_the_calendar_gets_no_new_events_and_waits_for_the_whole_line() -> None:
     ]
 
 
+def test_the_morning_shows_this_months_rows_next_to_the_carry_over() -> None:
+    # два остатка не занимают оба места «Впереди»: аванс и ЗП месяца видны тоже
+    october = listed(
+        ("ЗП Питер", 28, 100_000, "RUB"),
+        ("Фриланс", 20, 500, "USD"),
+    )
+    day = november(date(2026, 11, 3), previous=october)
+    assert [item.name for item in day.upcoming] == [
+        "Фриланс за октябрь, остаток",
+        "ЗП Питер за октябрь, остаток",
+        "Аванс",
+        "ЗП Питер",
+    ]
+
+
+def test_last_month_is_reconciled_without_its_own_carry_over() -> None:
+    # предел (спека 1.8): прошлый месяц сверяется своими строками. Октябрьский
+    # остаток, пришедший 4 ноября, в этой сверке засчитан ноябрьской ЗП — 1 декабря
+    # остатка за ноябрь нет, хотя 30 ноября «Впереди» ждал 55 000
+    came = facts(
+        HALF_PAID,
+        rubles(date(2026, 11, 4), 55_000),
+        rubles(date(2026, 11, 28), 45_000),
+    )
+    assert carried_items(NOVEMBER_TAB, came, date(2026, 12, 1)) == ()
+    day = november(
+        date(2026, 11, 30),
+        rubles(date(2026, 11, 4), 55_000),
+        rubles(date(2026, 11, 28), 45_000),
+    )
+    assert ("ЗП Питер", 55_000) in [(item.name, item.amount) for item in day.ahead]
+
+
 class Sheets(DaySheets):
     """Листы в памяти, курсы с рублём; read — какие вкладки читали."""
 
-    def __init__(self, tabs: dict[str, list[list[Any]]]) -> None:
+    def __init__(
+        self, tabs: dict[str, list[list[Any]]], down: str | None = None
+    ) -> None:
         super().__init__(tabs)
         self.read: list[str] = []
+        self.down = down  # эта вкладка не отвечает: сбой сети
 
     def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
         self.read.append(name)
+        if name == self.down:
+            raise ConnectionError("Google is down")
         return super().get_values(name, max_age)
+
+    def get_piggy(self, max_age: float = 0.0) -> tuple[list[Any], list[Any]]:
+        return [list(PIGGY_LIST_HEADER)], [list(PIGGY_JOURNAL_HEADER)]
 
     def get_rates(self, max_age: float = 0.0) -> Rates:
         self.ages.append(max_age)
@@ -240,13 +282,37 @@ def test_the_morning_message_reads_last_months_tab() -> None:
     service = AnalyticsService(Sheets(BOTH))
     assert (
         "📅 Впереди: ⏳ 01.11 ЗП Питер за октябрь, остаток +55 000 RUB • "
-        "15.11 Аванс +2,00 млн"
+        "15.11 Аванс +2,00 млн • 28.11 ЗП Питер +100 000 RUB"
     ) in service.morning_brief(date(2026, 11, 3)).text.splitlines()
     # вкладки октября нет — как раньше: впереди только ноябрьские строки
     alone = AnalyticsService(Sheets({"fact": FACT, "Nov 26": NOVEMBER_TAB}))
     assert "📅 Впереди: 15.11 Аванс +2,00 млн • 28.11 ЗП Питер +100 000 RUB" in (
         alone.morning_brief(date(2026, 11, 3)).text.splitlines()
     )
+
+
+def test_the_morning_comes_without_the_carry_over_when_last_months_tab_fails() -> None:
+    service = AnalyticsService(Sheets(BOTH, down="Oct 26"))
+    text = service.morning_brief(date(2026, 11, 3)).text
+    assert "📅 Впереди: 15.11 Аванс +2,00 млн • 28.11 ЗП Питер +100 000 RUB" in (
+        text.splitlines()
+    )
+
+
+def test_savings_do_not_read_last_months_tab() -> None:
+    # «Накоплениям» нужна только заморозка — переносу в ней нечего менять
+    sheets = Sheets(BOTH)
+    found = AnalyticsService(sheets).savings(
+        date(2026, 11, 3), {"UZS", "USD", "RUB"}, ["🍔 ЕДА"], {"🍔 ЕДА": ["кафе"]}
+    )
+    assert found is not None
+    assert "Oct 26" not in sheets.read
+
+
+def test_next_months_plan_does_not_read_this_month_for_the_carry_over() -> None:
+    sheets = Sheets({**BOTH, "Dec 26": NOVEMBER_TAB})
+    assert load_plan(sheets, "Dec 26", date(2026, 11, 3)) is not None
+    assert "Nov 26" not in sheets.read
 
 
 def test_the_reply_to_a_record_does_not_read_last_months_tab() -> None:

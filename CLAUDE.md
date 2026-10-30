@@ -61,7 +61,7 @@ app/
 │   ├── balances.py      # Bank main-screen screenshots: «Проверка» + «Сверено», «Выровнять» buttons
 │   └── analytics.py     # /advice, /analytics, daily report
 ├── services/
-│   ├── google_sheets.py # GoogleSheetsService — synchronous gspread wrapper; copies of sheets for Mini App screens (`get_values`/`get_rates(max_age)`), dropped by any write of the bot (`WriteAwareHTTPClient` reports every POST/PUT/DELETE); `read_month_sheets` reads the month tab, last month's tab (`MonthSheets.previous`, for the carry-over), rates, fact and «Календарь» in parallel
+│   ├── google_sheets.py # GoogleSheetsService — synchronous gspread wrapper; copies of sheets for Mini App screens (`get_values`/`get_rates(max_age)`), dropped by any write of the bot (`WriteAwareHTTPClient` reports every POST/PUT/DELETE); `read_month_sheets` reads the month tab, last month's tab (`MonthSheets.previous`, for the carry-over; `previous=False` for screens that do not need it, a failed read of it — no carry-over), rates, fact and «Календарь» in parallel
 │   ├── ai_service.py    # GeminiService (google-genai, JSON schema output, merchant hints from fact)
 │   ├── analytics_service.py # AnalyticsService - reports with matplotlib charts
 │   ├── recurring.py     # Monthly payments from fact: recurring_key, amount clusters, day ±4, /subs text and morning lines

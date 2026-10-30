@@ -305,6 +305,43 @@ def test_january_carries_over_from_last_years_december() -> None:
     assert read_month_sheets(source, "Jan 27").previous == [["Декабрь"]]
 
 
+def test_screens_without_the_carry_over_do_not_read_last_months_tab() -> None:
+    source = MonthSheetsSource(
+        {"Oct 26": [["План"]], "Sep 26": [["Сентябрь"]], "fact": FACT}
+    )
+    sheets = read_month_sheets(source, "Oct 26", calendar=False, previous=False)
+    assert sheets.previous is None
+    assert ("Sep 26", 0.0) not in source.calls
+
+
+class DownTab(MonthSheetsSource):
+    """Одна вкладка не отвечает: сбой сети, а не «вкладки нет»."""
+
+    def __init__(self, tabs: dict[str, list[list[Any]]], down: str) -> None:
+        super().__init__(tabs)
+        self.down = down
+
+    def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
+        if name == self.down:
+            raise ConnectionError("Google is down")
+        return super().get_values(name, max_age)
+
+
+def test_a_failed_read_of_last_months_tab_leaves_the_screen_without_carry_over(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    tabs = {"Oct 26": [["План"]], "Sep 26": [["Сентябрь"]], "fact": FACT}
+    sheets = read_month_sheets(DownTab(tabs, "Sep 26"), "Oct 26")
+    assert (sheets.month, sheets.previous) == ([["План"]], None)
+    assert "Sep 26" in caplog.text
+
+
+def test_a_failed_read_of_the_month_tab_still_fails() -> None:
+    tabs = {"Oct 26": [["План"]], "Sep 26": [["Сентябрь"]], "fact": FACT}
+    with pytest.raises(ConnectionError):
+        read_month_sheets(DownTab(tabs, "Oct 26"), "Oct 26")
+
+
 def test_the_plan_screen_does_not_read_the_calendar() -> None:
     source = MonthSheetsSource({"Oct 26": [["План"]], "fact": FACT})
     sheets = read_month_sheets(source, "Oct 26", calendar=False)

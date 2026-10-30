@@ -91,6 +91,19 @@ def test_a_closed_window_is_written_once_then_the_deadline_moves() -> None:
     assert sheets.updates == [("p3k9za", {"E": "20.12.2027"})]
 
 
+def test_the_piggy_sync_does_not_read_last_months_tab() -> None:
+    # копилкам нужна только заморозка — переносу в ней нечего менять
+    read: list[str] = []
+
+    class Recording(SyncSheets):
+        def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
+            read.append(name)
+            return super().get_values(name, max_age)
+
+    sync_piggy(Recording([ROW], [SAVED]), TODAY, *CATALOG)
+    assert "Dec 26" not in read
+
+
 def test_a_crash_between_the_two_writes_is_finished_next_time() -> None:
     total = ["20.01.2027", "p3k9za", "Новый год", -2_400_000, "UZS",
              "потрачено в окне", "бот", "окно:20.12.2026"]  # fmt: skip

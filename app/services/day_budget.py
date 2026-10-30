@@ -546,7 +546,11 @@ def day_budget(
         frozen_change=change,
         frozen_uzs=frozen_uzs,
         frozen_currency=frozen_currency,
-        upcoming=left_now[:2],
+        # остатки прошлого месяца — сверх двух строк месяца: аванс и платежи видны
+        upcoming=(
+            *(item for item in left_now if item.row < 0),
+            *[item for item in left_now if item.row > 0][:2],
+        ),
         over_plan=tuple(over[:3]),
         runway=uzs_runway(
             currency_forecast(

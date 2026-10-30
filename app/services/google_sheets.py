@@ -1323,22 +1323,38 @@ def _tab(read: Future[list[list[Any]]] | None) -> list[list[Any]] | None:
         return None
 
 
+def _optional_tab(
+    read: Future[list[list[Any]]] | None, title: str
+) -> list[list[Any]] | None:
+    """Вкладка прошлого месяца: нужна только для переноса. Не прочиталась — экран
+    без переноса, а не «таблица не ответила»."""
+    try:
+        return _tab(read)
+    except Exception:
+        logger.warning("Last month's tab %s was not read: no carry-over", title)
+        return None
+
+
 def read_month_sheets(
-    gs: MonthSource, title: str, max_age: float = 0.0, calendar: bool = True
+    gs: MonthSource,
+    title: str,
+    max_age: float = 0.0,
+    calendar: bool = True,
+    previous: bool = True,
 ) -> MonthSheets:
     """Вкладка месяца, вкладка прошлого месяца, курсы, fact и «Календарь» —
     одновременно: каждое чтение ждёт Google, а не процессор, и экран ждёт самое
     долгое из них, а не их сумму.
 
-    max_age > 0 — годятся копии листов не старше стольких секунд.
+    max_age > 0 — годятся копии листов не старше стольких секунд. previous=False —
+    без вкладки прошлого месяца: экрану перенос не нужен.
     """
     first = parse_month_title(title)
+    last = month_title(first - timedelta(days=1)) if first is not None else ""
     with ThreadPoolExecutor(max_workers=MONTH_SHEETS) as pool:
         month = pool.submit(gs.get_values, title, max_age)
-        previous = (
-            pool.submit(gs.get_values, month_title(first - timedelta(days=1)), max_age)
-            if first is not None
-            else None
+        before = (
+            pool.submit(gs.get_values, last, max_age) if previous and last else None
         )
         rates = pool.submit(gs.get_rates, max_age)
         fact = pool.submit(gs.get_values, config.FACT_SHEET_NAME, max_age)
@@ -1348,5 +1364,5 @@ def read_month_sheets(
             rates.result(),
             fact.result(),
             records.result() if records is not None else [],
-            _tab(previous),
+            _optional_tab(before, last),
         )
