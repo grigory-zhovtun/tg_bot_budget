@@ -523,6 +523,7 @@ async def save_rows(
     flags: Sequence[str | None] = (),
     prints: Sequence[str | None] = (),
     notes: Sequence[str] = (),
+    notify_failure: bool = True,
 ) -> SaveResult:
     """Записать строки в fact, обновить остатки, показать сводку в chat.
 
@@ -530,6 +531,8 @@ async def save_rows(
     запись», последняя запись и отпечаток входа — в user_data (для /undo и повторов).
     Для SMS: flags — пометка каждой строки (🆕, ❓ или None), prints — отпечаток SMS
     каждой строки (повтор этой SMS не запишется), notes — строки «⏭» в конце сводки.
+    notify_failure=False — таблица не приняла строки: в чат ничего, ответ — пустой
+    (Mini App повторит запись сам).
     """
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
     keys = state_of(context.bot_data, chat.id)
@@ -546,6 +549,8 @@ async def save_rows(
                 f"❌ Не записал в Google Таблицу ({len(rows)} шт.), попробуйте ещё раз"
             )
             failed.append(lines[-1])
+            if not notify_failure:
+                return SaveResult(0, None, None, tuple(lines))
             rows = []
         else:
             context.user_data[LAST_WRITE] = {

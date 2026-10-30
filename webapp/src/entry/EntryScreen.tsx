@@ -16,7 +16,7 @@ import {
   type Group,
   type Subcategory,
 } from "../api";
-import { dayLabel, shiftDay, withCurrency } from "../format";
+import { botDay, dayLabel, shiftDay, withCurrency } from "../format";
 import { useResource, useStore } from "../store";
 import { haptic, telegram } from "../telegram";
 import {
@@ -30,9 +30,11 @@ import { BIG_FIELD, ErrorLine, PRIMARY } from "../dashboard/controls";
 import Keypad from "./Keypad";
 import {
   dropPending,
-  enqueue,
+  enqueueSending,
+  finishSending,
   flushOutbox,
-  readOutbox,
+  stopsQueue,
+  unsent,
   type Pending,
 } from "./outbox";
 import { groupColor } from "./palette";
@@ -59,18 +61,21 @@ interface Props {
   wait?: Wait; // пауза перед повтором; тесты не ждут
 }
 
-/** Очередь на телефоне: что не ушло, с отказами сервера и «Удалить». */
+/** Очередь на телефоне: что не ушло, с отказами сервера и «Удалить» в два нажатия. */
 function Outbox({
   items,
   today,
+  busy,
   onSend,
   onDrop,
 }: {
   items: Pending[];
   today: string;
+  busy: boolean; // очередь отправляется — кнопка ждёт ответа
   onSend: () => void;
   onDrop: (entryId: string) => void;
 }) {
+  const [asked, setAsked] = useState<string | null>(null); // «Удалить» нажали раз
   const waiting = items.some((item) => !item.error);
   return (
     <section
@@ -80,28 +85,38 @@ function Outbox({
       <p className="text-fact font-extrabold">{`📤 Не отправлено: ${items.length}`}</p>
       {waiting && <p>отправлю, когда будет связь</p>}
       <ul className="flex flex-col gap-2">
-        {items.map((item) => (
-          <li key={item.entry.entry_id} className="flex flex-col gap-0.5">
-            <span className="font-bold">
-              {`${item.title}, ${dayLabel(item.entry.day ?? today, today).toLowerCase()}`}
-            </span>
-            {item.error && (
-              <>
-                <span className="font-extrabold text-danger">{`⚠️ ${item.error}`}</span>
-                <button
-                  type="button"
-                  className="min-h-11 self-start py-1 font-bold text-link"
-                  onClick={() => onDrop(item.entry.entry_id)}
-                >
-                  Удалить
-                </button>
-              </>
-            )}
-          </li>
-        ))}
+        {items.map((item) => {
+          const id = item.entry.entry_id;
+          const sure = asked === id;
+          return (
+            <li key={id} className="flex flex-col gap-0.5">
+              <span className="font-bold">
+                {`${item.title}, ${dayLabel(item.entry.day ?? today, today).toLowerCase()}`}
+              </span>
+              {item.error && (
+                <>
+                  <span className="font-extrabold text-danger">{`⚠️ ${item.error}`}</span>
+                  <button
+                    type="button"
+                    className={`min-h-11 self-start py-1 font-bold ${sure ? "text-danger" : "text-link"}`}
+                    onClick={() => (sure ? onDrop(id) : setAsked(id))}
+                  >
+                    {sure ? "Точно удалить" : "Удалить"}
+                  </button>
+                </>
+              )}
+            </li>
+          );
+        })}
       </ul>
       {waiting && (
-        <button type="button" className={PRIMARY} onClick={onSend}>
+        <button
+          type="button"
+          className={PRIMARY}
+          disabled={busy}
+          aria-busy={busy}
+          onClick={onSend}
+        >
           Отправить сейчас
         </button>
       )}
@@ -147,6 +162,7 @@ export default function EntryScreen({
   onCatalogChanged,
   wait = sleep,
 }: Props) {
+  const owner = boot.user.id;
   const fallbackSource = boot.default_source ?? boot.sources[0]?.name ?? "";
   // карта, выбранная на экране; null — по умолчанию из справочника: он мог прийти
   // из памяти телефона, а свежий — назвать другую карту
@@ -163,8 +179,9 @@ export default function EntryScreen({
   const [done, setDone] = useState<ExpenseResult | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [undoing, setUndoing] = useState(false);
-  const [outbox, setOutbox] = useState<Pending[]>(() => readOutbox());
-  const flushing = useRef(false); // одна отправка очереди за раз
+  const [outbox, setOutbox] = useState<Pending[]>(() => unsent(owner));
+  const [flushing, setFlushing] = useState(false); // очередь отправляется
+  const expired = useRef(false); // вход устарел: очередь — при новом открытии
   const inFlight = useRef(false); // второй тап до перерисовки не шлёт второй запрос
   const undoInFlight = useRef(false);
   const store = useStore();
@@ -202,22 +219,33 @@ export default function EntryScreen({
     reloadDashboard();
   }, [reloadDashboard, store]);
 
-  // очередь на телефоне: по одной попытке на трату; ушло — остатки перечитать
-  const flush = useCallback(() => {
-    if (flushing.current || readOutbox().every((item) => item.error)) return;
-    flushing.current = true;
-    flushOutbox(api)
-      .then(({ sent, items }) => {
-        setOutbox(items);
-        if (sent > 0) {
-          setNotice(`✅ Отправлено из очереди: ${sent}`);
-          loadPlan();
-        }
-      })
-      .finally(() => {
-        flushing.current = false;
-      });
-  }, [api, loadPlan]);
+  // очередь на телефоне: по одной попытке на трату; ушло — остатки перечитать.
+  // Пока идёт отмена — не шлём: сервер отменяет последнюю запись, а ею стала бы
+  // трата из очереди
+  const flush = useCallback(
+    (byHand = false) => {
+      if (expired.current || undoInFlight.current) return;
+      if (unsent(owner).every((item) => item.error)) return;
+      setFlushing(true);
+      flushOutbox(api, owner)
+        .then(({ sent, items, stopped }) => {
+          setOutbox(items);
+          if (stopped) {
+            expired.current = true;
+            setError(stopped.message);
+          }
+          if (sent > 0) {
+            setDone(null); // «Отменить» под сводкой отменило бы трату из очереди
+            setNotice(`✅ Отправлено из очереди: ${sent}`);
+            loadPlan();
+          } else if (byHand && !stopped && items.some((item) => !item.error)) {
+            setNotice("📵 Связи нет — трата ждёт на телефоне");
+          }
+        })
+        .finally(() => setFlushing(false));
+    },
+    [api, loadPlan, owner],
+  );
   const flushRef = useRef(flush);
   useEffect(() => {
     flushRef.current = flush;
@@ -264,8 +292,18 @@ export default function EntryScreen({
       comment: comment.trim(),
       ...(day ? { day } : {}),
     };
+    // трата на телефоне до первой попытки: закрыли приложение во время повторов —
+    // уйдёт при следующем открытии с датой нажатия (сегодня по боту)
+    enqueueSending(owner, {
+      entry: {
+        ...input,
+        day: input.day ?? botDay(boot.today, boot.utc_offset),
+      },
+      title: `${sub.name} ${withCurrency(value, currency)}`,
+    });
     sendExpense(api, input, wait)
       .then((result) => {
+        finishSending(owner, input.entry_id, false);
         haptic("success");
         loadPlan();
         setDone(result);
@@ -275,15 +313,18 @@ export default function EntryScreen({
         setStep("group");
       })
       .catch((reason: unknown) => {
-        if (retryable(reason)) {
-          // связи нет и после повторов: трата ждёт на телефоне со своей датой
-          setOutbox(
-            enqueue({
-              entry: { ...input, day: input.day ?? boot.today },
-              title: `${sub.name} ${withCurrency(value, currency)}`,
-            }),
-          );
-          setNotice("📤 Сохранено на телефоне — отправлю, когда будет связь");
+        // связи нет и после повторов или вход устарел: трата ждёт на телефоне
+        const keep = retryable(reason) || stopsQueue(reason);
+        finishSending(owner, input.entry_id, keep);
+        if (keep) {
+          setOutbox(unsent(owner));
+          if (stopsQueue(reason)) {
+            expired.current = true;
+            setError(reason.message);
+            setNotice(null);
+          } else {
+            setNotice("📤 Трата сохранена на телефоне");
+          }
           setDone(null);
           setGroup(null);
           setSub(null);
@@ -315,6 +356,7 @@ export default function EntryScreen({
     amount,
     api,
     boot.today,
+    boot.utc_offset,
     comment,
     currency,
     day,
@@ -322,6 +364,7 @@ export default function EntryScreen({
     group,
     loadPlan,
     onCatalogChanged,
+    owner,
     source,
     sub,
     value,
@@ -423,9 +466,13 @@ export default function EntryScreen({
       {outbox.length > 0 && (
         <Outbox
           items={outbox}
-          today={boot.today}
-          onSend={flush}
-          onDrop={(entryId) => setOutbox(dropPending(entryId))}
+          today={botDay(boot.today, boot.utc_offset)}
+          busy={flushing}
+          onSend={() => flush(true)}
+          onDrop={(entryId) => {
+            dropPending(owner, entryId);
+            setOutbox(unsent(owner));
+          }}
         />
       )}
       <SourceChips
@@ -444,7 +491,7 @@ export default function EntryScreen({
           <button
             type="button"
             className="min-h-11 self-start py-1 text-line font-bold text-danger disabled:opacity-50"
-            disabled={undoing}
+            disabled={undoing || flushing}
             aria-busy={undoing}
             onClick={undo}
           >

@@ -21,6 +21,7 @@ export interface Bootstrap {
   user: { id: number; first_name: string };
   bot_username: string;
   today: string;
+  utc_offset?: number; // минут к востоку от UTC у бота; нет — справочник из старой копии
   default_source: string | null;
   sources: Source[];
   groups: Group[];
