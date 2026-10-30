@@ -55,6 +55,21 @@ function Summary({ spending, today, planPerDay }: Omit<Props, "limit">) {
   );
 }
 
+/** Сколько можно в день впереди — в легенде, как план: над столбиками к концу
+ * месяца справа от сегодня места нет, и подпись ложилась на прошлые дни. Длинная
+ * сумма переносится строкой ниже, а не уходит за экран. */
+function Ahead({ limit }: { limit: number }) {
+  if (limit <= 0) {
+    return <span className="font-extrabold text-danger">лимита нет</span>;
+  }
+  return (
+    <span className="flex items-center gap-1.5">
+      <i className="inline-block h-4 w-3 shrink-0 rounded-[3px] border-2 border-dashed border-hint" />
+      {`можно ${money(limit)} в день`}
+    </span>
+  );
+}
+
 /** Траты каждого дня против лимита этого дня; впереди — сколько можно в день. */
 export default function SpendingChart({
   spending,
@@ -80,12 +95,6 @@ export default function SpendingChart({
     (top, bar) => (bar.value > (top?.value ?? 0) ? bar : top),
     null,
   );
-  const ahead = bars.find((bar) => bar.state === "ahead");
-  const aheadText =
-    ahead && limit !== null ? `можно ${money(limit)} в день` : "лимита нет";
-  // подпись про дни впереди — от сегодняшнего дня вправо, если влезает, иначе у края
-  const aheadX = now * slot;
-  const aheadLeft = aheadX + 2 + labelWidth(aheadText) <= WIDTH;
   const peakText = peak ? money(peak.value) : "";
   const labels = [...LABEL_DAYS, month].filter(
     (day) => Math.abs(day - now) >= 3,
@@ -165,19 +174,6 @@ export default function SpendingChart({
             {peakText}
           </text>
         )}
-        {now < month && limit !== null && (
-          <text
-            x={aheadLeft ? aheadX + 2 : WIDTH - 2}
-            y={ahead ? ahead.y - 5 : SIZE.top + 8}
-            fontSize={FONT}
-            fontWeight={700}
-            textAnchor={aheadLeft ? "start" : "end"}
-            fill={ahead ? "var(--color-text)" : "var(--color-danger)"}
-            {...HALO}
-          >
-            {aheadText}
-          </text>
-        )}
         {[...labels, now].map((day) => (
           <text
             key={`day-${day}`}
@@ -210,6 +206,7 @@ export default function SpendingChart({
             {`план ${money(planPerDay)} в день`}
           </span>
         )}
+        {now < month && limit !== null && <Ahead limit={limit} />}
       </figcaption>
     </figure>
   );

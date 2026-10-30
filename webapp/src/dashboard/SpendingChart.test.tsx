@@ -68,11 +68,33 @@ describe("SpendingChart", () => {
     ).toContain("whitespace-nowrap");
   });
 
-  it("keeps a long label inside the chart", () => {
+  it("says what is left per day ahead in the legend, off the bars", () => {
+    const month = Array.from({ length: 30 }, (_, index) => ({
+      day: `2026-10-${String(index + 1).padStart(2, "0")}`,
+      spent: 300_000,
+      limit: 250_000,
+    }));
+    show(month, "2026-10-30", 75_000);
+    // конец месяца: справа от сегодня места нет — подпись не ложится на прошлые дни
+    const label = screen.getByText("можно 75 000 в день");
+    expect(label.closest("svg")).toBeNull();
+    expect(label.closest("figcaption")).not.toBeNull();
+    // значок — пунктирный столбик, как дни впереди на графике
+    expect(label.querySelector("i")?.className).toContain("border-dashed");
+  });
+
+  it("lets a long sum ahead move to the next line instead of off the screen", () => {
     show(dashboardFixture.spending.slice(0, 4), "2026-10-15", 12_345_678);
     const label = screen.getByText("можно 12 345 678 в день");
-    // середина месяца, длинная сумма: подпись прижата к правому краю, а не уходит за него
-    expect(label.getAttribute("text-anchor")).toBe("end");
-    expect(label.getAttribute("x")).toBe("318");
+    expect(label.closest("figcaption")).not.toBeNull();
+    expect(label.className).not.toContain("whitespace-nowrap");
+  });
+
+  it("says there is no limit ahead in the legend", () => {
+    show(dashboardFixture.spending, "2026-10-10", -50_000);
+    const label = screen.getByText("лимита нет");
+    expect(label.closest("svg")).toBeNull();
+    expect(label.closest("figcaption")).not.toBeNull();
+    expect(label.className).toContain("text-danger");
   });
 });
