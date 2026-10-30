@@ -633,6 +633,86 @@ def test_a_salary_that_came_today_keeps_the_morning_limit() -> None:
     assert day.upcoming == ()  # а в «Впереди» её уже нет
 
 
+SALARY_TODAY = fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000)
+
+
+def test_on_the_salary_day_the_limit_runs_from_tomorrow() -> None:
+    cafe = fact_row(date(2026, 10, 30), "🍔 ЕДА", "кафе", 300_000)  # после зарплаты
+    day = budget(date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, SALARY_TODAY, cafe)
+    assert day.tomorrow is not None
+    # с 31 октября по 30 ноября: сумы на сейчас и аванс 15 ноября
+    assert (day.tomorrow.payday, day.tomorrow.days) == (date(2026, 11, 30), 31)
+    assert day.tomorrow.sums == 16_700_000  # по 30.10 включительно, с кафе
+    assert (day.tomorrow.advances, day.tomorrow.advance_on) == (
+        2_000_000,
+        date(2026, 11, 15),
+    )
+    assert day.tomorrow.limit == pytest.approx(18_700_000 / 31)
+    assert (day.salary_came, day.salary_name) == (10_000_000, "ЗП")
+    assert day.limit == pytest.approx(9_000_000 / 32)  # утренний лимит — прежний
+
+
+def test_a_salary_on_the_last_day_runs_to_next_months_salary() -> None:
+    advance = fact_row(date(2026, 11, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000)
+    salary = fact_row(date(2026, 11, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000)
+    day = budget(date(2026, 11, 30), advance, salary)
+    assert day.tomorrow is not None
+    # 1 декабря — строки вкладки на те же дни декабря, ещё не пришли: с 1 по 30 декабря
+    # и аванс 15 декабря, а не до ЗП 30 января
+    assert (day.tomorrow.payday, day.tomorrow.days) == (date(2026, 12, 30), 30)
+    assert (day.tomorrow.advances, day.tomorrow.advance_on) == (
+        2_000_000,
+        date(2026, 12, 15),
+    )
+    assert day.tomorrow.limit == pytest.approx(19_000_000 / 30)
+
+
+def test_a_salary_from_yesterday_is_the_morning_limit() -> None:
+    assert budget(date(2026, 10, 31), ADVANCE_PAID, SALARY_TODAY).tomorrow is None
+    # записали сегодня вчерашней датой: к утру она уже пришла — лимит утра её считает
+    early = fact_row(date(2026, 10, 29), "💰 ДОХОДЫ", "зарплата", 10_000_000)
+    day = budget(date(2026, 10, 30), ADVANCE_PAID, early)
+    assert day.tomorrow is None
+    assert day.limit == pytest.approx(19_000_000 / 32)
+
+
+def test_no_tomorrow_until_the_salary_comes() -> None:
+    assert budget(date(2026, 10, 30), ADVANCE_PAID).tomorrow is None
+    half = fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 5_000_000)
+    day = budget(date(2026, 10, 30), ADVANCE_PAID, half)
+    assert (day.tomorrow, day.salary_came, day.salary_name) == (None, 0, "")
+
+
+def test_the_salary_in_two_parts_today_runs_from_tomorrow() -> None:
+    parts = [
+        fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 6_000_000),
+        fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 4_000_000),
+    ]
+    day = budget(date(2026, 10, 30), ADVANCE_PAID, *parts)
+    assert day.tomorrow is not None
+    assert day.salary_came == 10_000_000
+
+
+def test_two_salaries_a_month_run_from_tomorrow_to_the_next_one() -> None:
+    twice = [("ЗП", 15, 5_000_000, "UZS"), ("ЗП", 30, 5_000_000, "UZS")]
+    paid = fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 5_000_000)
+    day = budget(date(2026, 10, 15), paid, items=twice)
+    assert day.tomorrow is not None
+    assert (day.tomorrow.payday, day.tomorrow.days) == (date(2026, 10, 30), 15)
+    assert day.salary_came == 5_000_000
+
+
+def test_without_a_main_salary_the_advance_runs_from_tomorrow() -> None:
+    only = [("Аванс", 15, 2_000_000, "UZS")]
+    day = budget(date(2026, 10, 15), ADVANCE_PAID, items=only)
+    assert day.tomorrow is not None
+    assert (day.tomorrow.payday, day.tomorrow.payday_name) == (
+        date(2026, 11, 15),
+        "Аванс",
+    )
+    assert (day.salary_came, day.salary_name) == (2_000_000, "Аванс")
+
+
 def test_a_payment_a_bit_off_its_sum_does_not_eat_the_day() -> None:
     rent = fact_row(date(2026, 10, 18), "🏚️ ДОМ", "квартплата", 390, "USD")
     cafe = fact_row(date(2026, 10, 18), "🍔 ЕДА", "кафе", 50_000)

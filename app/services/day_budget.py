@@ -15,6 +15,11 @@
 строка у графика «Траты». Ячейка лимита во вкладке месяца считает план до конца
 месяца — это другое число.
 
+С завтра: в день прихода зарплаты (её строка закрыта на сейчас, а к утру — нет)
+утренний лимит устарел — рядом считается лимит завтрашнего дня по деньгам на сейчас:
+сумы по сегодня, срок с завтра по следующую зарплату. Завтра 1-е число — строки
+вкладки на те же дни следующего месяца, ещё не пришедшие.
+
 Заморожено — карты в валюте заморозки (долларовая) без платежей в этой валюте,
 которые ещё впереди. Лимит эти деньги не тратит: он считает только сумы, а доллары
 входят в него, когда их обменяли на сумы.
@@ -95,6 +100,24 @@ class DaySpend:
 
 
 @dataclass(frozen=True)
+class Allowance:
+    """Лимит дня по деньгам: сумы и авансы минус платежи до зарплаты на дни по неё;
+    при страховке — по день аванса без него."""
+
+    limit: float
+    sums: float
+    bills: float
+    subscriptions: float  # часть bills: подписки вне списка
+    payday: date | None
+    payday_name: str
+    days: int
+    advances: float = 0.0  # авансы срока: прибавлены к деньгам
+    advance_on: date | None = None  # первый из них; None — авансов в сроке нет
+    salary_subscriptions: float = 0.0  # подписки по день основной зарплаты — Q5 вкладки
+    advance_subscriptions: float | None = None  # по день аванса — R5; None — его нет
+
+
+@dataclass(frozen=True)
 class DayBudget:
     today: date
     limit: (
@@ -129,24 +152,11 @@ class DayBudget:
     )
     payday_name: str = ""  # её строка списка: «Аванс», «ЗП»
     plan_gap: float | None = None  # траты дня с 1-го по вчера минус план; None — 1-е
-
-
-@dataclass(frozen=True)
-class Allowance:
-    """Лимит дня по деньгам: сумы и авансы минус платежи до зарплаты на дни по неё;
-    при страховке — по день аванса без него."""
-
-    limit: float
-    sums: float
-    bills: float
-    subscriptions: float  # часть bills: подписки вне списка
-    payday: date | None
-    payday_name: str
-    days: int
-    advances: float = 0.0  # авансы срока: прибавлены к деньгам
-    advance_on: date | None = None  # первый из них; None — авансов в сроке нет
-    salary_subscriptions: float = 0.0  # подписки по день основной зарплаты — Q5 вкладки
-    advance_subscriptions: float | None = None  # по день аванса — R5; None — его нет
+    # день прихода зарплаты: лимит с завтра по деньгам на сейчас (утренний устарел);
+    # None — зарплата сегодня не приходила
+    tomorrow: Allowance | None = None
+    salary_came: float = 0.0  # сколько пришло по закрывшейся сегодня строке
+    salary_name: str = ""  # её название
 
 
 def _number(value: Any) -> float | None:
@@ -481,8 +491,14 @@ def day_budget(
     carried = carried_items(previous, frame, first)
 
     def allowance_on(day: date) -> Allowance:
-        """Лимит дня day: сумы на вечер накануне, авансы, платежи и дни до зарплаты."""
-        receipts = match_receipts(frame, items, first, day - timedelta(days=1), carried)
+        """Лимит дня day: сумы на вечер накануне, авансы, платежи и дни до зарплаты.
+        День следующего месяца (с завтра в последний день): его строки ещё не пришли —
+        сверка пустая, строки вкладки — те же дни следующего месяца целиком."""
+        receipts: Mapping[int, Receipt] = {}
+        if (day.year, day.month) == (first.year, first.month):
+            receipts = match_receipts(
+                frame, items, first, day - timedelta(days=1), carried
+            )
         payday, name = _payday(salaries, receipts, day)
         # день зарплаты — тоже: её могут начислить и вечером
         until = (payday or month_end) + timedelta(days=1)
@@ -529,9 +545,21 @@ def day_budget(
 
     passed = yesterday.day if yesterday >= first else 0
     now_allowance = allowance_on(today)
-    morning = _ahead(items, match_receipts(frame, items, first, yesterday, carried))
+    early = match_receipts(frame, items, first, yesterday, carried)
+    morning = _ahead(items, early)
     now = match_receipts(frame, items, first, today, carried)
     paid = frozenset(index for receipt in now.values() for index in receipt.operations)
+    # зарплата пришла сегодня: строка закрыта на сейчас, а к утру — нет
+    came = next(
+        (
+            item
+            for item in salaries
+            if closed(item, now.get(item.row, NOTHING))
+            and not closed(item, early.get(item.row, NOTHING))
+        ),
+        None,
+    )
+    tomorrow = allowance_on(today + timedelta(days=1)) if came else None
 
     frozen, change, frozen_uzs = None, 0.0, 0.0
     rate = rates.to_uzs.get(frozen_currency) if frozen_currency else None
@@ -601,6 +629,9 @@ def day_budget(
         payday=now_allowance.payday,
         payday_name=now_allowance.payday_name,
         plan_gap=done - per_day * passed if passed else None,
+        tomorrow=tomorrow,
+        salary_came=now[came.row].received if came else 0.0,
+        salary_name=came.name if came else "",
     )
 
 
