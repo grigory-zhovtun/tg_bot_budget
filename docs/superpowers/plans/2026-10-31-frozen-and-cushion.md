@@ -711,12 +711,12 @@ def test_the_frozen_card_adds_up() -> None:
 ```
 
 **Q10 — стало.** Локаль `ru_RU`: аргументы через `;`, дробь через запятую. Обозначения:
-- `upto` — срок 1.5 по T: самая ранняя открытая строка ЗП (основных нет — аванса), не раньше сегодня; иначе первая строка ЗП в следующем месяце; строк нет — `$M$2`;
+- `upto` — срок 1.5 по T: самая ранняя открытая строка ЗП (основных нет — аванса), не раньше сегодня; опоздавшая строка, по которой пришла часть денег, пропускается — ждём следующую, как `_sums_payday` (правка исполнителя 31.10); иначе первая строка ЗП в следующем месяце; строк нет — `$M$2`;
 - `bills` — открытые по T долларовые платежи этого месяца по `upto`;
 - `later` — строки следующего месяца целиком.
 
 ```
-=ARRAYFORMULA(LET(td;$P$1;qs;$Q$12:$Q$19;cur;$R$12:$R$19;ds;$P$12:$P$19;nm;LOWER($O$12:$O$19);got;IF($T$12:$T$19="";0;$T$12:$T$19);isopen;ABS(got)<0,9*ABS(qs);dues;IF(DATE(YEAR(td);MONTH(td);ds)>$M$2;$M$2;DATE(YEAR(td);MONTH(td);ds));plus;(qs>0)*(cur="UZS");isadv;plus*REGEXMATCH(nm;"аванс");ismain;plus*REGEXMATCH(nm;"зарплат|(^|[^а-яё])зп([^а-яё]|$)")*(1-REGEXMATCH(nm;"аванс"));salary;IF(SUM(ismain)>0;ismain;isadv)>0;here;IFERROR(MIN(FILTER(dues;salary;isopen));0);firstday;IFERROR(MIN(FILTER(ds;salary));0);upto;IF(here>0;MAX(here;td);IF(firstday>0;MIN(DATE(YEAR($M$2);MONTH($M$2)+1;firstday);EOMONTH($M$2;1));$M$2));nexts;IF(DATE(YEAR($M$2);MONTH($M$2)+1;ds)>EOMONTH($M$2;1);EOMONTH($M$2;1);DATE(YEAR($M$2);MONTH($M$2)+1;ds));usd;SUMIFS(fact!$D:$D;fact!$G:$G;"USD";fact!$A:$A;"<"&td;fact!$B:$B;"💰 ДОХОДЫ")-SUMIFS(fact!$D:$D;fact!$G:$G;"USD";fact!$A:$A;"<"&td;fact!$B:$B;"<>💰 ДОХОДЫ");bills;SUMPRODUCT((qs<0)*(cur="USD")*isopen*(dues<=upto)*(got-qs));later;IF(upto>$M$2;SUMPRODUCT((qs<0)*(cur="USD")*(nexts<=upto)*(-qs));0);usd-bills-later))
+=ARRAYFORMULA(LET(td;$P$1;qs;$Q$12:$Q$19;cur;$R$12:$R$19;ds;$P$12:$P$19;nm;LOWER($O$12:$O$19);got;IF($T$12:$T$19="";0;$T$12:$T$19);isopen;ABS(got)<0,9*ABS(qs);dues;IF(DATE(YEAR(td);MONTH(td);ds)>$M$2;$M$2;DATE(YEAR(td);MONTH(td);ds));plus;(qs>0)*(cur="UZS");isadv;plus*REGEXMATCH(nm;"аванс");ismain;plus*REGEXMATCH(nm;"зарплат|(^|[^а-яё])зп([^а-яё]|$)")*(1-REGEXMATCH(nm;"аванс"));salary;IF(SUM(ismain)>0;ismain;isadv)>0;here;IFERROR(MIN(FILTER(dues;salary;isopen;((dues>=td)+(got=0))>0));0);firstday;IFERROR(MIN(FILTER(ds;salary));0);upto;IF(here>0;MAX(here;td);IF(firstday>0;MIN(DATE(YEAR($M$2);MONTH($M$2)+1;firstday);EOMONTH($M$2;1));$M$2));nexts;IF(DATE(YEAR($M$2);MONTH($M$2)+1;ds)>EOMONTH($M$2;1);EOMONTH($M$2;1);DATE(YEAR($M$2);MONTH($M$2)+1;ds));usd;SUMIFS(fact!$D:$D;fact!$G:$G;"USD";fact!$A:$A;"<"&td;fact!$B:$B;"💰 ДОХОДЫ")-SUMIFS(fact!$D:$D;fact!$G:$G;"USD";fact!$A:$A;"<"&td;fact!$B:$B;"<>💰 ДОХОДЫ");bills;SUMPRODUCT((qs<0)*(cur="USD")*isopen*(dues<=upto)*(got-qs));later;IF(upto>$M$2;SUMPRODUCT((qs<0)*(cur="USD")*(nexts<=upto)*(-qs));0);usd-bills-later))
 ```
 
 **O10:** «🧊 Заморожено: доллары без платежей в USD до зарплаты (подушка и копилки)».
