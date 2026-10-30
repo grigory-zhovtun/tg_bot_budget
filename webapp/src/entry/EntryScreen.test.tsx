@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -24,8 +25,14 @@ import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
 import { nb } from "../test/text";
 import EntryScreen from "./EntryScreen";
+import { enqueue, readOutbox, writeOutbox } from "./outbox";
 
 type User = ReturnType<typeof userEvent.setup>;
+
+const OWNER = bootstrapFixture.user.id;
+
+// повторы без пауз: тесты не ждут 2 и 5 секунд
+const noWait = () => Promise.resolve();
 
 function renderEntry(api: Api, onCatalogChanged: () => void = vi.fn()): void {
   render(
@@ -33,6 +40,7 @@ function renderEntry(api: Api, onCatalogChanged: () => void = vi.fn()): void {
       api={api}
       boot={bootstrapFixture}
       onCatalogChanged={onCatalogChanged}
+      wait={noWait}
     />,
   );
 }
@@ -54,6 +62,17 @@ function tilePlan(name: string): string | null {
   return note ? (note.textContent ?? "") : null;
 }
 
+function sentLike(id: string): ExpenseInput {
+  return {
+    entry_id: id,
+    source: "VISA 9090 UZS",
+    category: "🍔 ЕДА",
+    subcategory: "кофе",
+    amount: "48000",
+    comment: "",
+  };
+}
+
 function sent(api: Api, call = 0): ExpenseInput {
   const input = vi.mocked(api.addExpense).mock.calls[call]?.[0];
   if (!input) throw new Error("addExpense was not called");
@@ -63,6 +82,8 @@ function sent(api: Api, call = 0): ExpenseInput {
 describe("EntryScreen", () => {
   afterEach(() => {
     vi.useRealTimers();
+    writeOutbox(OWNER, []);
+    localStorage.clear();
   });
 
   it("records an expense and comes back to the groups", async () => {
@@ -113,7 +134,7 @@ describe("EntryScreen", () => {
     expect(sent(api).day).toBe("2026-10-09");
   });
 
-  it("keeps the input and the entry id when the sheet is down", async () => {
+  it("sends again by itself with the same entry id when the sheet is down", async () => {
     const addExpense = vi
       .fn<Api["addExpense"]>()
       .mockRejectedValueOnce(
@@ -129,13 +150,244 @@ describe("EntryScreen", () => {
     renderEntry(api);
     await fillCoffee(user);
     await user.click(screen.getByRole("button", { name: /Записать/ }));
-    expect((await screen.findByRole("alert")).textContent).toBe(
-      "Таблица не ответила — попробуйте ещё раз",
-    );
-    await user.click(
-      screen.getByRole("button", { name: /Записать 48\s000 UZS/ }),
-    );
+    expect(await screen.findByText(/✅ 48 000 UZS/)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
     expect(sent(api, 1).entry_id).toBe(sent(api, 0).entry_id);
+  });
+
+  it("keeps the expense on the phone when there is no connection", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-10T12:00:00Z"));
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(
+        new ApiError(0, "network", "Нет связи с сервером — проверьте интернет"),
+      );
+    const api = fakeApi({ addExpense });
+    const user = userEvent.setup();
+    renderEntry(api);
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    expect(
+      await screen.findByText("📤 Трата сохранена на телефоне"),
+    ).toBeTruthy();
+    expect(addExpense).toHaveBeenCalledTimes(3);
+    const queue = screen.getByRole("region", { name: "Не отправлено" });
+    expect(queue.textContent).toContain("📤 Не отправлено: 1");
+    expect(queue.textContent?.replace(/\s/g, " ")).toContain(
+      "кофе 48 000 UZS, сегодня",
+    );
+    // форма — снова с групп; дата в очереди — сегодня по боту
+    expect(screen.getByRole("button", { name: "ЕДА" })).toBeTruthy();
+    expect(readOutbox(OWNER)[0]?.entry.day).toBe(bootstrapFixture.today);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("dates a kept expense by the bot's day at the tap", async () => {
+    // приложение открыли 10-го, трату ввели в 00:30 по Ташкенту уже 12-го
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-11T19:30:00Z"));
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(new ApiError(0, "network", "Нет связи"));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await screen.findByText("📤 Трата сохранена на телефоне");
+    expect(readOutbox(OWNER)[0]?.entry.day).toBe("2026-10-12");
+    // сам запрос — без даты: её ставит бот
+    expect(addExpense.mock.calls[0]?.[0].day).toBeUndefined();
+  });
+
+  it("keeps the expense on the phone while it is being sent", async () => {
+    // приложение закрыли во время повторов — трата уйдёт при следующем открытии
+    const addExpense = vi.fn<Api["addExpense"]>(() => new Promise(() => {}));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    expect(
+      readOutbox(OWNER).map((item) => item.title.replace(/\s/g, " ")),
+    ).toEqual(["кофе 48 000 UZS"]);
+    expect(screen.queryByRole("region", { name: "Не отправлено" })).toBeNull();
+  });
+
+  it("sends the queue when the phone is back online", async () => {
+    enqueue(OWNER, {
+      entry: { ...sentLike("q1"), day: bootstrapFixture.today },
+      title: "кофе 48 000 UZS",
+    });
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValueOnce(new ApiError(0, "network", "Нет связи"))
+      .mockResolvedValueOnce(writtenFixture);
+    renderEntry(fakeApi({ addExpense }));
+    await waitFor(() => expect(addExpense).toHaveBeenCalledTimes(1));
+    expect(
+      screen.getByRole("region", { name: "Не отправлено" }).textContent,
+    ).toContain("📤 Не отправлено: 1");
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(await screen.findByText("✅ Отправлено из очереди: 1")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Не отправлено" })).toBeNull();
+    expect(addExpense.mock.calls[1]?.[0].entry_id).toBe("q1");
+  });
+
+  it("shows why the server refused and deletes after a second tap", async () => {
+    enqueue(OWNER, {
+      entry: { ...sentLike("q2"), day: "2026-08-01" },
+      title: "кофе 48 000 UZS",
+    });
+    const day = "Дата — не раньше чем 31 день назад и не позже сегодня";
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(
+        new ApiError(422, "validation", "Проверьте введённые данные", { day }),
+      );
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    const queue = await screen.findByRole("region", { name: "Не отправлено" });
+    expect(await within(queue).findByText(`⚠️ ${day}`)).toBeTruthy();
+    await user.click(within(queue).getByRole("button", { name: "Удалить" }));
+    expect(readOutbox(OWNER)).toHaveLength(1);
+    await user.click(
+      within(queue).getByRole("button", { name: "Точно удалить" }),
+    );
+    expect(screen.queryByRole("region", { name: "Не отправлено" })).toBeNull();
+    expect(readOutbox(OWNER)).toEqual([]);
+  });
+
+  it("keeps the expense unmarked when the login expired", async () => {
+    enqueue(OWNER, {
+      entry: { ...sentLike("q3"), day: bootstrapFixture.today },
+      title: "кофе 48 000 UZS",
+    });
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(
+        new ApiError(401, "unauthorized", "Откройте приложение заново из бота"),
+      );
+    renderEntry(fakeApi({ addExpense }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Откройте приложение заново из бота",
+    );
+    const queue = screen.getByRole("region", { name: "Не отправлено" });
+    expect(queue.textContent).not.toContain("⚠️");
+    expect(within(queue).queryByRole("button", { name: "Удалить" })).toBeNull();
+    // до нового открытия приложения больше не шлём
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(addExpense).toHaveBeenCalledTimes(1);
+    expect(readOutbox(OWNER)[0]?.error).toBeUndefined();
+  });
+
+  it("sends the queue when the app is back on the screen", async () => {
+    enqueue(OWNER, {
+      entry: { ...sentLike("q4"), day: bootstrapFixture.today },
+      title: "кофе 48 000 UZS",
+    });
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValueOnce(new ApiError(0, "network", "Нет связи"))
+      .mockResolvedValueOnce(writtenFixture);
+    renderEntry(fakeApi({ addExpense }));
+    await waitFor(() => expect(addExpense).toHaveBeenCalledTimes(1));
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(await screen.findByText("✅ Отправлено из очереди: 1")).toBeTruthy();
+  });
+
+  it("waits for «Отправить сейчас» and says when there is no connection", async () => {
+    enqueue(OWNER, {
+      entry: { ...sentLike("q5"), day: bootstrapFixture.today },
+      title: "кофе 48 000 UZS",
+    });
+    let fail: (reason: unknown) => void = () => undefined;
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValueOnce(new ApiError(0, "network", "Нет связи"))
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            fail = reject;
+          }),
+      );
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await waitFor(() => expect(addExpense).toHaveBeenCalledTimes(1));
+    const button = await screen.findByRole("button", {
+      name: "Отправить сейчас",
+    });
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+    await user.click(button);
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    await act(async () => {
+      fail(new ApiError(0, "network", "Нет связи"));
+    });
+    expect(
+      await screen.findByText("📵 Связи нет — трата ждёт на телефоне"),
+    ).toBeTruthy();
+  });
+
+  it("drops «Отменить» once the queue sent an expense", async () => {
+    // сервер отменяет последнюю запись — ею стала трата из очереди
+    const user = userEvent.setup();
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockResolvedValue(writtenFixture);
+    renderEntry(fakeApi({ addExpense }));
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    expect(
+      await screen.findByRole("button", { name: "↩️ Отменить" }),
+    ).toBeTruthy();
+    enqueue(OWNER, {
+      entry: { ...sentLike("q6"), day: bootstrapFixture.today },
+      title: "кофе 48 000 UZS",
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(await screen.findByText("✅ Отправлено из очереди: 1")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "↩️ Отменить" })).toBeNull();
+  });
+
+  it("holds «Отменить» while the queue is being sent", async () => {
+    const user = userEvent.setup();
+    let finish: (result: ExpenseResult) => void = () => undefined;
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockResolvedValueOnce(writtenFixture)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+    renderEntry(fakeApi({ addExpense }));
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    const undo = await screen.findByRole("button", { name: "↩️ Отменить" });
+    enqueue(OWNER, {
+      entry: { ...sentLike("q7"), day: bootstrapFixture.today },
+      title: "кофе 48 000 UZS",
+    });
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(undo.hasAttribute("disabled")).toBe(true);
+    await act(async () => {
+      finish(writtenFixture);
+    });
   });
 
   it("sends one request when the button is tapped twice", async () => {
@@ -471,9 +723,7 @@ describe("EntryScreen", () => {
   it("writes an error at 17 px", async () => {
     const addExpense = vi
       .fn<Api["addExpense"]>()
-      .mockRejectedValue(
-        new ApiError(503, "sheets_unavailable", "Таблица не ответила"),
-      );
+      .mockRejectedValue(new ApiError(400, "bad_amount", "Сумма не читается"));
     const user = userEvent.setup();
     renderEntry(fakeApi({ addExpense }));
     await fillCoffee(user);

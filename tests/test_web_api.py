@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -119,6 +120,13 @@ def test_bootstrap_does_not_touch_the_sheet() -> None:
     application = make_application(sheets=object())  # любой вызов таблицы упал бы
     response = client_for(application).get("/api/bootstrap", headers=auth())
     assert response.status_code == 200
+
+
+def test_bootstrap_gives_the_bots_offset_from_utc() -> None:
+    # по нему приложение знает «сегодня по боту» в момент нажатия, а не открытия
+    body = client_for(make_application()).get("/api/bootstrap", headers=auth()).json()
+    now = datetime.now(ZoneInfo(config.ANALYTICS_TIMEZONE))
+    assert body["utc_offset"] == now.utcoffset() // timedelta(minutes=1)
 
 
 def test_expense_is_written_like_a_manual_entry() -> None:
@@ -240,6 +248,38 @@ def test_sheet_failure_is_503_and_the_retry_writes() -> None:
     )
     retried = client.post("/api/expenses", json=body, headers=auth())
     assert retried.json()["status"] == "written"
+    assert len(sheets.rows) == 1
+
+
+def test_a_failed_sheet_write_sends_nothing_to_the_chat() -> None:
+    # приложение повторит запись или оставит её на телефоне: «❌ Не записал… попробуйте
+    # ещё раз» в чате на каждую попытку — лишнее
+    class DownSheets(FakeSheets):
+        def append_transactions(self, rows: list[Any]) -> tuple[int, int]:
+            raise ConnectionError("Google is down")
+
+    application = make_application(DownSheets())
+    response = client_for(application).post(
+        "/api/expenses", json=expense(), headers=auth()
+    )
+    assert response.status_code == 503
+    application.bot.send_message.assert_not_awaited()
+
+
+def test_a_written_expense_is_a_duplicate_even_after_the_catalog_changed() -> None:
+    # ответ потерялся, трата ждала на телефоне, а подкатегорию за это время убрали:
+    # повтор — «уже записано», а не отказ, иначе её удалили бы и ввели заново
+    sheets = FakeSheets()
+    application = make_application(sheets)
+    client = client_for(application)
+    body = expense()
+    assert client.post("/api/expenses", json=body, headers=auth()).status_code == 200
+    application.bot_data["subcategories"] = {
+        **SUBCATEGORIES,
+        "🍔 ЕДА": [s for s in SUBCATEGORIES["🍔 ЕДА"] if s != "кофе"],
+    }
+    again = client.post("/api/expenses", json=body, headers=auth())
+    assert (again.status_code, again.json()["status"]) == (200, "duplicate")
     assert len(sheets.rows) == 1
 
 
