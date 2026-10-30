@@ -137,9 +137,31 @@ def test_on_the_advance_day_before_it_comes_the_limit_lasts_until_the_salary() -
         "ЗП",
         16,
     )
-    # аванс сегодня, а денег ещё нет — не ждём, как зарплату
-    assert day.advances == 0
-    assert day.limit == pytest.approx(5_000_000 / 16)
+    # аванс сегодня, денег ещё нет — он в деньгах срока: его день живём на то, что
+    # есть (страховка — один сегодняшний день), а лимит не проседает на день
+    assert (day.advances, day.advance_on) == (2_000_000, date(2026, 10, 15))
+    assert day.limit == pytest.approx(7_000_000 / 16)
+
+
+def test_the_limit_does_not_dip_on_the_advance_day() -> None:
+    cafe = [
+        fact_row(date(2026, 10, day), "🍔 ЕДА", "кафе", 200_000) for day in range(1, 15)
+    ]
+    day = budget(date(2026, 10, 16), *cafe, ADVANCE_PAID)
+    # 14-го, 15-го и 16-го — одни и те же деньги: сумы и аванс на дни по ЗП
+    assert [round(item.limit) for item in day.history[13:16]] == [
+        round((5_000_000 - 2_600_000 + 2_000_000) / 17),
+        round((5_000_000 - 2_800_000 + 2_000_000) / 16),
+        round((5_000_000 - 2_800_000 + 2_000_000) / 15),
+    ]
+
+
+def test_only_the_rest_of_a_partly_paid_advance_is_added() -> None:
+    # миллион аванса пришёл 10-го: 12-го в деньгах срока — только второй миллион
+    part = fact_row(date(2026, 10, 10), "💰 ДОХОДЫ", "зарплата", 1_000_000)
+    day = budget(date(2026, 10, 12), part)
+    assert (day.advances, day.advance_on) == (1_000_000, date(2026, 10, 15))
+    assert day.limit == pytest.approx((6_000_000 + 1_000_000) / 19)
 
 
 def test_the_advance_that_came_counts_from_the_next_morning() -> None:
@@ -190,6 +212,21 @@ def test_the_guard_keeps_the_advance_money_until_it_comes() -> None:
     )
     assert (day.advances, day.advance_on, day.bills) == (0, None, 4_600_000)
     assert day.limit == pytest.approx(400_000 / 15)
+    # для формулы вкладки: Q — подписки по день ЗП, R — по день аванса, и при страховке
+    cloud = [
+        charge(date(2026, 8, 20), 50_000, "CLOUD STORAGE"),
+        charge(date(2026, 9, 20), 50_000, "CLOUD STORAGE"),
+    ]
+    paper = [
+        charge(date(2026, 8, 5), 30_000, "PAPER PRESS"),
+        charge(date(2026, 9, 5), 30_000, "PAPER PRESS"),
+    ]
+    guarded = budget(date(2026, 10, 1), *cloud, *paper, items=repair)
+    assert guarded.payday_name == "Аванс"
+    assert (guarded.salary_subscriptions, guarded.advance_subscriptions) == (
+        pytest.approx(80_000),
+        pytest.approx(30_000),
+    )
 
 
 def test_without_a_salary_row_the_advance_sets_the_horizon() -> None:

@@ -40,6 +40,27 @@ describe("DashboardScreen", () => {
     ]);
   });
 
+  it("counts to the advance when the money before it is short", async () => {
+    // страховка: срок — до аванса, строки аванса в таблице нет
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      sums: 5_000_000,
+      bills: 4_600_000,
+      days_left: 6,
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    const source = await screen.findByRole("table", { name: "Откуда лимит" });
+    expect(
+      within(source)
+        .getAllByRole("row")
+        .map((row) => row.textContent?.replace(/\s/g, " ")),
+    ).toEqual([
+      "сумы утром5 000 000",
+      "платежи до 15.10−4 600 000",
+      "на 6 дней400 000",
+    ]);
+  });
+
   it("opens on «Сегодня» with what is left today", async () => {
     render(<DashboardScreen api={fakeApi()} />);
     const today = await screen.findByRole("region", { name: "Можно сегодня" });
@@ -426,6 +447,11 @@ describe("DashboardScreen", () => {
       screen.getByText("до аванса 15\u2011го не хватает 1 100 000"),
     ).toBeTruthy();
     expect(screen.getByText("потрачено сегодня 120 000")).toBeTruthy();
+    // откуда недостача — той же таблицей
+    const today = screen.getByRole("region", { name: "Можно сегодня" });
+    expect(
+      within(today).getByRole("table", { name: "Откуда лимит" }),
+    ).toBeTruthy();
     expect(screen.queryByText("до плана на конец месяца")).toBeNull();
     await show(user, "Траты");
     expect(screen.getByText("лимита нет")).toBeTruthy(); // в графике вместо «можно»
