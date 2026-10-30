@@ -52,7 +52,12 @@ describe("FrozenCard", () => {
   });
 
   it("warns when the piggies are over the card", () => {
-    const over = fixture({ amount: 1200, piggies: 1500, cushion: 0, over: 300 });
+    const over = fixture({
+      amount: 1200,
+      piggies: 1500,
+      cushion: 0,
+      over: 300,
+    });
     render(<FrozenCard frozen={over} />);
     expect(screen.getByText("⚠️ Копилки больше карты")).toBeTruthy();
     expect(lines()).toContain("разница 300 $");
