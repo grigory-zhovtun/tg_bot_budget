@@ -69,7 +69,21 @@ export const dashboardFixture: Dashboard = {
   payday: "2026-10-15",
   advances: 0,
   advance_on: null,
-  frozen: { amount: 1000, currency: "USD", uzs: 12_000_000, change: -50 },
+  // 1 400 $ на карте, квартплата 18-го 400 $ — в сроке до зарплаты
+  frozen: {
+    amount: 1000,
+    currency: "USD",
+    uzs: 12_000_000,
+    change: 0,
+    total: 1400,
+    payments: [{ day: "2026-10-18", name: "Квартплата", amount: 400 }],
+    piggies: 600,
+    cushion: 400,
+    over: 0,
+    lacking: 0,
+    lacking_on: null,
+    target: "до зарплаты 30-го",
+  },
   groups: [
     {
       name: "🍔 ЕДА",

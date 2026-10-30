@@ -194,11 +194,29 @@ class SubscriptionOut(ApiModel):
     state: Literal["charged", "twice", "expected", "missed"]
 
 
+class FrozenPaymentOut(ApiModel):
+    """Платёж срока в валюте заморозки: день (в следующем месяце — его день там)."""
+
+    day: date
+    name: str
+    amount: float  # плюсом
+
+
 class FrozenOut(ApiModel):
+    """«🧊 Заморожено»: доллары на сейчас без платежей срока — подушка и копилки."""
+
     amount: float
     currency: str
     uzs: float
-    change: float
+    change: float = 0.0  # «с 1-го числа» убрана; для открытых до обновления
+    total: float = 0.0  # всего на картах в этой валюте
+    payments: list[FrozenPaymentOut] = []
+    piggies: float | None = None  # копилки на сейчас; None — их не читали
+    cushion: float | None = None  # подушка: заморожено без копилок; None — так же
+    over: float = 0.0  # копилки больше карты на столько
+    lacking: float = 0.0  # копилок нет, а долларов на платежи не хватает
+    lacking_on: date | None = None  # день платежа, с которого не хватает
+    target: str = ""  # срок платежей, как у «Сумы»: «до зарплаты 30 ноября»
 
 
 class CushionOut(ApiModel):

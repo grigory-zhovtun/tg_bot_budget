@@ -156,6 +156,30 @@ export interface Runway {
   target?: string | null; // «до зарплаты 30-го», «до зарплаты сегодня»
 }
 
+/** Платёж срока в валюте заморозки: день — ISO-дата (в следующем месяце — его
+ * день там), сумма плюсом. */
+export interface FrozenPayment {
+  day: string;
+  name: string;
+  amount: number;
+}
+
+/** «🧊 Заморожено»: доллары на сейчас без платежей срока — подушка и копилки. */
+export interface Frozen {
+  amount: number;
+  currency: string;
+  uzs: number;
+  change: number; // всегда 0: «с 1-го числа» убрана
+  total: number; // всего на картах в этой валюте
+  payments: FrozenPayment[];
+  piggies: number | null; // копилки на сейчас; null — их не читали
+  cushion: number | null; // заморожено без копилок; null — копилки не читали
+  over: number; // копилки больше карты на столько
+  lacking: number; // копилок нет, а долларов на платежи не хватает
+  lacking_on: string | null; // день платежа, с которого не хватает
+  target: string; // срок платежей, как у «Сумы»: «до зарплаты 30 ноября»
+}
+
 /** Лимит с завтра в день прихода зарплаты: сумы сейчас, срок с завтра. */
 export interface Tomorrow {
   limit: number;
@@ -188,12 +212,7 @@ export interface Dashboard {
   tomorrow?: Tomorrow | null; // день прихода зарплаты: лимит с завтра; иначе null
   salary_came?: number | null; // сколько пришло по строке зарплаты в этот день
   came?: string | null; // «Пришла ЗП» или «Пришёл аванс»; нет — «Пришла ЗП»
-  frozen: {
-    amount: number;
-    currency: string;
-    uzs: number;
-    change: number;
-  } | null;
+  frozen: Frozen | null;
   spending: DaySpend[]; // с 1-го числа по сегодня
   upcoming: ForecastItem[];
   subscriptions: Subscription[];

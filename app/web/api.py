@@ -42,10 +42,14 @@ from app.services.calendar import CalendarRecord, new_id, read_calendar, record_
 from app.services.cards import CardBalance
 from app.services.dashboard import Dashboard
 from app.services.day_budget import (
+    DayBudget,
     allowance_until,
     came_word,
+    frozen_split,
+    frozen_until,
     payday_on,
     runway_until,
+    short_on,
     until_text,
 )
 from app.services.forecast import DayArticle, Dip, Evening, MonthForecast, PastDay
@@ -120,6 +124,7 @@ from app.web.schemas import (
     ForecastRecordOut,
     ForecastTotalOut,
     FrozenOut,
+    FrozenPaymentOut,
     GroupOut,
     GroupPlanOut,
     HintOut,
@@ -590,6 +595,34 @@ def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOu
     )
 
 
+def frozen_out(budget: DayBudget) -> FrozenOut | None:
+    """«🧊 Заморожено» «Сводки» — те же числа, что в утре: что не трогаем (подушка и
+    копилки), что не сходится и платежи срока; заморозку не считаем — None."""
+    if budget.frozen is None or not budget.frozen_currency:
+        return None
+    cushion, over, lacking = frozen_split(budget.frozen, budget.piggies or 0.0)
+    return FrozenOut(
+        amount=budget.frozen,
+        currency=budget.frozen_currency,
+        uzs=budget.frozen_uzs,
+        total=budget.frozen_total,
+        payments=[
+            FrozenPaymentOut(day=payment.day, name=payment.name, amount=payment.amount)
+            for payment in budget.frozen_payments
+        ],
+        piggies=budget.piggies,
+        cushion=None if budget.piggies is None else cushion,
+        over=over,
+        lacking=lacking,
+        lacking_on=(
+            short_on(budget.frozen_total, budget.frozen_payments)
+            if lacking > 0
+            else None
+        ),
+        target=frozen_until(budget),
+    )
+
+
 def dashboard_out(
     found: Dashboard | None, today: date, icons: dict[str, str]
 ) -> DashboardOut:
@@ -695,14 +728,6 @@ def dashboard_out(
             advances=t.advances,
             advance_on=t.advance_on,
         )
-    frozen = None
-    if budget.frozen is not None and budget.frozen_currency:
-        frozen = FrozenOut(
-            amount=budget.frozen,
-            currency=budget.frozen_currency,
-            uzs=budget.frozen_uzs,
-            change=0.0,  # «с 1-го числа» убрана; поле — для открытых до обновления
-        )
     return DashboardOut(
         status="ok",
         month=month,
@@ -726,7 +751,7 @@ def dashboard_out(
         came=(
             _capital(came_word(budget.salary_name)) if tomorrow is not None else None
         ),
-        frozen=frozen,
+        frozen=frozen_out(budget),
         groups=groups,
         daily=[
             DayPointOut(day=point.day, plan=point.plan, fact=point.fact)
