@@ -514,6 +514,7 @@ def piggy_out(state: PiggyState) -> PiggyOut:
         forecast=None if state.forecast is None else _rounded(state.forecast, code),
         now=_rounded(state.now, code),
         saved_month=_rounded(state.saved_month, code),
+        next_month=state.next_month,
         history=[
             MoveOut(day=move.day, amount=move.amount, kind=move.kind, who=move.who)
             for move in state.history

@@ -715,6 +715,15 @@ def test_the_percent_needed_counts_the_cushions_half() -> None:
     assert calm.percent_needed == pytest.approx(0.36)
 
 
+def test_a_piggy_names_its_next_months_part() -> None:
+    found = screen(
+        piggy_row(), fact=HOME, share=0.5, today=NOVEMBER_10, budget=frozen(950)
+    )
+    new_year = state(found, "p3k9za")
+    # ноябрь — 5,4 млн к сроку 20.12, с декабря — по 1 млн к следующему
+    assert (new_year.this_month, new_year.next_month) == (5_400_000, 1_000_000)
+
+
 def test_the_cushion_is_the_frozen_money_without_the_piggies_now() -> None:
     moves = (
         move_row(id="tr0001", day="16.10.2026", amount=400, currency="USD"),

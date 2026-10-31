@@ -717,6 +717,7 @@ class PiggyOut(ApiModel):
     forecast: float | None = None  # будет к ближайшему сроку по плану
     now: float = 0.0  # отложить сейчас
     saved_month: float = 0.0  # отложено в этом месяце
+    next_month: float = 0.0  # взнос следующего месяца плана
     history: list[MoveOut]
     spends: list[SpendOut]
 

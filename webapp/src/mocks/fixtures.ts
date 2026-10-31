@@ -748,6 +748,7 @@ function piggy(changes: Partial<Piggy>): Piggy {
     forecast: 12_000_000,
     now: 4_000_000,
     saved_month: 0,
+    next_month: 0,
     history: [],
     spends: [],
     ...changes,

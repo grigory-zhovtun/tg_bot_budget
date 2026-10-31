@@ -13,9 +13,15 @@ function piggy(changes: Partial<Piggy> = {}): Piggy {
 function card(changes: Partial<Piggy>) {
   return render(
     <ul>
-      <PiggyCard piggy={piggy(changes)} />
+      <PiggyCard piggy={piggy(changes)} month="2026-10" />
     </ul>,
   );
+}
+
+/** Где в тексте карточки начинается строка — чтобы проверить порядок. */
+function at(text: string): number {
+  const whole = screen.getByRole("listitem").textContent ?? "";
+  return whole.replace(/\u00a0/g, " ").indexOf(text);
 }
 
 describe("PiggyCard", () => {
@@ -28,10 +34,51 @@ describe("PiggyCard", () => {
   });
 
   it("marks a collected piggy and this month's part set aside", () => {
-    card({ status: "done", collected: 12_000_000, left_this_month: 0 });
+    card({
+      status: "done",
+      collected: 12_000_000,
+      left_this_month: 0,
+      saved_month: 6_000_000,
+    });
     expect(screen.getByText("✓ собрано").className).toContain("bg-chip-good");
-    expect(screen.getByText("в этом месяце 6 000 000")).toBeTruthy();
-    expect(screen.getByText("✓ отложено").className).toContain("text-ok");
+    expect(
+      screen.getByText("✓ в октябре отложено 6 000 000").className,
+    ).toContain("text-ok");
+    expect(screen.queryByText("в этом месяце 6 000 000")).toBeNull();
+    expect(screen.queryByText("✓ отложено")).toBeNull();
+  });
+
+  it("says what this month got and what is left", () => {
+    card({});
+    expect(screen.getByText("в октябре отложено 0")).toBeTruthy();
+    expect(screen.getByText("в этом месяце ещё 6 000 000")).toBeTruthy();
+    expect(screen.getByText("к 20.12 будет 12 000 000")).toBeTruthy();
+    expect(screen.getByText("✓ успеваем").className).toContain("bg-chip-good");
+    const order = [
+      "Новый год",
+      "к 20.12, каждый год",
+      "накоплено",
+      "в октябре отложено",
+      "к 20.12 будет",
+      "✓ успеваем",
+    ].map(at);
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it("marks the month's part and names the next one", () => {
+    card({ saved_month: 6_000_000, left_this_month: 0, next_month: 6_000_000 });
+    expect(
+      screen.getByText("✓ в октябре отложено 6 000 000").className,
+    ).toContain("text-ok");
+    expect(screen.getByText("в ноябре по плану 6 000 000")).toBeTruthy();
+    expect(screen.queryByText(/в этом месяце ещё/)).toBeNull();
+  });
+
+  it("names only the next month without a part this month", () => {
+    card({ this_month: 0, left_this_month: 0, next_month: 2_000_000 });
+    expect(screen.getByText("в ноябре по плану 2 000 000")).toBeTruthy();
+    expect(screen.queryByText(/в октябре отложено/)).toBeNull();
   });
 
   it("says what is left after a one-time deadline", () => {
@@ -64,8 +111,9 @@ describe("PiggyCard", () => {
     expect(screen.getByText("⚠️ Не хватит 9 000 000").className).toContain(
       "text-danger",
     );
-    // восьмизначные суммы в одну фразу не влезают: прогноз и цель — разными строками
     expect(screen.getByText("к 20.12 будет 3 000 000")).toBeTruthy();
-    expect(screen.getByText("нужно 12 000 000")).toBeTruthy();
+    expect(at("к 20.12 будет")).toBeLessThan(at("⚠️ Не хватит"));
+    // цель уже есть в «накоплено X из Y» — строки «нужно» нет
+    expect(screen.queryByText("нужно 12 000 000")).toBeNull();
   });
 });

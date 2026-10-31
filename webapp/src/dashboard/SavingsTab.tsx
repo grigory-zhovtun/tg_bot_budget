@@ -310,6 +310,7 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
               <PiggyCard
                 key={`${piggy.row}-${piggy.id}`}
                 piggy={piggy}
+                month={data.month?.month ?? data.today.slice(0, 7)}
                 onOpen={boot ? setOpened : undefined}
               />
             ))}

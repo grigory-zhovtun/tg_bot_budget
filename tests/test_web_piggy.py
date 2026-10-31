@@ -600,6 +600,9 @@ def test_the_month_counts_what_the_piggies_got_since_the_1st() -> None:
     application, _ = setup(PiggySheets([ROW], [saved(400_000, day=TODAY)]))
     found = client_for(application).get("/api/savings", headers=auth()).json()
     assert found["month"]["saved"] == 400_000
+    piggy = found["piggies"][0]
+    assert piggy["saved_month"] == 400_000
+    assert "next_month" in piggy  # взнос следующего месяца плана
 
 
 def test_a_dollar_piggy_counts_in_sums_by_the_tabs_rate() -> None:

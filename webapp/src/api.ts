@@ -293,6 +293,7 @@ export interface Piggy {
   forecast: number | null; // будет к ближайшему сроку по плану
   now: number; // отложить сейчас
   saved_month: number; // отложено в этом месяце
+  next_month: number; // взнос следующего месяца плана
   history: PiggyMove[];
   spends: PiggySpend[];
 }

@@ -592,6 +592,7 @@ class PiggyState:
     forecast: float | None = None  # будет к ближайшему сроку по плану
     now: float = 0.0  # «отложить сейчас»: часть процента пришедшего минус отложенное
     saved_month: float = 0.0  # отложено в этом месяце
+    next_month: float = 0.0  # взнос следующего месяца плана
 
 
 @dataclass(frozen=True)
@@ -1227,6 +1228,13 @@ def savings_screen(
             piggy.id, 0.0
         )
         this_month = _up(planned_now / rate, piggy.currency) if rate else 0.0
+        later = plan[1] if len(plan) > 1 else None
+        planned_next = (
+            later.items.get(piggy.id, 0.0) + later.goals.get(piggy.id, 0.0)
+            if later is not None
+            else 0.0
+        )
+        next_month = _up(planned_next / rate, piggy.currency) if rate else 0.0
         saved = _saved_in(moves, month)
         left_month = max(this_month - saved, 0.0)
         status, short, leftover = "on_track", 0.0, _leftover(moves, balance.left)
@@ -1271,6 +1279,7 @@ def savings_screen(
                 numbers.get(piggy.id) if status != "broken" else None,
                 forecast,
                 saved_month=saved,
+                next_month=next_month,
             )
         )
     states.sort(  # порядок важности, другие со сроком, долгие цели, с ошибкой

@@ -342,7 +342,10 @@ describe("SavingsTab", () => {
       nb("накоплено 0 из 12 000 000"),
     );
     expect(within(newYear).getByText("к 20.12, каждый год")).toBeTruthy();
-    expect(within(newYear).getByText("в этом месяце 6 000 000")).toBeTruthy();
+    expect(within(newYear).getByText("в октябре отложено 0")).toBeTruthy();
+    expect(
+      within(newYear).getByText("в этом месяце ещё 6 000 000"),
+    ).toBeTruthy();
     expect(within(newYear).getByText("✓ успеваем").className).toContain(
       "bg-chip-good",
     );
@@ -351,7 +354,7 @@ describe("SavingsTab", () => {
     );
     expect(within(trip).getByText("⚠️ Не хватит 500 $")).toBeTruthy();
     expect(within(trip).getByText("к 01.06 будет 2 000 $")).toBeTruthy();
-    expect(within(trip).getByText("нужно 2 500 $")).toBeTruthy();
+    expect(within(trip).queryByText("нужно 2 500 $")).toBeNull();
     expect(within(repair).getByText("⚠️ Не указана сумма").className).toContain(
       "text-danger",
     );
