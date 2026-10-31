@@ -2,6 +2,7 @@ import type {
   AdvicePoint,
   Bootstrap,
   CalendarRecord,
+  CardBalance,
   Dashboard,
   DayArticle,
   ExpenseResult,
@@ -12,6 +13,7 @@ import type {
   MonthPlan,
   Piggy,
   SavingsScreen,
+  Source,
 } from "../api";
 
 export const bootstrapFixture: Bootstrap = {
@@ -42,6 +44,38 @@ export const bootstrapFixture: Bootstrap = {
     },
   ],
 };
+
+/** Карты экрана перевода и окна карт. */
+export const transferSources: Source[] = [
+  { name: "VISA 1111 UZS", currency: "UZS" },
+  { name: "HUMO 2222 UZS", currency: "UZS" },
+  { name: "VISA 3333 USD", currency: "USD" },
+];
+
+/** «Остатки на картах» экрана перевода: у HUMO 2222 строки нет — «на карте» не
+ * показывается. */
+export const transferCards: CardBalance[] = [
+  {
+    name: "VISA 1111",
+    currency: "UZS",
+    balance: 5_250_000,
+    uzs: 5_250_000,
+    bank: null,
+    checked: null,
+    matches: null,
+    stale: false,
+  },
+  {
+    name: "VISA 3333",
+    currency: "USD",
+    balance: 1500.25,
+    uzs: 18_003_000,
+    bank: null,
+    checked: null,
+    matches: null,
+    stale: false,
+  },
+];
 
 export const writtenFixture: ExpenseResult = {
   status: "written",
