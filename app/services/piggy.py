@@ -652,6 +652,10 @@ class Screen:
     due: float = 0.0  # процент от пришедшего — отложить за месяц, сумы
     cushion_now: float = 0.0  # его часть подушке, сумы
     rates: Rates | None = None  # курсы таблицы — для раскладки сумм
+    # подушка на 1-е в сумах: «Заморожено» утром 1-го без копилок на вечер последнего
+    # дня прошлого месяца; None — нет бюджета, «Заморожено» или курса
+    cushion_start: float | None = None
+    cushion_saved: float = 0.0  # «Отложено подушке»: её рост с 1-го числа, сумы
 
 
 @dataclass(frozen=True)
@@ -1050,12 +1054,10 @@ def savings_screen(
         math.ceil(step / base * 100 - 1e-9) / 100 if base > 0 and step > 1e-6 else None
     )
 
-    # доля 10 %: по подушке на 1-е число, дальше подушка растёт на свою часть; до
-    # этапа 4 — в месяцах всех трат, как раньше: план посреди месяца не двигается
-    monthly = monthly_spending(frame, today)
+    # подушка на 1-е: «Заморожено» утром 1-го без копилок на вечер накануне, в сумах
     currency = budget.frozen_currency if budget is not None else None
     frozen_rate = rates.to_uzs.get(currency or "", 0.0)
-    cushion_uzs: float | None = None
+    cushion_start: float | None = None
     if (
         budget is not None
         and budget.frozen is not None
@@ -1064,7 +1066,12 @@ def savings_screen(
         and frozen_rate
     ):
         envelopes_start = piggies_total(book, start, rates, currency)
-        cushion_uzs = (budget.frozen_start - envelopes_start) * frozen_rate
+        cushion_start = max(budget.frozen_start - envelopes_start, 0.0) * frozen_rate
+
+    # доля 10 %: по подушке на 1-е число, дальше подушка растёт на свою часть; до
+    # этапа 4 — в месяцах всех трат, как раньше: план посреди месяца не двигается
+    monthly = monthly_spending(frame, today)
+    cushion_uzs = cushion_start
     collected_goals = {
         piggy.id: start[piggy.id].collected * rates.to_uzs.get(piggy.currency, 0.0)
         for piggy in goals
@@ -1237,6 +1244,12 @@ def savings_screen(
     ]
     received = float(came["amount_uzs"].sum())
     due = portion * received
+    # «Отложено подушке» — настоящий рост с 1-го: расчётная доля не в счёт
+    cushion_saved = (
+        max(cushion.uzs - cushion_start, 0.0)
+        if cushion is not None and cushion_start is not None
+        else 0.0
+    )
     screen = Screen(
         today,
         tuple(states),
@@ -1257,6 +1270,8 @@ def savings_screen(
         due,
         0.0,
         rates,
+        cushion_start,
+        cushion_saved,
     )
     parts = parts_of(screen, due, after_saved=False)
     return replace(

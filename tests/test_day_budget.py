@@ -447,7 +447,7 @@ def test_frozen_is_the_dollars_now_without_the_payments_until_the_salary() -> No
     # квартплата 18-го — в сроке до ЗП 30-го
     assert (calm.frozen, calm.frozen_total, calm.frozen_uzs) == (600, 1000, 7_200_000)
     assert calm.frozen_payments == (Payment(date(2026, 10, 18), "Квартплата", 400),)
-    assert calm.frozen_start == 600  # на 1-е по прежнему правилу — плану копилок
+    assert calm.frozen_start == 600  # утром 1-го по правилу 1.5
     took = budget(date(2026, 10, 10), *EXCHANGE_TODAY)  # обмен сегодня виден сразу
     assert (took.frozen, took.frozen_total, took.frozen_start) == (500, 900, 600)
     assert budget(date(2026, 10, 19), RENT_PAID).frozen_payments == ()
@@ -769,6 +769,16 @@ def test_a_salary_that_came_today_keeps_the_morning_limit() -> None:
 
 
 SALARY_TODAY = fact_row(date(2026, 10, 30), "💰 ДОХОДЫ", "зарплата", 10_000_000)
+
+
+def test_frozen_on_the_first_is_the_morning_of_the_first() -> None:
+    # «Курсы» 31-го — после ЗП 30-го: утром 1-го их нет в сроке, как и 10-го
+    day = budget(date(2026, 10, 10), items=[*ITEMS, ("Курсы", 31, -100, "USD")])
+    assert (day.frozen_start, day.frozen) == (600, 600)
+    # 1 ноября утром — «Заморожено» вечера 31 октября: квартплата ноября в сроке
+    paid = (ADVANCE_PAID, RENT_PAID, SALARY_TODAY)
+    first = budget(date(2026, 11, 1), *paid)
+    assert first.frozen_start == first.frozen == 200
 
 
 def test_on_the_salary_day_the_limit_runs_from_tomorrow() -> None:

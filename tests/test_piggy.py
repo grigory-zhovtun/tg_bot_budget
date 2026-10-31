@@ -684,6 +684,49 @@ def test_the_cushion_does_not_move_on_the_first() -> None:
     assert last.cushion.amount == first.cushion.amount == 100
 
 
+def test_set_aside_for_the_cushion_is_its_growth_since_the_first() -> None:
+    bought = fact_row(TODAY, "💳 СЧЕТА", "обмен валюты", -300, "USD")
+    moves = (move_row(id="tr0001", day="16.10.2026", amount=100, currency="USD"),)
+    found = screen(piggy_row(**TRIP), moves=moves, budget=budget_on(TODAY, bought))
+    # на 1-е: 1000 $ − квартплата 400 $; сейчас: 1300 $ − 400 $ − копилка 100 $
+    assert found.cushion_start == 600 * 12_000
+    assert found.cushion_saved == 200 * 12_000  # из 300 $ — 100 $ копилке
+    # копилке отложили, а долларов не купили — подушка не выросла
+    calm = screen(piggy_row(**TRIP), moves=moves, budget=budget_on(TODAY))
+    assert calm.cushion_saved == 0
+
+
+def test_the_first_starts_the_cushion_saving_from_zero() -> None:
+    paid = (ADVANCE_PAID, RENT_PAID, SALARY_TODAY)
+    moves = (move_row(id="tr0001", day="20.10.2026", amount=100, currency="USD"),)
+    last, first = (
+        screen(piggy_row(**TRIP), moves=moves, today=day, budget=budget_on(day, *paid))
+        for day in (date(2026, 10, 31), date(2026, 11, 1))
+    )
+    assert last.cushion is not None
+    assert first.cushion_start == last.cushion.amount * 12_000 == 100 * 12_000
+    assert first.cushion_saved == 0
+
+
+def test_on_the_salary_day_the_cushion_grows_by_dollars_beyond_the_payments() -> None:
+    day = date(2026, 10, 30)
+    came = (ADVANCE_PAID, RENT_PAID, SALARY_TODAY)
+    rent = fact_row(
+        day, "💳 СЧЕТА", "обмен валюты", -400, "USD"
+    )  # на квартплату ноября
+    more = fact_row(day, "💳 СЧЕТА", "обмен валюты", -500, "USD")  # и ещё 100 $
+    before, bought, extra = (
+        screen(today=day, budget=budget_on(day, *came, *rows))
+        for rows in ((), (rent,), (more,))
+    )
+    # ЗП пришла — квартплата ноября в сроке: подушка меньше, «отложено» не уходит в минус
+    assert (before.cushion_saved, bought.cushion_saved, extra.cushion_saved) == (
+        0,
+        0,
+        100 * 12_000,
+    )
+
+
 def test_the_cushion_counts_months_of_life() -> None:
     home = tuple(
         fact_row(date(2026, m, 5), "🏚️ ДОМ", "квартплата", 12_000_000)
