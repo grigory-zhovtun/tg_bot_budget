@@ -88,6 +88,21 @@ async function fillCoffee(user: User): Promise<void> {
   }
 }
 
+/** «СЧЕТА» → «переводы» → Куда HUMO 2222 UZS → 500 000. */
+async function fillTransfer(user: User): Promise<void> {
+  await user.click(screen.getByRole("button", { name: "СЧЕТА" }));
+  await user.click(screen.getByRole("button", { name: "переводы" }));
+  await user.click(screen.getByRole("button", { name: /^Куда/ }));
+  await user.click(
+    within(screen.getByRole("dialog", { name: "Куда" })).getByRole("button", {
+      name: /HUMO 2222 UZS/,
+    }),
+  );
+  for (const key of ["5", "0", "0", "000"]) {
+    await user.click(screen.getByRole("button", { name: key }));
+  }
+}
+
 /** Строка плана на плитке: «⚠️ сверх на 300 000»; null — плитка без плана. */
 function tilePlan(name: string): string | null {
   const id = screen
@@ -940,6 +955,127 @@ describe("EntryScreen", () => {
     // сохранённая до обновления — без признака, то есть трата
     expect(addExpense.mock.calls[1]?.[0]).not.toHaveProperty("incoming");
     expect(addExpense.mock.calls[2]?.[0].incoming).toBe(true);
+  });
+
+  it("opens «Откуда → Куда» only for «переводы» and «обмен валюты»", async () => {
+    const user = userEvent.setup();
+    renderEntry(fakeApi(), vi.fn(), ALL_GROUPS);
+    await user.click(screen.getByRole("button", { name: "СЧЕТА" }));
+    await user.click(screen.getByRole("button", { name: "переводы" }));
+    expect(
+      screen.getByRole("heading", { name: "💳 СЧЕТА · 🔄 переводы" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Откуда/ })).toBeTruthy();
+    // карта здесь — «Откуда»: ряда карт «Ввода» нет
+    expect(screen.queryByRole("radiogroup", { name: "Карта" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Списать" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "← Назад" }));
+    await user.click(screen.getByRole("button", { name: "обмен валюты" }));
+    expect(screen.getByRole("button", { name: /^Откуда/ })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "← Назад" }));
+    await user.click(screen.getByRole("button", { name: "выравнивание" }));
+    expect(screen.getByRole("button", { name: "Зачислить" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Списать" })).toBeTruthy();
+  });
+
+  it("writes a transfer, shows it and makes «Куда» the card", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    renderEntry(api, vi.fn(), ALL_GROUPS);
+    await fillTransfer(user);
+    await user.click(screen.getByRole("button", { name: "Записать перевод" }));
+    expect(sent(api)).toMatchObject({
+      source: "VISA 9090 UZS",
+      to_source: "HUMO 2222 UZS",
+      category: "💳 СЧЕТА",
+      subcategory: "переводы",
+      amount: "500000",
+    });
+    expect(sent(api)).not.toHaveProperty("to_amount");
+    expect(await screen.findByText("✓ Записан перевод")).toBeTruthy();
+    expect(
+      screen.getByRole("radio", { name: "HUMO 2222 UZS", checked: true }),
+    ).toBeTruthy();
+  });
+
+  it("says «Уже записано: строки N–M» for a repeated transfer", async () => {
+    const addExpense = vi.fn<Api["addExpense"]>().mockResolvedValue({
+      status: "duplicate",
+      rows: { first: 4169, last: 4170 },
+      lines: [],
+    });
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }), vi.fn(), ALL_GROUPS);
+    await fillTransfer(user);
+    await user.click(screen.getByRole("button", { name: "Записать перевод" }));
+    expect(
+      await screen.findByText("✅ Уже записано: строки 4169–4170"),
+    ).toBeTruthy();
+  });
+
+  it("asks to choose again when the second card left the catalog", async () => {
+    const addExpense = vi.fn<Api["addExpense"]>().mockRejectedValue(
+      new ApiError(422, "validation", "Проверьте введённые данные", {
+        to_source: "«Куда» — другая своя карта, перевод — только в «💳 СЧЕТА»",
+      }),
+    );
+    const onCatalogChanged = vi.fn();
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }), onCatalogChanged, ALL_GROUPS);
+    await fillTransfer(user);
+    await user.click(screen.getByRole("button", { name: "Записать перевод" }));
+    expect(
+      await screen.findByText("Справочник обновился — выберите заново"),
+    ).toBeTruthy();
+    expect(onCatalogChanged).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "ЕДА" })).toBeTruthy();
+  });
+
+  it("keeps a transfer on the phone with its cards", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-10T12:00:00Z"));
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(new ApiError(0, "network", "Нет связи"));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }), vi.fn(), ALL_GROUPS);
+    await fillTransfer(user);
+    await user.click(screen.getByRole("button", { name: "Записать перевод" }));
+    expect(
+      await screen.findByText("📤 Перевод сохранён на телефоне"),
+    ).toBeTruthy();
+    const queue = screen.getByRole("region", { name: "Не отправлено" });
+    expect(queue.textContent?.replace(/\s/g, " ")).toContain(
+      "переводы 500 000 UZS → HUMO 2222 UZS, сегодня",
+    );
+  });
+
+  it("says a transfer waits on the phone when there is still no connection", async () => {
+    enqueue(OWNER, {
+      entry: {
+        ...sentLike("t1"),
+        to_source: "HUMO 2222 UZS",
+        category: "💳 СЧЕТА",
+        subcategory: "переводы",
+        amount: "500000",
+        day: bootstrapFixture.today,
+      },
+      title: "переводы 500 000 UZS → HUMO 2222 UZS",
+    });
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(new ApiError(0, "network", "Нет связи"));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }), vi.fn(), ALL_GROUPS);
+    await waitFor(() => expect(addExpense).toHaveBeenCalledTimes(1));
+    const button = await screen.findByRole("button", {
+      name: "Отправить сейчас",
+    });
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+    await user.click(button);
+    expect(
+      await screen.findByText("📵 Связи нет — перевод ждёт на телефоне"),
+    ).toBeTruthy();
   });
 
   it("writes an error at 17 px", async () => {

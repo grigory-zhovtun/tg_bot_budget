@@ -52,7 +52,9 @@ import {
 import {
   creditHead,
   INCOME_GROUP,
+  keptNotice,
   spentHead,
+  waitingNotice,
   type Outgoing,
   type Sign,
 } from "./outgoing";
@@ -61,13 +63,15 @@ import { planIndex } from "./plan";
 import { retryable, sendExpense, sleep, type Wait } from "./send";
 import SourceChips from "./SourceChips";
 import { GroupTiles, SubTiles } from "./Tiles";
+import { isTransfer } from "./transfer";
+import TransferScreen from "./TransferScreen";
 
-const CATALOG_FIELDS = ["source", "category", "subcategory"];
+const CATALOG_FIELDS = ["source", "to_source", "category", "subcategory"];
 // трата и её отмена меняют сводку, прогноз, факт плана и траты из копилок
 const CHANGED_BY_WRITES = ["dashboard", "forecast", "plan:", "savings"];
 const OUTBOX_EVERY_MS = 30_000; // очередь на телефоне — снова, пока не пуста
 
-type Step = "group" | "sub" | "amount";
+type Step = "group" | "sub" | "amount" | "transfer";
 
 /** Ответ на запись: строки сервера и своя первая строка («✓ Списано …»). */
 interface Done {
@@ -143,6 +147,11 @@ function Outbox({
       )}
     </section>
   );
+}
+
+/** «строка 4169» или «строки 4169–4170» — что уже записано. */
+function rowsText({ first, last }: { first: number; last: number }): string {
+  return first === last ? `строка ${first}` : `строки ${first}–${last}`;
 }
 
 /** Заголовок шага: «🍔 ЕДА» или «🍔 ЕДА · ☕ кофе»; длинная пара переносится
@@ -268,12 +277,8 @@ export default function EntryScreen({
             setNotice(`✅ Отправлено из очереди: ${sent}`);
             loadPlan();
           } else if (byHand && !stopped && left.length > 0) {
-            // очередь — из нескольких записей: зачисление, только если все такие
-            setNotice(
-              left.every((item) => item.entry.incoming)
-                ? "📵 Связи нет — зачисление ждёт на телефоне"
-                : "📵 Связи нет — трата ждёт на телефоне",
-            );
+            // очередь — из нескольких записей: по виду, только если все одного
+            setNotice(waitingNotice(left.map((item) => item.entry)));
           }
         })
         .finally(() => setFlushing(false));
@@ -309,7 +314,9 @@ export default function EntryScreen({
 
   const back = useCallback(() => {
     setError(null);
-    setStep((current) => (current === "amount" ? "sub" : "group"));
+    setStep((current) =>
+      current === "amount" || current === "transfer" ? "sub" : "group",
+    );
   }, []);
 
   // запись уходит на сервер — одна дорога для любой кнопки: очередь на телефоне,
@@ -335,6 +342,7 @@ export default function EntryScreen({
           finishSending(owner, input.entry_id, false);
           haptic("success");
           loadPlan();
+          if (out.card) setPicked(out.card); // у перевода — «Куда»
           setDone({ result, head: out.head });
           setNotice(null);
           setGroup(null);
@@ -352,11 +360,7 @@ export default function EntryScreen({
               setError(reason.message);
               setNotice(null);
             } else {
-              setNotice(
-                out.entry.incoming
-                  ? "📤 Зачисление сохранено на телефоне"
-                  : "📤 Трата сохранена на телефоне",
-              );
+              setNotice(keptNotice(out.entry));
             }
             setDone(null);
             setGroup(null);
@@ -519,7 +523,8 @@ export default function EntryScreen({
     setComment("");
     setDay(null);
     setEntryId(crypto.randomUUID());
-    setStep("amount");
+    // «💳 СЧЕТА» → «переводы» или «обмен валюты» — «Откуда → Куда» вместо суммы
+    setStep(group && isTransfer(group.name, next.name) ? "transfer" : "amount");
   }
 
   function undo() {
@@ -551,7 +556,7 @@ export default function EntryScreen({
   const lines = done
     ? done.result.lines.length > 0
       ? done.result.lines
-      : [`✅ Уже записано: строка ${done.result.rows.first}`]
+      : [`✅ Уже записано: ${rowsText(done.result.rows)}`]
     : [];
   const off = value <= 0 || sending !== null; // кнопки записи недоступны
 
@@ -569,11 +574,14 @@ export default function EntryScreen({
           }}
         />
       )}
-      <SourceChips
-        sources={boot.sources}
-        current={source}
-        onPick={chooseSource}
-      />
+      {/* на переводе карта — «Откуда»: второго места выбора карты нет */}
+      {step !== "transfer" && (
+        <SourceChips
+          sources={boot.sources}
+          current={source}
+          onPick={chooseSource}
+        />
+      )}
       {done && (
         <div
           className="flex flex-col gap-1 rounded-2xl bg-section p-3 text-line"
@@ -616,6 +624,26 @@ export default function EntryScreen({
             onPick={chooseSub}
           />
         </>
+      )}
+      {step === "transfer" && group && sub && (
+        <div className="flex flex-col gap-3">
+          <Header
+            parts={[group.name, `${sub.icon} ${sub.name}`]}
+            onBack={tg ? null : back}
+          />
+          <TransferScreen
+            key={entryId}
+            group={group}
+            sub={sub}
+            sources={boot.sources}
+            current={source}
+            cards={dashboard?.cards ?? null}
+            today={boot.today}
+            entryId={entryId}
+            busy={sending !== null}
+            onSubmit={send}
+          />
+        </div>
       )}
       {step === "amount" && group && sub && (
         <div className="flex flex-col gap-3">
