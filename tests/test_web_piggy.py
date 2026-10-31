@@ -249,7 +249,8 @@ def test_savings_screen_shape() -> None:
     assert len(found["savings"]["months"]) == 6
     assert set(found["month"]) == {
         "month", "percent", "percent_source", "percent_needed", "capacity",
-        "received", "due", "left", "cushion", "saved",
+        "received", "due", "left", "cushion", "saved", "cushion_saved",
+        "cushion_room",
     }  # fmt: skip
 
 
@@ -564,6 +565,18 @@ def test_a_new_piggy_drops_the_bots_memory_of_articles() -> None:
 
 TRIP_ROW = ["tr0001", "Отпуск", 2500, "USD", f"{TODAY + timedelta(days=200):%d.%m.%Y}",
             "каждый год", "", "", "", "", "", "", "Иван", ""]  # fmt: skip
+
+
+def test_the_month_names_what_the_cushion_got() -> None:
+    bought = fact_row(TODAY, "💳 СЧЕТА", "обмен валюты", -300, "USD")
+    moves = [saved(100, "tr0001", "USD", day=TODAY)]
+    application, _ = setup(PiggySheets([ROW, TRIP_ROW], moves), bought)
+    found = client_for(application).get("/api/savings", headers=auth()).json()
+    # из 300 $ — 100 $ «Отпуску», 200 $ подушке; обязательных трат нет — комнаты нет
+    month = found["month"]
+    assert (month["cushion_saved"], month["cushion_room"]) == (2_400_000, 0)
+    trip = next(item for item in found["piggies"] if item["id"] == "tr0001")
+    assert trip["saved_month"] == 100
 
 
 def test_savings_answer_has_the_percent_and_the_month() -> None:

@@ -1,4 +1,4 @@
-import type { Api } from "../api";
+import type { Api, SavingsScreen } from "../api";
 import {
   adviceFixture,
   bootstrapFixture,
@@ -17,6 +17,18 @@ function later<T>(value: T): Promise<T> {
 
 /** API без сервера для npm run dev: тестовые данные с задержкой. */
 let nextCreated = false; // мок-режим: созданный план следующего месяца живёт до перезагрузки
+
+// мок-режим: подушка меньше месяца — «Отложил…» отдаёт ей сначала её часть
+const underMonth: SavingsScreen = {
+  ...savingsFixture,
+  month: savingsFixture.month && {
+    ...savingsFixture.month,
+    left: 3_000_000,
+    cushion: 1_000_000,
+    cushion_saved: 400_000,
+    cushion_room: 600_000,
+  },
+};
 
 export const mockApi: Api = {
   bootstrap: () => later(bootstrapFixture),
@@ -39,7 +51,7 @@ export const mockApi: Api = {
   savePlan: () => later({ ...planFixture, saved: 1 }),
   planAdvice: () => later(adviceFixture),
   // мок-режим: правки копилок не сохраняются, приходит тот же экран
-  savings: () => later(savingsFixture),
+  savings: () => later(underMonth),
   addPiggy: () => later(savingsFixture),
   updatePiggy: () => later(savingsFixture),
   closePiggy: () => later(savingsFixture),

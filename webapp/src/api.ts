@@ -292,6 +292,7 @@ export interface Piggy {
   order: number | null; // номер важности; null — не в порядке
   forecast: number | null; // будет к ближайшему сроку по плану
   now: number; // отложить сейчас
+  saved_month: number; // отложено в этом месяце
   history: PiggyMove[];
   spends: PiggySpend[];
 }
@@ -301,7 +302,7 @@ export interface PiggyPlanMonth {
   month: string; // «2026-10»
   total: number; // копилки со сроком
   items: AmountItem[];
-  cushion: number; // доля 10 % подушке
+  cushion: number; // доля процента подушке
   goals: AmountItem[]; // доля 10 % долгим целям
   ready: string[]; // копилки, собранные к сроку в этом месяце
 }
@@ -318,6 +319,8 @@ export interface SavingsMonth {
   left: number; // отложить сейчас — копилкам и долгим целям
   cushion: number; // часть подушке
   saved: number; // отложено копилкам с 1-го числа
+  cushion_saved: number; // «Отложено подушке»: её настоящий рост с 1-го числа
+  cushion_room: number; // подушке ещё не отложено из её части; 0 — сначала ничего
 }
 
 /** Предпросмотр окон «Процент» и «Порядок»: ничего не пишется. */

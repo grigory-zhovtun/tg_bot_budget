@@ -28,7 +28,28 @@ function setAside(): HTMLElement {
 }
 
 function bar(): HTMLElement {
-  return screen.getByRole("progressbar", { name: "Отложено копилкам" });
+  return screen.getByRole("progressbar", { name: "Отложено за месяц" });
+}
+
+/** Строки таблицы «Куда» без шапки: клетки текстом. */
+function where(card: HTMLElement): string[][] {
+  const table = within(card).getByRole("table", { name: "Куда" });
+  return [...table.querySelectorAll("tbody tr")].map((row) =>
+    [...row.querySelectorAll("td")].map((cell) => cell.textContent ?? ""),
+  );
+}
+
+/** Строки карточки по порядку. */
+function lines(card: HTMLElement): string[] {
+  return [...card.querySelectorAll("p")].map((line) => line.textContent ?? "");
+}
+
+/** Строки идут в этом порядке (между ними могут быть другие). */
+function inOrder(card: HTMLElement, wanted: string[]): void {
+  const found = lines(card);
+  const at = wanted.map((text) => found.indexOf(nb(text)));
+  expect(at.every((index) => index >= 0)).toBe(true);
+  expect([...at].sort((a, b) => a - b)).toEqual(at);
 }
 
 function withSavings(changes: Partial<SavingsScreen>): Api {
@@ -57,6 +78,9 @@ describe("SavingsTab", () => {
   it("says the percent, the month's sum and how much is set aside", async () => {
     const api = withSavings({
       month: { ...month(), saved: 1_000_000, left: 3_000_000 },
+      piggies: savingsFixture.piggies.map((piggy) =>
+        piggy.id === "p3k9za" ? { ...piggy, saved_month: 1_000_000 } : piggy,
+      ),
     });
     render(<SavingsTab api={api} boot={bootstrapFixture} />);
     const heading = await screen.findByRole("heading", {
@@ -76,54 +100,144 @@ describe("SavingsTab", () => {
     expect(
       within(card).getByText("отложено 1 000 000, ещё 3 000 000"),
     ).toBeTruthy();
+    expect(within(card).getByText("25 % от пришедших 16 000 000")).toBeTruthy();
+    const table = within(card).getByRole("table", { name: "Куда" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((cell) => cell.textContent),
+    ).toEqual(["куда", "отложено"]);
+    expect(where(card)).toEqual([
+      ["Новый год", nb("1 000 000")],
+      ["подушка", "0"],
+    ]);
+    expect(within(table).getByText("Новый год").className).toContain(
+      "wrap-anywhere",
+    );
     expect(within(card).getByRole("button", { name: "Отложил…" })).toBeTruthy();
-    // меньше текста: ни таблицы копилок, ни «пришло», ни «с каждого поступления»
-    expect(within(card).queryByRole("table")).toBeNull();
-    expect(within(card).queryByText(/пришло|с каждого поступления/)).toBeNull();
   });
 
-  it("says in green when the month's part is set aside", async () => {
+  it("says in green when the whole month is set aside", async () => {
     const api = withSavings({
-      month: { ...month(), saved: 5_000_000, left: 0 },
+      month: {
+        ...month(),
+        saved: 3_600_000,
+        left: 0,
+        cushion: 400_000,
+        cushion_saved: 400_000,
+      },
     });
     render(<SavingsTab api={api} boot={bootstrapFixture} />);
-    const done = await screen.findByText("✓ Отложено 5 000 000 из 4 000 000");
+    const done = await screen.findByText("✓ Октябрь: отложено 4 000 000");
     expect(done.className).toContain("text-ok");
-    expect(bar().getAttribute("aria-valuenow")).toBe("100");
+    expect(
+      screen.queryByRole("progressbar", { name: "Отложено за месяц" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Отложил…" })).toBeNull();
+    expect(where(setAside())).toEqual([["подушка", nb("400 000")]]);
+  });
+
+  it("keeps the cushion's part until the dollars are bought", async () => {
+    const api = withSavings({
+      month: {
+        ...month(),
+        saved: 3_600_000,
+        left: 0,
+        cushion: 400_000,
+        cushion_saved: 0,
+      },
+    });
+    render(<SavingsTab api={api} boot={bootstrapFixture} />);
+    expect(
+      await screen.findByText("отложено 3 600 000, ещё 400 000"),
+    ).toBeTruthy();
+    expect(bar().getAttribute("aria-valuenow")).toBe("90");
+    // копилкам откладывать нечего — «Отложил…» нет
     expect(screen.queryByRole("button", { name: "Отложил…" })).toBeNull();
   });
 
-  it("measures the piggies' part and names the cushion's", async () => {
+  it("counts the dollars bought before the piggies are written", async () => {
     const api = withSavings({
-      month: { ...month(), cushion: 300_000, saved: 3_700_000, left: 0 },
+      month: {
+        ...month(),
+        due: 4_000_000,
+        saved: 0,
+        left: 2_000_000,
+        cushion: 2_000_000,
+        cushion_saved: 4_000_000,
+        cushion_room: 0,
+      },
     });
-    render(<SavingsTab api={api} boot={null} />);
+    render(<SavingsTab api={api} boot={bootstrapFixture} />);
+    const done = await screen.findByText("✓ Октябрь: отложено 4 000 000");
+    expect(done.className).toContain("text-ok");
+    const card = setAside();
     expect(
-      await screen.findByText("✓ Отложено 3 700 000 из 3 700 000"),
-    ).toBeTruthy();
-    expect(screen.getByText("подушке — 300 000")).toBeTruthy();
-    expect(bar().getAttribute("aria-valuenow")).toBe("100");
+      screen.queryByRole("progressbar", { name: "Отложено за месяц" }),
+    ).toBeNull();
+    expect(within(card).queryByText(/ещё/)).toBeNull();
+    // копилкам есть что записать
+    expect(within(card).getByRole("button", { name: "Отложил…" })).toBeTruthy();
+    expect(where(card)).toEqual([["подушка", nb("4 000 000")]]);
   });
 
-  it("puts each warning in one line with its number", async () => {
+  it("puts the two warnings together with the numbers", async () => {
     render(<SavingsTab api={fakeApi()} boot={null} />);
     await screen.findByText("Откладываем 25 %");
     const card = setAside();
     const warnings = within(card).getAllByText(/^⚠️/);
-    expect(warnings.map((line) => line.textContent)).toEqual(
-      [
-        "⚠️ К срокам нужно 30 %",
-        "⚠️ На жизнь не хватит 2 200 000",
-        "⚠️ В плане «Отложить» 2 000 000, нужно 7 200 000",
-      ].map(nb),
-    );
+    expect(warnings.map((line) => line.textContent)).toEqual([
+      "⚠️ Цели не сходятся с тратами",
+    ]);
     expect(warnings[0]?.className).toContain("text-danger");
-    // подробности — в окне процента, не здесь
+    inOrder(card, [
+      "⚠️ Цели не сходятся с тратами",
+      "копилкам к срокам нужно 30 %,",
+      "а траты и при 25 % больше",
+      "дохода на 2 200 000 в месяц",
+      "сдвиньте сроки копилок или сократите траты",
+    ]);
+    expect(within(card).queryByText(/В плане «Отложить»/)).toBeNull();
+  });
+
+  it("asks for the percent only when the spending is fine", async () => {
+    const api = withSavings({
+      enough: {
+        income: 42_000_000,
+        save: 4_000_000,
+        life: 38_000_000,
+        ordinary: 34_000_000,
+        gap: 4_000_000,
+      },
+    });
+    render(<SavingsTab api={api} boot={null} />);
+    await screen.findByText("Откладываем 25 %");
+    const card = setAside();
     expect(
-      within(card).queryByText(
-        /успеть все копилки|останется|обычные траты|разница|поправьте|не сходится/,
-      ),
-    ).toBeNull();
+      within(card)
+        .getAllByText(/^⚠️/)
+        .map((line) => line.textContent),
+    ).toEqual([nb("⚠️ Копилкам к срокам нужно 30 %")]);
+    inOrder(card, [
+      "⚠️ Копилкам к срокам нужно 30 %",
+      "поднимите процент или сдвиньте сроки копилок",
+    ]);
+  });
+
+  it("says what life lacks when the percent is fine", async () => {
+    const api = withSavings({ month: { ...month(), percent_needed: 20 } });
+    render(<SavingsTab api={api} boot={null} />);
+    await screen.findByText("Откладываем 25 %");
+    const card = setAside();
+    expect(
+      within(card)
+        .getAllByText(/^⚠️/)
+        .map((line) => line.textContent),
+    ).toEqual([nb("⚠️ На жизнь не хватит 2 200 000 в месяц")]);
+    inOrder(card, [
+      "⚠️ На жизнь не хватит 2 200 000 в месяц",
+      "сократите траты или уменьшите процент",
+    ]);
   });
 
   it("leaves out the good news to keep the card short", async () => {
@@ -135,13 +249,6 @@ describe("SavingsTab", () => {
         life: 38_000_000,
         ordinary: 34_000_000,
         gap: 4_000_000,
-      },
-      goal: {
-        suggested: 7_200_000,
-        in_plan: 7_200_000,
-        piggies: 6_000_000,
-        share: 4_000_000,
-        spent: 2_800_000,
       },
     });
     render(<SavingsTab api={api} boot={null} />);
@@ -168,9 +275,12 @@ describe("SavingsTab", () => {
       await screen.findByText("в октябре поступлений ещё не было"),
     ).toBeTruthy();
     expect(
-      screen.queryByRole("progressbar", { name: "Отложено копилкам" }),
+      screen.queryByRole("progressbar", { name: "Отложено за месяц" }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Отложил…" })).toBeNull();
+    const card = setAside();
+    expect(within(card).queryByText(/от пришедших/)).toBeNull();
+    expect(within(card).queryByRole("table", { name: "Куда" })).toBeNull();
   });
 
   it("opens the percent and the order windows", async () => {

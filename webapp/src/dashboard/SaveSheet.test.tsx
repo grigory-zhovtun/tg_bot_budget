@@ -2,7 +2,12 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { bootstrapFixture, savingsFixture } from "../mocks/fixtures";
-import { ApiError, type Api, type SavingsScreen } from "../api";
+import {
+  ApiError,
+  type Api,
+  type SavingsMonth,
+  type SavingsScreen,
+} from "../api";
 import { fakeApi } from "../test/fakeApi";
 import { nb } from "../test/text";
 import SaveSheet from "./SaveSheet";
@@ -13,6 +18,22 @@ function cells(name: string): string[] {
   const row = within(table).getByText(name).closest("tr");
   if (!row) throw new Error(`no row for ${name}`);
   return [...row.querySelectorAll("td")].map((cell) => cell.textContent ?? "");
+}
+
+/** Подушка меньше месяца: копилкам отложить 3 млн, подушке — её 1 млн. */
+function underMonth(changes: Partial<SavingsMonth> = {}): SavingsScreen {
+  if (!savingsFixture.month) throw new Error("fixture");
+  return {
+    ...savingsFixture,
+    month: {
+      ...savingsFixture.month,
+      left: 3_000_000,
+      cushion: 1_000_000,
+      cushion_saved: 0,
+      cushion_room: 1_000_000,
+      ...changes,
+    },
+  };
 }
 
 function show(data: SavingsScreen = savingsFixture) {
@@ -88,6 +109,38 @@ describe("SaveSheet", () => {
     });
     await user.click(screen.getByRole("button", { name: "000" }));
     expect(cells("Отпуск")).toEqual(["Отпуск", nb("500,50 $")]);
+  });
+
+  it("gives the cushion its half first while it is under a month", () => {
+    show(underMonth());
+    expect(screen.getByLabelText("Сумма").textContent).toContain(
+      "4\u00a0000\u00a0000",
+    );
+    expect(cells("подушка")).toEqual(["подушка", nb("1 000 000")]);
+    expect(cells("Новый год")).toEqual(["Новый год", nb("3 000 000")]);
+    expect(screen.getByText("подушка — в журнал не пишется")).toBeTruthy();
+  });
+
+  it("gives the piggies their whole part once the cushion has its dollars", () => {
+    show(underMonth({ cushion_saved: 1_000_000, cushion_room: 0 }));
+    expect(screen.getByLabelText("Сумма").textContent).toContain(
+      "3\u00a0000\u00a0000",
+    );
+    expect(cells("Новый год")).toEqual(["Новый год", nb("3 000 000")]);
+    expect(screen.queryByText("подушка")).toBeNull();
+  });
+
+  it("splits a smaller sum in half", async () => {
+    const user = userEvent.setup();
+    show(underMonth());
+    for (let key = 0; key < 7; key += 1) {
+      await user.click(screen.getByRole("button", { name: "Стереть" }));
+    }
+    await user.click(screen.getByRole("button", { name: "2" }));
+    await user.click(screen.getByRole("button", { name: "000" }));
+    await user.click(screen.getByRole("button", { name: "000" }));
+    expect(cells("подушка")).toEqual(["подушка", nb("1 000 000")]);
+    expect(cells("Новый год")).toEqual(["Новый год", nb("1 000 000")]);
   });
 
   it("writes the button big", () => {

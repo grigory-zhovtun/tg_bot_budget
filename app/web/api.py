@@ -63,6 +63,7 @@ from app.services.piggy import (
     MonthGoal,
     Piggy,
     PiggyState,
+    cushion_room,
     distribute,
     goal_of,
     thousands,
@@ -512,6 +513,7 @@ def piggy_out(state: PiggyState) -> PiggyOut:
         order=state.order,
         forecast=None if state.forecast is None else _rounded(state.forecast, code),
         now=_rounded(state.now, code),
+        saved_month=_rounded(state.saved_month, code),
         history=[
             MoveOut(day=move.day, amount=move.amount, kind=move.kind, who=move.who)
             for move in state.history
@@ -557,6 +559,8 @@ def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOu
             left=float(round(left)),
             cushion=float(round(screen.cushion_now)),
             saved=float(round(saved)),
+            cushion_saved=float(round(screen.cushion_saved)),
+            cushion_room=float(round(cushion_room(screen))),
         )
     found_goal = goal_of(screen, first.month) if first is not None else None
     goal = None
