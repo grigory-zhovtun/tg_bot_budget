@@ -38,6 +38,10 @@ export const PRIMARY =
 export const GOOD_BUTTON =
   "h-12 rounded-xl bg-chip-good text-lg font-extrabold text-white disabled:opacity-50";
 
+/** Тот же зелёный для «Зачислить» на панели Telegram: родной кнопке цвет задаётся
+ * строкой, а не классом (совпадает с --color-chip-good). */
+export const GOOD_COLOR = "#146c2e";
+
 /** Ошибка над кнопкой — 17 px жирно. */
 export function ErrorLine({ text }: { text: string | null }) {
   return text ? (

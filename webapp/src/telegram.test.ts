@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { followScheme, offerHomeScreen, type WebApp } from "./telegram";
+import {
+  followScheme,
+  offerHomeScreen,
+  secondaryButton,
+  type BottomButton,
+  type WebApp,
+} from "./telegram";
 
 function app(version: boolean, startParam?: string) {
   const addToHomeScreen = vi.fn();
@@ -26,6 +32,29 @@ describe("offerHomeScreen", () => {
     expect(offerHomeScreen(null)).toBe(false);
     expect(old.addToHomeScreen).not.toHaveBeenCalled();
     expect(plain.addToHomeScreen).not.toHaveBeenCalled();
+  });
+});
+
+describe("secondaryButton", () => {
+  const button = {} as BottomButton;
+
+  it("gives Telegram's second bottom button from Bot API 7.10", () => {
+    const fake = {
+      isVersionAtLeast: (version: string) => version === "7.10",
+      SecondaryButton: button,
+    } as unknown as WebApp;
+    expect(secondaryButton(fake)).toBe(button);
+  });
+
+  it("is null on an older Telegram, without the button and outside Telegram", () => {
+    const old = {
+      isVersionAtLeast: () => false,
+      SecondaryButton: button,
+    } as unknown as WebApp;
+    const missing = { isVersionAtLeast: () => true } as unknown as WebApp;
+    expect(secondaryButton(old)).toBeNull();
+    expect(secondaryButton(missing)).toBeNull();
+    expect(secondaryButton(null)).toBeNull();
   });
 });
 

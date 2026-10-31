@@ -18,7 +18,12 @@ import {
 } from "../api";
 import { botDay, dayLabel, shiftDay, withCurrency } from "../format";
 import { useResource, useStore } from "../store";
-import { haptic, telegram } from "../telegram";
+import {
+  haptic,
+  secondaryButton,
+  telegram,
+  type BottomButton,
+} from "../telegram";
 import {
   amountValue,
   apiAmount,
@@ -30,6 +35,7 @@ import {
   BIG_FIELD,
   ErrorLine,
   GOOD_BUTTON,
+  GOOD_COLOR,
   PRIMARY,
 } from "../dashboard/controls";
 import Keypad from "./Keypad";
@@ -228,6 +234,11 @@ export default function EntryScreen({
   const label = `Записать ${withCurrency(value, currency)}`; // у доходов
   const income = group?.name === INCOME_GROUP;
   const tg = telegram();
+  const second = secondaryButton(tg); // «Зачислить» на панели — с 7.10
+  // кнопки записи — на панели Telegram: «Записать» доходов — на любой версии,
+  // пара «Зачислить» и «Списать» — с 7.10; иначе те же кнопки в экране
+  const native = tg !== null && (income || second !== null);
+  const onSum = step === "amount";
 
   const plan = useMemo(() => planIndex(dashboard), [dashboard]);
 
@@ -401,8 +412,8 @@ export default function EntryScreen({
   const spend = useCallback(() => submit("spend"), [submit]);
   const credit = useCallback(() => submit("credit"), [submit]);
 
-  // Системные кнопки Telegram: «Назад» после первого шага, «Записать» на сумме
-  // у доходов
+  // Кнопки панели Telegram: «Назад» после первого шага; на сумме — «Списать» и
+  // «Зачислить» (с 7.10), у доходов — «Записать»
   useEffect(() => {
     if (!tg || step === "group") return;
     tg.BackButton.show();
@@ -414,29 +425,66 @@ export default function EntryScreen({
   }, [tg, step, back]);
 
   useEffect(() => {
-    if (!tg || step !== "amount" || !income) return;
+    if (!tg || !native || !onSum) return;
     tg.MainButton.show();
     return () => {
       tg.MainButton.hide();
     };
-  }, [tg, step, income]);
+  }, [tg, native, onSum]);
+
+  // не зависит от суммы: кнопка не мигает, пока сумма набирается
+  useEffect(() => {
+    if (!second || income || !onSum) return;
+    // текст — в том же вызове: видимая кнопка без текста — исключение
+    second.setParams({
+      text: "Зачислить",
+      color: GOOD_COLOR,
+      text_color: "#ffffff",
+      position: "left",
+      is_visible: true,
+    });
+    return () => {
+      second.hide();
+    };
+  }, [second, income, onSum]);
 
   useEffect(() => {
-    if (!tg || step !== "amount" || !income) return;
-    tg.MainButton.setText(label);
-    if (value > 0) tg.MainButton.enable();
-    else tg.MainButton.disable();
-    if (sending) tg.MainButton.showProgress(false);
-    else tg.MainButton.hideProgress();
-  }, [tg, step, income, label, value, sending]);
+    if (!tg || !native || !onSum) return;
+    tg.MainButton.setText(income ? label : "Списать");
+  }, [tg, native, onSum, income, label]);
+
+  // сначала прогресс, потом доступность: hideProgress() снова включает кнопку.
+  // Крутится только нажатая, соседняя просто недоступна
+  useEffect(() => {
+    if (!tg || !native || !onSum) return;
+    const panel: [BottomButton, Sign][] = [[tg.MainButton, "spend"]];
+    if (second && !income) panel.push([second, "credit"]);
+    for (const [button, sign] of panel) {
+      if (sending === sign) {
+        button.showProgress(false);
+        continue;
+      }
+      button.hideProgress();
+      if (value > 0 && sending === null) button.enable();
+      else button.disable();
+    }
+  }, [tg, native, second, income, onSum, value, sending]);
 
   useEffect(() => {
-    if (!tg || step !== "amount" || !income) return;
+    if (!tg || !native || !onSum) return;
     tg.MainButton.onClick(spend);
     return () => {
       tg.MainButton.offClick(spend);
     };
-  }, [tg, step, income, spend]);
+  }, [tg, native, onSum, spend]);
+
+  useEffect(() => {
+    if (!second || income || !onSum) return;
+    second.onClick(credit);
+    return () => {
+      second.offClick(credit);
+    };
+  }, [second, income, onSum, credit]);
 
   function chooseSource(name: string) {
     setPicked(name);
@@ -601,28 +649,9 @@ export default function EntryScreen({
               setAmount((text) => press(text, key, decimals))
             }
           />
-          {!income ? (
-            // «Списать» справа — ближе к большому пальцу, её жмут чаще
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                className={GOOD_BUTTON}
-                disabled={off}
-                onClick={credit}
-              >
-                Зачислить
-              </button>
-              <button
-                type="button"
-                className={PRIMARY}
-                disabled={off}
-                onClick={spend}
-              >
-                Списать
-              </button>
-            </div>
-          ) : (
-            !tg && (
+          {/* без кнопок панели Telegram — те же кнопки в экране */}
+          {!native &&
+            (income ? (
               <button
                 type="button"
                 className={PRIMARY}
@@ -631,8 +660,27 @@ export default function EntryScreen({
               >
                 {label}
               </button>
-            )
-          )}
+            ) : (
+              // «Списать» справа — ближе к большому пальцу, её жмут чаще
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  className={GOOD_BUTTON}
+                  disabled={off}
+                  onClick={credit}
+                >
+                  Зачислить
+                </button>
+                <button
+                  type="button"
+                  className={PRIMARY}
+                  disabled={off}
+                  onClick={spend}
+                >
+                  Списать
+                </button>
+              </div>
+            ))}
         </div>
       )}
     </div>

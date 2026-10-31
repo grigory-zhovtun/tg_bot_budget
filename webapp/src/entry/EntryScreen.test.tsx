@@ -22,8 +22,10 @@ import {
   savingsFixture,
   writtenFixture,
 } from "../mocks/fixtures";
+import { GOOD_COLOR } from "../dashboard/controls";
 import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
+import { inTelegram, lastCall, tapPanel } from "../test/telegram";
 import { nb } from "../test/text";
 import EntryScreen from "./EntryScreen";
 import { enqueue, readOutbox, writeOutbox } from "./outbox";
@@ -896,5 +898,103 @@ describe("EntryScreen", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.className).toContain("text-line");
     expect(alert.className).not.toContain("text-sm");
+  });
+});
+
+describe("EntryScreen in Telegram", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    writeOutbox(OWNER, []);
+    localStorage.clear();
+  });
+
+  it("puts «Зачислить» left of «Списать» on Telegram's bar from 7.10", async () => {
+    const { main, second } = inTelegram();
+    const api = fakeApi();
+    const user = userEvent.setup();
+    renderEntry(api);
+    await fillCoffee(user);
+    expect(second.setParams).toHaveBeenCalledWith({
+      text: "Зачислить",
+      color: GOOD_COLOR,
+      text_color: "#ffffff",
+      position: "left",
+      is_visible: true,
+    });
+    expect(main.setText).toHaveBeenLastCalledWith("Списать");
+    expect(screen.queryByRole("button", { name: "Зачислить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Списать" })).toBeNull();
+    await tapPanel(second);
+    expect(sent(api)).toMatchObject({ amount: "48000", incoming: true });
+    expect(
+      await screen.findByText("✓ Зачислено 48 000 UZS — в таблицу −48 000"),
+    ).toBeTruthy();
+    expect(second.hide).toHaveBeenCalled(); // форма вернулась к группам
+  });
+
+  it("keeps Telegram's buttons off at zero and while one is sending", async () => {
+    const { main, second } = inTelegram();
+    const addExpense = vi.fn<Api["addExpense"]>(() => new Promise(() => {}));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await user.click(screen.getByRole("button", { name: "ЕДА" }));
+    await user.click(screen.getByRole("button", { name: "кофе" }));
+    // hideProgress снова включает кнопку — выключаем после него
+    for (const button of [main, second]) {
+      expect(lastCall(button.disable)).toBeGreaterThan(
+        lastCall(button.hideProgress),
+      );
+    }
+    for (const key of ["4", "8", "000"]) {
+      await user.click(screen.getByRole("button", { name: key }));
+    }
+    for (const button of [main, second]) {
+      expect(lastCall(button.enable)).toBeGreaterThan(lastCall(button.disable));
+    }
+    await tapPanel(main);
+    expect(main.showProgress).toHaveBeenLastCalledWith(false);
+    expect(second.showProgress).not.toHaveBeenCalled(); // крутится только нажатая
+    expect(lastCall(second.disable)).toBeGreaterThan(lastCall(second.enable));
+  });
+
+  it("hides «Зачислить» when the sum step closes", async () => {
+    const { second } = inTelegram();
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <EntryScreen
+        api={fakeApi()}
+        boot={bootstrapFixture}
+        onCatalogChanged={vi.fn()}
+        wait={noWait}
+      />,
+    );
+    await fillCoffee(user);
+    expect(second.hide).not.toHaveBeenCalled(); // сумма набирается — кнопка на месте
+    unmount(); // другая вкладка
+    expect(second.hide).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the two buttons in the screen on an older Telegram", async () => {
+    const { main, second } = inTelegram(false);
+    const user = userEvent.setup();
+    renderEntry(fakeApi());
+    await fillCoffee(user);
+    expect(screen.getByRole("button", { name: "Зачислить" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Списать" })).toBeTruthy();
+    expect(main.show).not.toHaveBeenCalled();
+    expect(second.setParams).not.toHaveBeenCalled();
+  });
+
+  it("keeps one «Записать» on Telegram's bar for incomes", async () => {
+    const { main, second } = inTelegram();
+    const user = userEvent.setup();
+    renderEntry(fakeApi(), vi.fn(), ALL_GROUPS);
+    await user.click(screen.getByRole("button", { name: "ДОХОДЫ" }));
+    await user.click(screen.getByRole("button", { name: "зарплата" }));
+    for (const key of ["4", "8", "000"]) {
+      await user.click(screen.getByRole("button", { name: key }));
+    }
+    expect(main.setText.mock.lastCall?.[0]).toMatch(/^Записать 48\s000 UZS$/);
+    expect(second.setParams).not.toHaveBeenCalled();
   });
 });
