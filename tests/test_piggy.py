@@ -531,6 +531,21 @@ def spending_months(amount: float = 10_000_000) -> tuple[list[Any], ...]:
     )
 
 
+def life_months(
+    amount: float = 10_000_000, months: tuple[int, ...] = (7, 8, 9)
+) -> tuple[list[Any], ...]:
+    """Обязательные траты по 10 млн июля–сентября: месяц жизни — 10 млн."""
+    return tuple(
+        fact_row(date(2026, month, 3), "🏚️ ДОМ", "квартплата", amount)
+        for month in months
+    )
+
+
+NOVEMBER_10 = date(2026, 11, 10)
+# по 12 млн с июля по октябрь: месяц жизни 12 млн и в октябре, и в ноябре
+HOME = life_months(12_000_000, (7, 8, 9, 10))
+
+
 def test_money_day_is_the_last_income_of_the_list() -> None:
     assert money_day(tab()) == 30
     assert money_day(None) is None
@@ -587,24 +602,20 @@ def test_done_when_collected_reaches_the_target() -> None:
 
 
 def test_the_share_goes_to_the_cushion_under_a_month() -> None:
-    found = screen(
-        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(500)
-    )
-    assert found.share_to == "cushion"  # 6 млн при тратах 10 млн — 0,6 месяца
+    found = screen(piggy_row(**GOAL), fact=life_months(), share=0.1, budget=frozen(500))
+    assert found.share_to == "cushion"  # 6 млн при месяце жизни 10 млн — 0,6 месяца
     assert state(found, "car001").this_month == 0
 
 
 def test_a_goal_without_a_part_is_not_in_the_month_plan() -> None:
     # иначе экран пишет «пополам: подушка и «Машина»», а план года — «Машина 0»
-    found = screen(
-        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(500)
-    )
+    found = screen(piggy_row(**GOAL), fact=life_months(), share=0.1, budget=frozen(500))
     assert found.plan[0].goals == {}
 
 
 def test_the_share_splits_between_a_month_and_the_target() -> None:
     found = screen(
-        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(2000)
+        piggy_row(**GOAL), fact=life_months(), share=0.1, budget=frozen(2000)
     )
     assert found.share_to == "split"  # 24 млн — 2,4 месяца
     # 10 % от поступлений 12 млн — 1,2 млн, половина цели: 600 000 = $50
@@ -615,7 +626,7 @@ def test_the_share_splits_between_a_month_and_the_target() -> None:
 
 def test_the_share_goes_to_goals_from_the_target() -> None:
     found = screen(
-        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(6000)
+        piggy_row(**GOAL), fact=life_months(), share=0.1, budget=frozen(6000)
     )
     assert found.share_to == "goals"  # 72 млн — 7,2 месяца из 6
     assert state(found, "car001").this_month == 100
@@ -628,7 +639,7 @@ def test_a_goal_at_its_target_passes_its_part() -> None:
         piggy_row(**car),
         piggy_row(**laptop),
         moves=(move_row(id="car001", day="01.09.2026", amount=1000, currency="USD"),),
-        fact=spending_months(),
+        fact=life_months(),
         share=0.1,
         budget=frozen(2000),  # подушка 1000 $ = 12 млн — 1,2 месяца
     )
@@ -637,6 +648,70 @@ def test_a_goal_at_its_target_passes_its_part() -> None:
         0,
         50,
     )
+
+
+def test_under_a_month_the_share_splits_in_half_with_the_cushion() -> None:
+    # 50 % от 12 млн — 6 млн в месяц; подушка 500 $ = 6 млн — нехватка 6 млн
+    found = screen(
+        piggy_row(**TRIP), fact=HOME, share=0.5, today=NOVEMBER_10, budget=frozen(500)
+    )
+    assert [(month.items, month.cushion) for month in found.plan[:3]] == [
+        ({"tr0001": pytest.approx(3_000_000)}, pytest.approx(3_000_000)),
+        ({"tr0001": pytest.approx(3_000_000)}, pytest.approx(3_000_000)),
+        # месяц жизни набран — как сейчас: «Отпуску» его ступень, остальное подушке
+        ({"tr0001": pytest.approx(4_800_000)}, pytest.approx(1_200_000)),
+    ]
+    trip = state(found, "tr0001")
+    assert (trip.this_month, trip.status) == (250, "on_track")
+    assert found.cushion_need == pytest.approx(6_000_000)
+
+
+def test_what_the_cushion_does_not_need_goes_to_the_piggies() -> None:
+    # подушке до месяца не хватает 600 000: ей 600 000, «Новому году» — 5,4 млн
+    found = screen(
+        piggy_row(), fact=HOME, share=0.5, today=NOVEMBER_10, budget=frozen(950)
+    )
+    assert found.plan[0].items == {"p3k9za": pytest.approx(5_400_000)}
+    assert found.plan[0].cushion == pytest.approx(600_000)
+    new_year = state(found, "p3k9za")
+    assert (new_year.status, new_year.short) == ("short", 6_600_000)
+
+
+def test_from_a_month_of_life_the_share_goes_as_before() -> None:
+    found = screen(
+        piggy_row(), fact=HOME, share=0.5, today=NOVEMBER_10, budget=frozen(1_300)
+    )
+    assert (found.plan[0].items, found.plan[0].cushion) == (
+        {"p3k9za": pytest.approx(6_000_000)},
+        0,
+    )
+    assert found.cushion_need == 0
+
+
+def test_october_keeps_its_share_the_half_starts_in_november() -> None:
+    found = screen(piggy_row(), fact=HOME, share=0.5, budget=frozen(500))  # 17.10
+    assert (found.plan[0].items, found.plan[0].cushion) == (
+        {"p3k9za": pytest.approx(6_000_000)},
+        0,
+    )
+    assert (found.plan[1].items, found.plan[1].cushion) == (
+        {"p3k9za": pytest.approx(3_000_000)},
+        pytest.approx(3_000_000),
+    )
+    assert found.cushion_need == 0  # «сейчас» в октябре — по-старому
+
+
+def test_the_percent_needed_counts_the_cushions_half() -> None:
+    # «Отпуску» к июню — 30 млн за 7 месяцев, подушке — 6 млн: (30 + 6) / 7 ≈ 5,14
+    # млн из 12 млн — 43 %; с подушкой от месяца — 30 / 7 ≈ 4,29 млн, 36 %
+    found = screen(
+        piggy_row(**TRIP), fact=HOME, share=0.3, today=NOVEMBER_10, budget=frozen(500)
+    )
+    assert found.percent_needed == pytest.approx(0.43)
+    calm = screen(
+        piggy_row(**TRIP), fact=HOME, share=0.3, today=NOVEMBER_10, budget=frozen(1_300)
+    )
+    assert calm.percent_needed == pytest.approx(0.36)
 
 
 def test_the_cushion_is_the_frozen_money_without_the_piggies_now() -> None:
@@ -838,7 +913,7 @@ def test_a_goal_gets_no_more_than_it_lacks() -> None:
     found = screen(
         piggy_row(**car),
         moves=(move_row(id="car001", day="01.09.2026", amount=980, currency="USD"),),
-        fact=spending_months(),
+        fact=life_months(),
         share=0.1,
         budget=frozen(6000),  # подушка 5020 $ ≈ 6 месяцев — вся доля целям
     )

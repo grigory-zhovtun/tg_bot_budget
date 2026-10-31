@@ -39,6 +39,7 @@ class SyncSheets:
         ]
         self.journal = [list(PIGGY_JOURNAL_HEADER), *(list(row) for row in moves)]
         self.fact = [FACT_HEADER, GIFTS]
+        self.tabs: dict[str, list[list[Any]]] = {"Jan 27": tab()}  # вкладки месяцев
         self.cells: list[dict[str, Any]] = []
         self.formulas: list[int] = []
         self.updates: list[tuple[str, dict[str, Any]]] = []
@@ -49,9 +50,9 @@ class SyncSheets:
     def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
         if name == config.FACT_SHEET_NAME:
             return self.fact
-        if name != "Jan 27":
+        if name not in self.tabs:
             raise WorksheetNotFound(name)
-        return tab()
+        return self.tabs[name]
 
     def get_rates(self, max_age: float = 0.0) -> Any:
         return RATES
@@ -182,3 +183,20 @@ def test_goal_cells_without_open_piggies_leave_the_cell() -> None:
 def test_goal_cells_need_the_goal_row() -> None:
     cells = goal_cells(SyncSheets([ROW], []), date(2026, 10, 17), *CATALOG)
     assert cells(tab(), date(2026, 11, 1)) is None
+
+
+def test_goal_cells_count_the_cushions_half_by_the_current_tab() -> None:
+    # 10.11: долларов нет — подушки нет, месяц жизни 12 млн; ноябрь пополам: «Новый
+    # год» к 20.12 соберёт 3 млн и потратит их в декабре — 6 − 3 млн
+    sheets = SyncSheets([ROW], [])
+    home = [
+        fact_row(date(2026, m, 5), "🏚️ ДОМ", "квартплата", 12_000_000)
+        for m in (8, 9, 10)
+    ]
+    sheets.fact = [FACT_HEADER, *home]
+    sheets.tabs["Nov 26"] = tab()
+    catalog = (CATALOG[0], [*CATALOG[1], "🏚️ ДОМ"], CATALOG[2])
+    cells = goal_cells(sheets, date(2026, 11, 10), *catalog)
+    assert cells(tab(goal=2_000_000), date(2026, 12, 1)) == (20, 3_000_000)
+    del sheets.tabs["Nov 26"]  # без вкладки месяца — без подушки, как раньше
+    assert cells(tab(goal=2_000_000), date(2026, 12, 1)) == (20, 0)
