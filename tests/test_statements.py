@@ -6,6 +6,7 @@ import pytest
 
 from app import statements as st
 from app.domain import Catalog, MerchantBook, merchant_core
+from app.transfers import transfer_rows
 
 SOURCES = ["VISA 9090 UZS", "UZCARD 5656 UZS", "HUMO 7007 UZS", "VISA 3434 USD"]
 CATALOG = Catalog(
@@ -648,6 +649,30 @@ def test_transfer_pairs_with_an_already_loaded_half() -> None:
     [item] = plan.rows
     assert item.row.comment == "AI: перевод HUMO 7007 ← VISA 9090 (свой)"
     assert item.review == ""
+
+
+def test_a_transfer_from_the_app_is_not_written_again() -> None:
+    # «Ввод» записал перевод 5-го; выписки видят снятие 5-го и зачисление 6-го
+    day = date(2026, 10, 5)
+    rows = transfer_rows(
+        500_000, None, "", "VISA 9090 UZS", "HUMO 7007 UZS", "💳 СЧЕТА", "переводы", day
+    )
+    values = fact_values(
+        *(
+            [serial(r.day), r.category, r.subcategory, r.amount, "", r.comment]
+            + [r.currency, r.source]
+            for r in rows
+        )
+    )
+    details = "Перевод с VISA UZS KB на HUMO KB через МП"
+    out = txn("VISA 9090 UZS", -500_000, details, date(2026, 10, 5))
+    inc = txn("HUMO 7007 UZS", 500_000, details, date(2026, 10, 6))
+    statements = [
+        st.Statement(t.source, [t], (date(2026, 10, 1), STATEMENT_DAY), STATEMENT_DAY)
+        for t in (out, inc)
+    ]
+    plan = st.plan_import(statements, CATALOG, values, {})
+    assert (plan.rows, plan.already) == ([], 2)
 
 
 def test_first_word_match_is_optional() -> None:
