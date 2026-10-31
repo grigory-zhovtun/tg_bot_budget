@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from app.services.google_sheets import PERCENT_LABEL
+from app.services.google_sheets import LIFE_LABEL, PERCENT_LABEL
 from app.services.piggy import JOURNAL_HEADER, LIST_HEADER, Book, Piggy, read_book
 
 CURRENCIES = {"UZS", "USD"}
@@ -118,6 +118,14 @@ def test_reads_the_percent_and_the_order() -> None:
     assert found.percent == pytest.approx(0.025)
     assert found.percent_bad is False
     assert [piggy.order for piggy in found.piggies] == [2, None]
+
+
+def test_reads_the_mandatory_groups_next_to_the_percent() -> None:
+    head = [*LIST_HEADER, PERCENT_LABEL, 5, LIFE_LABEL, "🏚️ ДОМ, 🚌 ТРАНСПОРТ"]
+    assert book(piggy_row(), head=head).life_groups == ("🏚️ ДОМ", "🚌 ТРАНСПОРТ")
+    assert book(piggy_row()).life_groups is None  # пусто — группы по умолчанию
+    blank = [*LIST_HEADER, PERCENT_LABEL, 5, LIFE_LABEL, " , "]
+    assert book(piggy_row(), head=blank).life_groups == ()
 
 
 @pytest.mark.parametrize("cell", ["", "abc", -5, 150])
@@ -688,6 +696,23 @@ def test_the_cushion_counts_months_of_life() -> None:
     assert (cushion.monthly, cushion.life.groups) == (12_000_000, ("🏚️ ДОМ",))
     assert cushion.shown_months == 1.3
     assert [step.months for step in cushion.steps] == [3, 6]
+
+
+def test_the_month_of_life_follows_the_groups_in_the_sheet() -> None:
+    home = tuple(
+        fact_row(date(2026, m, 5), "🏚️ ДОМ", "квартплата", 12_000_000)
+        for m in (7, 8, 9)
+    )
+    food = tuple(
+        fact_row(date(2026, m, 6), "🍔 ЕДА", "кафе", 6_000_000) for m in (7, 8, 9)
+    )
+    head = [*LIST_HEADER, PERCENT_LABEL, "", LIFE_LABEL, "🏚️ ДОМ, 🍔 ЕДА, 🚀 КОСМОС"]
+    found = screen(fact=(*home, *food), budget=frozen(1_500), head=head)
+    cushion = found.cushion
+    assert cushion is not None and cushion.life is not None
+    # в порядке справочника; «🚀 КОСМОС» в справочнике нет — пропущен
+    assert cushion.life.groups == ("🍔 ЕДА", "🏚️ ДОМ")
+    assert (cushion.monthly, cushion.shown_months) == (18_000_000, 1.0)
 
 
 def test_piggies_over_the_frozen_money_warn() -> None:

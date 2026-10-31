@@ -218,10 +218,13 @@ def _bare(group: str) -> str:
     return leading_emoji(group)[1].strip().casefold()
 
 
-def life_groups(catalog: Iterable[str]) -> tuple[str, ...]:
-    """Обязательные группы справочника (LIFE_GROUPS по названию без эмодзи), в его
-    порядке; каких нет в справочнике — пропущены."""
-    names = {_bare(group) for group in LIFE_GROUPS}
+def life_groups(
+    catalog: Iterable[str], chosen: Iterable[str] = LIFE_GROUPS
+) -> tuple[str, ...]:
+    """Обязательные группы справочника — chosen (по умолчанию LIFE_GROUPS, иначе S1
+    листа «Копилки») по названию без эмодзи, в порядке справочника; каких нет в
+    справочнике — пропущены."""
+    names = {_bare(group) for group in chosen}
     return tuple(group for group in catalog if _bare(group) in names)
 
 

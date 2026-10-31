@@ -27,6 +27,7 @@ from app.services.google_sheets import (
 )
 from app.services.plan import read_plan
 from app.services.savings import (
+    LIFE_GROUPS,
     Cushion,
     life_groups,
     life_month,
@@ -91,6 +92,8 @@ class Book:
     moves: tuple[Move, ...]  # в порядке журнала, только у копилок из списка
     percent: float | None = None  # доля с поступлений из Q1; None — пусто или плохо
     percent_bad: bool = False  # в Q1 не число от 0 до 100
+    # обязательные группы месяца жизни из S1; None — ячейка пустая (по умолчанию)
+    life_groups: tuple[str, ...] | None = None
 
     def moves_of(self, piggy_id: str) -> tuple[Move, ...]:
         return tuple(move for move in self.moves if move.piggy_id == piggy_id)
@@ -134,6 +137,15 @@ def _percent(head: Sequence[Any]) -> tuple[float | None, bool]:
     if value is None or not 0 <= value <= 100:
         return None, True
     return value / 100, False
+
+
+def _life(head: Sequence[Any]) -> tuple[str, ...] | None:
+    """S1 шапки «Копилок» → обязательные группы месяца жизни по запятым, без пробелов
+    по краям и пустых; пустая ячейка — None (группы по умолчанию)."""
+    cell = _text(_cells(head, PIGGY_WIDTH)[18])
+    if not cell:
+        return None
+    return tuple(name.strip() for name in cell.split(",") if name.strip())
 
 
 def _moves(rows: Sequence[Sequence[Any]]) -> list[Move]:
@@ -263,6 +275,7 @@ def read_book(
         tuple(move for move in moves if move.piggy_id in seen),
         percent,
         bad,
+        _life(list_rows[0]) if list_rows else None,
     )
 
 
@@ -927,7 +940,8 @@ def savings_screen(
 
     share — процент с поступлений по умолчанию; Q1 листа его заменяет, а percent и
     order — предпросмотр окон «Процент» и «Порядок» (ничего не пишется). groups —
-    справочник групп бота: из него обязательные группы месяца жизни подушки."""
+    справочник групп бота: из него обязательные группы месяца жизни подушки — какие
+    названы в S1 листа (пусто — по умолчанию)."""
     month = today.replace(day=1)
     before = month - timedelta(days=1)
     start = balances(book, frame, rates, before)  # план месяца — от остатков на 1-е
@@ -948,6 +962,9 @@ def savings_screen(
         portion, source = share, "bad" if book.percent_bad else "default"
     base = _income(rows) or _average_income(frame, today)
     capacity = portion * base
+    # месяц жизни — по обязательным группам из S1 листа (пусто — по умолчанию)
+    chosen = LIFE_GROUPS if book.life_groups is None else book.life_groups
+    life = life_month(frame, today, life_groups(groups, chosen))
 
     # сроки и их нужда в сумах — слоями: ближайшие сроки по порядку важности, потом
     # сроки следующего года в том же порядке
@@ -1194,7 +1211,6 @@ def savings_screen(
     if budget is not None and frozen is not None and currency and frozen_rate:
         envelopes = piggies_total(book, now, rates, currency)
         kept, over, lacking = frozen_split(frozen, envelopes, budget.frozen_total)
-        life = life_month(frame, today, life_groups(groups))
         cushion = Cushion(
             kept,
             currency,

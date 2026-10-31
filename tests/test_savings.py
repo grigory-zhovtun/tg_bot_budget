@@ -147,6 +147,16 @@ def test_the_mandatory_groups_are_the_defaults_in_the_catalog() -> None:
     assert life_groups(["🍔 ЕДА"]) == ()
 
 
+def test_the_chosen_groups_are_found_in_the_catalog() -> None:
+    catalog = ["🍔 ЕДА", "🚌 ТРАНСПОРТ", "🏚 ДОМ", "🌛 ЕЖЕМЕСЯЧНО"]
+    # в порядке справочника; «🏚️ ДОМ» — та же группа, «🚀 КОСМОС» нет
+    assert life_groups(catalog, ("🏚️ ДОМ", "🍔 ЕДА", "🚀 КОСМОС")) == (
+        "🍔 ЕДА",
+        "🏚 ДОМ",
+    )
+    assert life_groups(catalog, ()) == ()
+
+
 @pytest.mark.parametrize(
     ("dollars", "shown", "steps"),
     [

@@ -129,6 +129,7 @@ from app.web.schemas import (
     GroupOut,
     GroupPlanOut,
     HintOut,
+    LifeIn,
     MessageOut,
     MonthPlanOut,
     MoveIn,
@@ -225,6 +226,7 @@ PIGGY_FIELDS = {
     "key": "Трата не подходит — обновите «Накопления»",
     "percent": "Процент — от 0 до 100, не больше одного знака после запятой",
     "ids": "Копилки не те — обновите «Накопления»",
+    "groups": "Выберите группы трат",
 }
 PIGGY_CHANGED = "Копилки поменялись — обновите «Накопления»"
 PIGGY_GONE = "Копилку уже закрыли — обновите «Накопления»"
@@ -1627,6 +1629,31 @@ def routes(application: Application) -> list[Route]:
         text = " · ".join(f"{n}. {names[piggy_id]}" for piggy_id, n in numbers.items())
         return await written(user.id, author, f"порядок копилок|{text}")
 
+    async def set_life(request: Request) -> JSONResponse:
+        """Обязательные группы месяца жизни — в S1 «Копилок», в порядке справочника:
+        только группы трат, без повторов и запятых (запятая делит ячейку)."""
+        user = current_user(request)
+        body = await piggy_body(request, LifeIn)
+        if isinstance(body, JSONResponse):
+            return body
+        _, groups, _ = catalog()
+        spending = [group for group in groups if group not in CLOSED_GROUPS]
+        chosen = [str(group) for group in body.groups]
+        if len(set(chosen)) != len(chosen) or any(
+            group not in spending or "," in group for group in chosen
+        ):
+            return piggy_error({"groups"})
+        ordered = [group for group in spending if group in chosen]
+        author = await author_name(application.bot, user) or ""
+        gs = application.bot_data["gs_service"]
+        try:
+            async with piggy_lock():
+                await asyncio.to_thread(gs.write_life_groups, ordered)
+        except Exception:
+            logger.exception("Piggy life groups failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        return await written(user.id, author, f"месяц жизни|{', '.join(ordered)}")
+
     async def piggy_body(request: Request, model: Any) -> Any:
         try:
             return model.model_validate_json(await request.body() or b"{}")
@@ -2093,6 +2120,7 @@ def routes(application: Application) -> list[Route]:
         Route("/piggy/save", save_piggies, methods=["POST"]),
         Route("/piggy/percent", set_percent, methods=["PUT"]),
         Route("/piggy/order", set_order, methods=["PUT"]),
+        Route("/piggy/life", set_life, methods=["PUT"]),
         Route("/piggy/{piggy_id}", update_piggy, methods=["PUT"]),
         Route("/piggy/{piggy_id}/close", close_piggy, methods=["POST"]),
         Route("/piggy/{piggy_id}/moves", move_piggy, methods=["POST"]),

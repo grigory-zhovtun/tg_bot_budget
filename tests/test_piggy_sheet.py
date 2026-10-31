@@ -7,6 +7,7 @@ from gspread.utils import ValueInputOption
 
 from app import config
 from app.services.google_sheets import (
+    LIFE_LABEL,
     PERCENT_LABEL,
     PIGGY_JOURNAL_HEADER,
     PIGGY_LIST_HEADER,
@@ -94,7 +95,7 @@ def test_creates_both_sheets_once_with_headers() -> None:
     service.ensure_piggy_sheets()
     service.ensure_piggy_sheets()
     book = service.sheet
-    assert book.created == [(LIST, 200, 17), (JOURNAL, 200, 8)]
+    assert book.created == [(LIST, 200, 19), (JOURNAL, 200, 8)]
     assert book.sheets[LIST].rows == [PIGGY_LIST_HEADER]
     assert book.sheets[JOURNAL].rows == [PIGGY_JOURNAL_HEADER]
 
@@ -175,11 +176,28 @@ def test_the_percent_widens_an_old_sheet_and_goes_into_p1_q1() -> None:
         Sheet(JOURNAL, [PIGGY_JOURNAL_HEADER]),
     )
     service.write_piggy_percent(5)
-    assert service.sheet.sheets[LIST].added_cols == [3]
+    assert service.sheet.sheets[LIST].added_cols == [5]
     assert service.sheet.batches == [
         {
             "valueInputOption": "RAW",
             "data": [{"range": f"'{LIST}'!P1:Q1", "values": [[PERCENT_LABEL, 5]]}],
+        }
+    ]
+
+
+def test_the_mandatory_groups_widen_the_sheet_and_go_into_r1_s1() -> None:
+    service = service_with(Sheet(LIST, [PIGGY_LIST_HEADER, ROW], cols=17))
+    service.write_life_groups(["🏚️ ДОМ", "🌛 ЕЖЕМЕСЯЧНО"])
+    assert service.sheet.sheets[LIST].added_cols == [2]
+    assert service.sheet.batches == [
+        {
+            "valueInputOption": "RAW",
+            "data": [
+                {
+                    "range": f"'{LIST}'!R1:S1",
+                    "values": [[LIFE_LABEL, "🏚️ ДОМ, 🌛 ЕЖЕМЕСЯЧНО"]],
+                }
+            ],
         }
     ]
 
@@ -190,7 +208,7 @@ def test_the_order_goes_into_o_by_id() -> None:
         Sheet(JOURNAL, [PIGGY_JOURNAL_HEADER]),
     )
     assert service.write_piggy_order({"p3k9za": 2, "m4c8x1": 1})
-    assert service.sheet.sheets[LIST].added_cols == []
+    assert service.sheet.sheets[LIST].added_cols == [2]
     assert service.sheet.batches == [
         {
             "valueInputOption": "RAW",

@@ -16,6 +16,7 @@ from app.handlers.receipts import DIRTY
 from app.services.analytics_service import SavingsTab
 from app.services.day_budget import day_budget
 from app.services.google_sheets import (
+    LIFE_LABEL,
     PERCENT_LABEL,
     PIGGY_JOURNAL_HEADER,
     PIGGY_LIST_HEADER,
@@ -72,6 +73,7 @@ class PiggySheets:
         self.updates: list[tuple[str, dict[str, Any]]] = []
         self.percents: list[float] = []
         self.orders: list[dict[str, int]] = []
+        self.lives: list[list[str]] = []
 
     def get_piggy(self, max_age: float = 0.0) -> tuple[list[Any], list[Any]]:
         return [list(r) for r in self.list or []], [list(r) for r in self.journal or []]
@@ -130,6 +132,16 @@ class PiggySheets:
             row[14] = number
         self.orders.append(dict(numbers))
         return True
+
+    def write_life_groups(self, groups: list[str]) -> None:
+        if self.fail:
+            raise ConnectionError("Google is down")
+        self.ensure_piggy_sheets()
+        assert self.list is not None
+        head = self.list[0] + [""] * (19 - len(self.list[0]))
+        head[17:19] = [LIFE_LABEL, ", ".join(groups)]
+        self.list[0] = head
+        self.lives.append(list(groups))
 
 
 class PiggyAnalytics:
@@ -654,3 +666,57 @@ def test_a_stale_or_bad_order_is_rejected(
     )
     assert (response.status_code, response.json()["error"]["code"]) == (status, code)
     assert sheets.orders == []
+
+
+def test_put_life_writes_s1_and_notes_the_other() -> None:
+    application, sheets = setup(PiggySheets([ROW], []))
+    client = client_for(application)
+    response = client.put(
+        "/api/piggy/life", json={"groups": ["🌛 ЕЖЕМЕСЯЧНО", "🏚️ ДОМ"]}, headers=auth()
+    )
+    assert response.status_code == 200
+    assert sheets.lives == [["🏚️ ДОМ", "🌛 ЕЖЕМЕСЯЧНО"]]  # в порядке справочника
+    assert response.json()["cushion"]["life_groups"] == ["🏚️ ДОМ", "🌛 ЕЖЕМЕСЯЧНО"]
+    assert told(application) == ["🐷 Иван — месяц жизни: 🏚️ ДОМ, 🌛 ЕЖЕМЕСЯЧНО"]
+    only = client.put("/api/piggy/life", json={"groups": ["🍔 ЕДА"]}, headers=auth())
+    assert only.json()["cushion"]["life_groups"] == ["🍔 ЕДА"]
+
+
+@pytest.mark.parametrize(
+    "groups", [[], ["🚀 КОСМОС"], ["💰 ДОХОДЫ"], ["🏚️ ДОМ", "🏚️ ДОМ"]]
+)
+def test_bad_life_groups_are_rejected(groups: list[str]) -> None:
+    application, sheets = setup(PiggySheets([ROW], []))
+    response = client_for(application).put(
+        "/api/piggy/life", json={"groups": groups}, headers=auth()
+    )
+    assert response.status_code == 422
+    assert list(response.json()["error"]["fields"]) == ["groups"]
+    assert sheets.lives == []
+
+
+def test_a_group_with_a_comma_is_not_stored() -> None:
+    application, sheets = setup(PiggySheets([ROW], []))
+    application.bot_data["categories"] = [
+        *application.bot_data["categories"],
+        "🧩 А, Б",
+    ]
+    response = client_for(application).put(
+        "/api/piggy/life", json={"groups": ["🧩 А, Б"]}, headers=auth()
+    )
+    assert response.status_code == 422
+    assert list(response.json()["error"]["fields"]) == ["groups"]
+    assert sheets.lives == []
+
+
+def test_a_failed_life_write_is_503() -> None:
+    application, sheets = setup(PiggySheets([ROW], []))
+    sheets.fail = True
+    response = client_for(application).put(
+        "/api/piggy/life", json={"groups": ["🏚️ ДОМ"]}, headers=auth()
+    )
+    assert (response.status_code, response.json()["error"]["code"]) == (
+        503,
+        "sheets_unavailable",
+    )
+    assert sheets.lives == []

@@ -86,9 +86,11 @@ CALENDAR_HEADER = [
 PIGGY_LIST_HEADER = ["ID", "Копилка", "Цель", "Валюта", "Срок", "Повтор", "Группа",
                      "Подкатегория", "Отложено", "Потрачено", "Осталось",
                      "В этом месяце", "Кто", "Закрыта", "Порядок"]  # fmt: skip
-# список — A:O, процент с поступлений — P1:Q1 (подпись и число)
-PIGGY_WIDTH = 17
+# список — A:O, процент с поступлений — P1:Q1 (подпись и число), обязательные группы
+# месяца жизни — R1:S1 (подпись и названия через «, »; пусто — по умолчанию)
+PIGGY_WIDTH = 19
 PERCENT_LABEL = "Откладываем с поступлений, %"
+LIFE_LABEL = "Месяц жизни: обязательные группы"
 PIGGY_JOURNAL_HEADER = ["Дата", "ID", "Копилка", "Сумма", "Валюта", "Что", "Кто",
                         "Ключ"]  # fmt: skip
 
@@ -751,8 +753,9 @@ class GoogleSheetsService:
 
     def _wide_piggy_list(self) -> Any:
         """Лист «Копилки» шириной не меньше PIGGY_WIDTH: листы до «Порядка» — в 14
-        колонок, запись в O или P1:Q1 за их край Google отклоняет. Без повтора:
-        повтор после потерянного ответа добавил бы колонки дважды."""
+        колонок, до месяца жизни — в 17, запись в O, P1:Q1 или R1:S1 за их край
+        Google отклоняет. Без повтора: повтор после потерянного ответа добавил бы
+        колонки дважды."""
         self.ensure_piggy_sheets()
         worksheet = self._worksheet(config.PIGGY_SHEET_NAME)
         if worksheet.col_count < PIGGY_WIDTH:
@@ -765,6 +768,21 @@ class GoogleSheetsService:
         name = config.PIGGY_SHEET_NAME
         self.write_cells(
             [{"range": f"'{name}'!P1:Q1", "values": [[PERCENT_LABEL, percent]]}]
+        )
+        self._written()
+
+    def write_life_groups(self, groups: Sequence[str]) -> None:
+        """R1:S1 «Копилок»: подпись и обязательные группы месяца жизни через «, »
+        (RAW)."""
+        self._wide_piggy_list()
+        name = config.PIGGY_SHEET_NAME
+        self.write_cells(
+            [
+                {
+                    "range": f"'{name}'!R1:S1",
+                    "values": [[LIFE_LABEL, ", ".join(groups)]],
+                }
+            ]
         )
         self._written()
 

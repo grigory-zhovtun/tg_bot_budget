@@ -812,6 +812,12 @@ class OrderIn(ApiModel):
     ids: list[str] = Field(min_length=1, max_length=50)
 
 
+class LifeIn(ApiModel):
+    """Обязательные группы месяца жизни подушки — группы трат справочника."""
+
+    groups: list[str] = Field(min_length=1, max_length=40)
+
+
 class SaveIn(ApiModel):
     """«Отложил…» одной суммой на все копилки."""
 
