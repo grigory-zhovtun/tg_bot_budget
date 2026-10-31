@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
 
 
 class ApiModel(BaseModel):
@@ -55,7 +55,10 @@ class BootstrapOut(ApiModel):
 
 
 class ExpenseIn(ApiModel):
-    """Трата из формы: сумма строкой («12.50»), чтобы центы не терялись во float."""
+    """Запись «Ввода»: трата или зачисление; сумма строкой («12.50»).
+
+    Строкой — чтобы центы не терялись во float.
+    """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -66,6 +69,8 @@ class ExpenseIn(ApiModel):
     amount: Decimal = Field(gt=0, le=Decimal(10) ** 12, decimal_places=2)
     comment: str = Field(default="", max_length=200)
     day: date | None = None  # нет — сегодня по часам бота, а не телефона
+    # «Зачислить»: в D минус, у «💰 ДОХОДЫ» плюс; нет поля — трата
+    incoming: StrictBool = False
 
 
 class CalendarIn(ApiModel):

@@ -194,6 +194,7 @@ FIELD_MESSAGES = {
     "weekdays": "Выберите дни недели",
     "name": "Название — до 60 символов",
     "repeat": "Такого повтора нет — обновите приложение",
+    "incoming": "Знак записи не читается — обновите приложение",
 }
 SHEETS_DOWN = "Таблица не ответила — попробуйте ещё раз"
 PLAN_LOCK = "plan_lock"  # bot_data: одно сохранение плана за раз — проверка и запись
@@ -1345,7 +1346,7 @@ def routes(application: Application) -> list[Route]:
         try:
             row = entry_row(
                 float(entry.amount),
-                False,
+                entry.incoming,
                 entry.comment,
                 entry.source,
                 entry.category,
