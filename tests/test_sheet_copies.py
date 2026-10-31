@@ -342,6 +342,37 @@ def test_a_failed_read_of_the_month_tab_still_fails() -> None:
         read_month_sheets(DownTab(tabs, "Oct 26"), "Oct 26")
 
 
+PIGGIES = [["ID", "Копилка"], ["cash01", "Запас"]]
+JOURNAL = [["Дата", "ID"], ["05.10.2026", "cash01"]]
+
+
+def test_piggy_sheets_come_with_the_month_when_asked() -> None:
+    tabs = {"Oct 26": [["План"]], "fact": FACT, "Копилки": PIGGIES}
+    source = MonthSheetsSource({**tabs, "Журнал копилок": JOURNAL})
+    sheets = read_month_sheets(source, "Oct 26", max_age=120, piggy=True)
+    assert sheets.piggy == (PIGGIES, JOURNAL)
+    assert ("Копилки", 120) in source.calls
+    assert ("Журнал копилок", 120) in source.calls
+    plain = MonthSheetsSource({**tabs, "Журнал копилок": JOURNAL})
+    assert read_month_sheets(plain, "Oct 26", max_age=120).piggy is None
+    assert not any(name in ("Копилки", "Журнал копилок") for name, _ in plain.calls)
+
+
+def test_missing_piggy_sheets_are_empty() -> None:
+    source = MonthSheetsSource({"Oct 26": [["План"]], "fact": FACT})
+    assert read_month_sheets(source, "Oct 26", piggy=True).piggy == ([], [])
+
+
+def test_a_failed_piggy_read_leaves_the_screen_without_piggies(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    tabs = {"Oct 26": [["План"]], "fact": FACT, "Копилки": PIGGIES}
+    down = DownTab({**tabs, "Журнал копилок": JOURNAL}, "Журнал копилок")
+    sheets = read_month_sheets(down, "Oct 26", piggy=True)
+    assert (sheets.month, sheets.piggy) == ([["План"]], None)
+    assert "Piggy" in caplog.text
+
+
 def test_the_plan_screen_does_not_read_the_calendar() -> None:
     source = MonthSheetsSource({"Oct 26": [["План"]], "fact": FACT})
     sheets = read_month_sheets(source, "Oct 26", calendar=False)
@@ -369,6 +400,28 @@ def test_sheets_are_read_at_the_same_time() -> None:
     source = Waiting({"Oct 26": [], "fact": FACT})
     sheets = read_month_sheets(source, "Oct 26", previous=True)
     assert sheets.fact == FACT
+
+
+def test_piggy_sheets_are_read_at_the_same_time_too() -> None:
+    # семь чтений «Сводки» с копилками — тоже все разом
+    barrier = threading.Barrier(7, timeout=5)
+
+    class Waiting(MonthSheetsSource):
+        def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
+            barrier.wait()
+            return super().get_values(name, max_age)
+
+        def get_rates(self, max_age: float = 0.0) -> Rates:
+            barrier.wait()
+            return super().get_rates(max_age)
+
+        def get_calendar(self, max_age: float = 0.0) -> list[list[Any]]:
+            barrier.wait()
+            return super().get_calendar(max_age)
+
+    source = Waiting({"Oct 26": [], "fact": FACT, "Копилки": PIGGIES})
+    sheets = read_month_sheets(source, "Oct 26", previous=True, piggy=True)
+    assert sheets.piggy == (PIGGIES, [])
 
 
 class JsonResponse:

@@ -48,6 +48,11 @@ export function signedMoney(amount: number, currency: string): string {
   return `${amount < 0 ? "−" : "+"}${moneyText(Math.abs(amount), currency)}`;
 }
 
+/** «15-го» не рвётся по дефису: неразрывный дефис. */
+export function glued(text: string): string {
+  return text.replace(/(\d)-/g, "$1\u2011");
+}
+
 /** Сколько дней от from до to (ISO-даты): «2026-10-09» → «2026-10-15» — 6. */
 export function daysBetween(from: string, to: string): number {
   const day = 24 * 60 * 60 * 1000;

@@ -48,6 +48,7 @@ from app.message_log import LoggingRequest, MessageLog
 from app.services.ai_service import GeminiService
 from app.services.analytics_service import AnalyticsService
 from app.services.google_sheets import GoogleSheetsService
+from app.services.piggy_sync import bot_catalog
 from app.web import server
 from app.web.auth import webhook_secret
 
@@ -273,7 +274,10 @@ def build_application(
         icons=icons or {},
         last_source=last_source,
         ai_service=GeminiService(gs_service),
-        analytics_service=AnalyticsService(gs_service),
+        # справочник — на момент чтения: копилки «Заморожено» проверяются по нему
+        analytics_service=AnalyticsService(
+            gs_service, catalog=lambda: bot_catalog(app.bot_data)
+        ),
         # клавиатуры и уборка из system!Q:U; не прочитались — все выключены
         chats=dict(chat_states or {}),
         chats_loaded=chat_states is not None,

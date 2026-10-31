@@ -1,19 +1,13 @@
 import { useCallback, useState, type ReactNode } from "react";
 import type { Api, Dashboard, Tomorrow } from "../api";
-import {
-  dayLabel,
-  inCurrency,
-  longDay,
-  money,
-  moneyText,
-  signedMoney,
-} from "../format";
+import { dayLabel, glued, inCurrency, longDay, money } from "../format";
 import { days, monthName } from "../plan/months";
 import { useResource, useStore } from "../store";
 import Ahead, { NoForecastNote } from "./Ahead";
 import { Big, Card, Fact, Good, Line, Table, Warn } from "./blocks";
 import CardBalances from "./CardBalances";
 import CategoryChart from "./CategoryChart";
+import FrozenCard from "./FrozenCard";
 import SectionSwitch from "./SectionSwitch";
 import SpendingChart from "./SpendingChart";
 import { paceVerdict } from "./spending";
@@ -27,11 +21,6 @@ function Skeleton() {
       ))}
     </div>
   );
-}
-
-/** «15-го» не рвётся по дефису: неразрывный дефис. */
-function glued(text: string): string {
-  return text.replace(/(\d)-/g, "$1\u2011");
 }
 
 /** Деньги лимита: сумы, аванс срока, платежи до его конца и дни срока. */
@@ -193,22 +182,6 @@ function Today({ data }: { data: Dashboard }) {
   );
 }
 
-/** «Заморожено» — своей карточкой. */
-function Frozen({ data }: { data: Dashboard }) {
-  const frozen = data.frozen;
-  if (!frozen) return null;
-  return (
-    <Card label="Заморожено">
-      <Fact>{`🧊 Заморожено ${moneyText(frozen.amount, frozen.currency)}`}</Fact>
-      <Line>
-        {Math.round(frozen.change * 100) === 0
-          ? "с 1-го числа без изменений"
-          : `с 1-го числа ${signedMoney(frozen.change, frozen.currency)}`}
-      </Line>
-    </Card>
-  );
-}
-
 /** Хватит ли сумов до зарплаты при нынешнем темпе и сколько долларов обменять;
  * «сейчас» — сумы с утра уже могли измениться. */
 function Sums({ data }: { data: Dashboard }) {
@@ -283,7 +256,9 @@ function SectionCards({ data, section }: SectionProps) {
           {/* лимита нет именно здесь — здесь и объясняем */}
           {data.status === "no_forecast" && <NoForecastNote />}
           <Today data={data} />
-          <Frozen data={data} />
+          {data.frozen && (
+            <FrozenCard frozen={data.frozen} today={data.today} />
+          )}
           <Sums data={data} />
           {data.cards.length > 0 && (
             <CardBalances cards={data.cards} today={data.today} />

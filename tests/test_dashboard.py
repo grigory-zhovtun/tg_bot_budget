@@ -10,8 +10,10 @@ from app.services.dashboard import build_dashboard, subscriptions
 from app.services.day_budget import DayPoint, day_budget, read_daily
 from tests.test_analytics_service import serial
 from tests.test_day_budget import (
+    CATALOG,
     FACT_HEADER,
     OPENING,
+    PIGGY_TABS,
     RATES,
     Sheets,
     fact_row,
@@ -265,3 +267,16 @@ def test_the_dashboard_may_take_copies_of_the_sheets() -> None:
     assert AnalyticsService(sheets).dashboard(TODAY, max_age=120) is not None
     # вкладка, прошлая вкладка, курсы, fact и «Календарь» — копии не старше 2 минут
     assert sheets.ages == [120, 120, 120, 120, 120]
+
+
+def test_the_dashboard_reads_the_piggies_with_the_catalog() -> None:
+    sheets = Sheets(
+        {"fact": [FACT_HEADER, *OPENING, CAFE], "Oct 26": tab(), **PIGGY_TABS}
+    )
+    found = AnalyticsService(sheets, catalog=lambda: CATALOG).dashboard(
+        TODAY, max_age=120
+    )
+    assert found is not None and found.budget is not None
+    assert found.budget.piggies == 500
+    # и листы копилок — копии не старше 2 минут, вместе с остальными
+    assert sheets.ages == [120] * 7

@@ -69,7 +69,21 @@ export const dashboardFixture: Dashboard = {
   payday: "2026-10-15",
   advances: 0,
   advance_on: null,
-  frozen: { amount: 1000, currency: "USD", uzs: 12_000_000, change: -50 },
+  // 1 400 $ на карте, квартплата 18-го 400 $ — в сроке до зарплаты
+  frozen: {
+    amount: 1000,
+    currency: "USD",
+    uzs: 12_000_000,
+    change: 0,
+    total: 1400,
+    payments: [{ day: "2026-10-18", name: "Квартплата", amount: 400 }],
+    piggies: 600,
+    cushion: 400,
+    over: 0,
+    lacking: 0,
+    lacking_on: null,
+    target: "до зарплаты 30-го",
+  },
   groups: [
     {
       name: "🍔 ЕДА",
@@ -761,18 +775,30 @@ export const savingsFixture: SavingsScreen = {
     cushion: 0,
     saved: 0,
   },
+  // 1 900 $ на карте − квартплата 400 $ − копилки 400 $ = 1 100 $; месяц жизни —
+  // 12 млн по дому и ежемесячным
   cushion: {
     amount: 1100,
     currency: "USD",
     uzs: 13_200_000,
-    monthly: 40_000_000,
-    months: 0.33,
+    monthly: 12_000_000,
+    months: 1.1,
     target_months: 6,
-    short_uzs: 226_800_000,
-    short: 18_900,
+    short_uzs: 58_800_000,
+    short: 4900,
     frozen: 1500,
     piggies: 400,
     over: 0,
+    card: 1900,
+    payments: [{ day: "2026-10-18", name: "Квартплата", amount: 400 }],
+    lacking: 0,
+    lacking_on: null,
+    life_months: ["2026-07", "2026-08", "2026-09"],
+    life_groups: ["🏚️ ДОМ", "🌛 ЕЖЕМЕСЯЧНО"],
+    steps: [
+      { months: 3, short: 1900, short_uzs: 22_800_000 },
+      { months: 6, short: 4900, short_uzs: 58_800_000 },
+    ],
   },
   piggies: [
     piggy({}),

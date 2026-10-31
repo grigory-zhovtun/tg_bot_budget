@@ -1,7 +1,6 @@
 """Подушка безопасности и норма сбережений: «Сводка» и строка «Отложите» после поступления."""
 
 from datetime import date
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -11,8 +10,11 @@ from app.config import parse_months, parse_share
 from app.domain import Rates, SheetRow
 from app.services.analytics_service import transactions_frame
 from app.services.savings import (
-    cushion_of,
+    Cushion,
+    LifeMonth,
     full_months,
+    life_groups,
+    life_month,
     month_savings,
     monthly_spending,
     save_hint,
@@ -25,11 +27,6 @@ TODAY = date(2026, 10, 17)
 
 def frame(*rows: list[Any]) -> Any:
     return transactions_frame([FACT_HEADER, *rows], RATES)
-
-
-def frozen(amount: float | None, uzs: float = 0.0) -> Any:
-    """Дневной бюджет с «Заморожено» в долларах — только то, что берёт подушка."""
-    return SimpleNamespace(frozen=amount, frozen_currency="USD", frozen_uzs=uzs)
 
 
 def test_full_months_end_before_this_month() -> None:
@@ -116,41 +113,76 @@ def test_without_income_the_rate_is_unknown() -> None:
     assert month_savings(frame(*rows), TODAY).rate is None
 
 
-def test_the_cushion_is_the_frozen_money_in_months_of_spending() -> None:
-    found = cushion_of(frozen(1_800, 21_600_000), RATES, 60_000_000, 6)
-    assert found is not None
-    assert found.months == pytest.approx(0.36)
-    assert found.short_uzs == pytest.approx(360_000_000 - 21_600_000)
-    assert found.short == pytest.approx((360_000_000 - 21_600_000) / 12_000)
+def test_the_month_of_life_counts_only_the_mandatory_groups() -> None:
+    rows = [
+        *(
+            fact_row(date(2026, m, 5), "🏚️ ДОМ", "квартплата", 6_000_000)
+            for m in (7, 8, 9)
+        ),
+        *(fact_row(date(2026, m, 6), "🍔 ЕДА", "кафе", 10_000_000) for m in (7, 8, 9)),
+        fact_row(date(2026, 8, 7), "👶 ДЕТИ", "садик", 3_000_000),
+        fact_row(date(2026, 9, 8), "💳 СЧЕТА", "перевод", 7_000_000),  # не трата
+    ]
+    life = life_month(frame(*rows), TODAY, ("🏚️ ДОМ", "👶 ДЕТИ"))
+    july, august, september = (date(2026, m, 1) for m in (7, 8, 9))
+    # (6 + 6 + 6 + 3) / 3; еда и перевод не в счёт
+    assert life == LifeMonth(
+        7_000_000, (july, august, september), ("🏚️ ДОМ", "👶 ДЕТИ")
+    )
+    assert life_month(frame(*rows), TODAY, ()).amount == 0  # групп нет
 
 
-def test_a_cushion_at_its_target_lacks_nothing() -> None:
-    found = cushion_of(frozen(40_000, 480_000_000), RATES, 60_000_000, 6)
-    assert found is not None
-    assert (found.months, found.short_uzs, found.short) == (8, 0, 0)
+def test_the_month_of_life_finds_the_group_whatever_its_emoji() -> None:
+    # в fact «🏚 ДОМ» без вариационного знака, в справочнике — «🏚️ ДОМ»
+    rows = [
+        fact_row(date(2026, m, 5), "🏚 ДОМ", "квартплата", 6_000_000) for m in (7, 8, 9)
+    ]
+    assert life_month(frame(*rows), TODAY, ("🏚️ ДОМ",)).amount == 6_000_000
 
 
-def test_no_cushion_without_frozen_money() -> None:
-    assert cushion_of(None, RATES, 60_000_000, 6) is None
-    assert cushion_of(frozen(None), RATES, 60_000_000, 6) is None
+def test_the_mandatory_groups_are_the_defaults_in_the_catalog() -> None:
+    catalog = ["🍔 ЕДА", "🚌 ТРАНСПОРТ", "🏚 ДОМ", "🌛 ЕЖЕМЕСЯЧНО", "💳 СЧЕТА"]
+    # нет 🚑 ЗДОРОВЬЕ, 👶 ДЕТИ, 🎓 ОБРАЗОВАНИЕ — пропущены; «🏚 ДОМ» — та же группа
+    assert life_groups(catalog) == ("🚌 ТРАНСПОРТ", "🏚 ДОМ", "🌛 ЕЖЕМЕСЯЧНО")
+    assert life_groups(["🍔 ЕДА"]) == ()
 
 
-def test_without_spending_the_months_are_unknown() -> None:
-    found = cushion_of(frozen(1_800, 21_600_000), RATES, 0, 6)
-    assert found is not None
-    assert (found.months, found.short_uzs) == (None, 0)
+@pytest.mark.parametrize(
+    ("dollars", "shown", "steps"),
+    [
+        (
+            800,
+            0.8,
+            [(1, 200, 2_400_000), (3, 2_200, 26_400_000), (6, 5_200, 62_400_000)],
+        ),
+        (1_400, 1.4, [(3, 1_600, 19_200_000), (6, 4_600, 55_200_000)]),
+        (3_500, 3.5, [(6, 2_500, 30_000_000)]),
+        (6_200, 6.2, []),
+        (995, 0.9, [(1, 5, 60_000), (3, 2_005, 24_060_000), (6, 5_005, 60_060_000)]),
+    ],
+)
+def test_the_cushion_steps(
+    dollars: float, shown: float, steps: list[tuple[int, float, float]]
+) -> None:
+    # месяц жизни 12 млн — 1000 $ по курсу 12 000, цель 6 месяцев
+    found = Cushion(dollars, "USD", dollars * 12_000, 12_000, 12_000_000, 6)
+    assert found.shown_months == shown
+    assert [(step.months, step.short, step.short_uzs) for step in found.steps] == steps
+    assert Cushion(0, "USD", 0, 12_000, 0, 6).shown_months is None  # месяца жизни нет
 
 
-def test_without_a_rate_nothing_is_short_in_the_cushion_currency() -> None:
-    found = cushion_of(frozen(1_800, 21_600_000), Rates({"UZS": 1.0}), 60e6, 6)
-    assert found is not None
-    assert (found.short_uzs, found.short) == (360_000_000 - 21_600_000, 0)
-
-
-def test_payments_bigger_than_the_frozen_money_leave_no_cushion() -> None:
-    found = cushion_of(frozen(-200, -2_400_000), RATES, 60_000_000, 6)
-    assert found is not None
-    assert (found.months, found.short_uzs) == (0, 360_000_000)
+def test_without_spending_or_a_rate_the_cushion_names_no_dollars() -> None:
+    # трат за полные месяцы нет — ни месяцев, ни ступеней
+    idle = Cushion(1_800, "USD", 21_600_000, 12_000, 0, 6)
+    assert (idle.months, idle.short_uzs, idle.steps) == (None, 0, ())
+    # курса нет — сумы считаются, а в валюте подушки не хватает «ничего»
+    blind = Cushion(1_800, "USD", 21_600_000, 0, 60_000_000, 6)
+    assert (blind.short_uzs, blind.short) == (360_000_000 - 21_600_000, 0)
+    assert [(step.months, step.short) for step in blind.steps] == [
+        (1, 0),
+        (3, 0),
+        (6, 0),
+    ]
 
 
 def income(amount: float, currency: str = "UZS", sub: str = "зарплата") -> SheetRow:

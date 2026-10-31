@@ -10,7 +10,7 @@ fact (services.cards).
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Any
 
@@ -240,9 +240,11 @@ def build_dashboard(
     records: Sequence[CalendarRecord] = (),
     cards: Sequence[CardBalance] = (),
     previous: list[list[Any]] | None = None,
+    piggies: float | None = None,
 ) -> Dashboard:
     """Сводка по fact и вкладке месяца; без блока прогноза — без лимита и списка.
-    previous — вкладка прошлого месяца: её недополученное — первым во «Впереди»."""
+    previous — вкладка прошлого месяца: её недополученное — первым во «Впереди»;
+    piggies — копилки на сейчас для «Заморожено» (None — их не читали)."""
     spend, _ = plan_lines(rows)
     groups = group_plans(spend)
     spent = spent_groups(frame, today)
@@ -268,7 +270,7 @@ def build_dashboard(
     upcoming = budget.ahead
     return Dashboard(
         "ok",
-        budget,
+        replace(budget, piggies=piggies),
         groups,
         tuple(read_daily(rows)),
         upcoming,

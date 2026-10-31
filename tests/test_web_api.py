@@ -570,6 +570,35 @@ def test_dashboard_has_tomorrows_limit_on_the_salary_day() -> None:
     assert (body["tomorrow"], body["salary_came"], body["came"]) == (None, None, None)
 
 
+def test_the_frozen_card_adds_up() -> None:
+    found = build_dashboard(
+        frame(), tab(), date(2026, 10, 2), RATES, "USD", piggies=500
+    )
+    assert dashboard_for(found).json()["frozen"] == {
+        "amount": 600,
+        "currency": "USD",
+        "uzs": 7_200_000,
+        "change": 0,
+        "total": 1_000,
+        "payments": [{"day": "2026-10-18", "name": "Квартплата", "amount": 400}],
+        "piggies": 500,
+        "cushion": 100,
+        "over": 0,
+        "lacking": 0,
+        "lacking_on": None,
+        "target": "до зарплаты 30-го",
+    }
+    plain = build_dashboard(frame(), tab(), date(2026, 10, 2), RATES, "USD")
+    body = dashboard_for(plain).json()["frozen"]
+    assert (body["piggies"], body["cushion"]) == (None, None)
+    # копилки 700 $ меньше карты, но с квартплатой не помещаются: купить 100 $ до 18-го
+    tight = build_dashboard(
+        frame(), tab(), date(2026, 10, 2), RATES, "USD", piggies=700
+    )
+    body = dashboard_for(tight).json()["frozen"]
+    assert (body["over"], body["lacking"], body["lacking_on"]) == (0, 100, "2026-10-18")
+
+
 def test_the_dashboard_takes_copies_unless_asked_to_refresh() -> None:
     application = make_application()
     analytics = FakeAnalytics()

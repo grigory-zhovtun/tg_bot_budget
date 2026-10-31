@@ -293,21 +293,18 @@ describe("DashboardScreen", () => {
     expect(within(today).getByText("потрачено сегодня 520 000")).toBeTruthy();
   });
 
-  it("shows the frozen dollars in a card of their own", async () => {
+  it("puts the frozen card between the limit and the sums", async () => {
     render(<DashboardScreen api={fakeApi()} />);
     const frozen = await screen.findByRole("region", { name: "Заморожено" });
     expect(within(frozen).getByText("🧊 Заморожено 1 000 $")).toBeTruthy();
-    expect(within(frozen).getByText("с 1-го числа −50 $")).toBeTruthy();
-  });
-
-  it("says when the frozen sum stood still", async () => {
-    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
-      ...dashboardFixture,
-      frozen: { amount: 1000, currency: "USD", uzs: 12_000_000, change: 0 },
-    });
-    render(<DashboardScreen api={fakeApi({ dashboard })} />);
-    expect(await screen.findByText("с 1-го числа без изменений")).toBeTruthy();
-    expect(screen.queryByText(/плана на \d/)).toBeNull();
+    const names = screen
+      .getAllByRole("region")
+      .map((card) => card.getAttribute("aria-label"));
+    const at = names.indexOf("Заморожено");
+    expect(at).toBeGreaterThan(names.indexOf("Можно сегодня"));
+    expect(at).toBeLessThan(names.indexOf("Сумы"));
+    // «с 1-го числа ±X» больше нет: она смешивала обмен, взносы и платежи
+    expect(screen.queryByText(/с 1-го числа/)).toBeNull();
   });
 
   it("says when the sums last until the end of the month", async () => {

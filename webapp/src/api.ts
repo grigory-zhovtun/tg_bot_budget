@@ -89,19 +89,33 @@ export interface CardBalance {
   stale: boolean; // сверке больше недели
 }
 
-/** Подушка безопасности: «Заморожено» в месяцах средних трат за 3 полных месяца. */
+/** Ступень подушки: 1, 3 месяца или цель — сколько ещё до неё. */
+export interface CushionStep {
+  months: number;
+  short: number; // в валюте подушки, вверх до целых
+  short_uzs: number; // сумы целыми
+}
+
+/** Подушка безопасности: «Заморожено» без копилок на сейчас в месяцах жизни. */
 export interface Cushion {
   amount: number; // в валюте подушки
   currency: string;
   uzs: number;
-  monthly: number; // средние траты в месяц, сумы
-  months: number | null; // на сколько месяцев хватит; null — трат ещё нет
+  monthly: number; // месяц жизни: средние траты обязательных групп, сумы
+  months: number | null; // месяцев подушки, один знак вниз; null — трат ещё нет
   target_months: number;
   short_uzs: number; // сколько не хватает до цели; 0 — цель достигнута
   short: number; // то же в валюте подушки
-  frozen?: number | null; // «Заморожено» на вечер вчера
-  piggies?: number; // остатки копилок на вечер вчера, в валюте подушки
-  over?: number; // на сколько копилки больше «Заморожено»
+  frozen: number | null; // «Заморожено» на сейчас
+  piggies: number; // остатки копилок на сейчас, в валюте подушки
+  over: number; // на сколько копилки больше «Заморожено»
+  card: number; // всего на картах в валюте подушки
+  payments: FrozenPayment[]; // платежи срока в этой валюте
+  lacking: number; // копилок нет, а долларов на платежи не хватает
+  lacking_on: string | null; // день платежа, с которого не хватает
+  life_months: string[]; // месяцы месяца жизни: «2026-07»
+  life_groups: string[]; // обязательные группы справочника
+  steps: CushionStep[]; // ступени, до которых ещё не дошли
 }
 
 /** Полный месяц: доход без «нач остаток» и траты без переводов, в сумах. */
@@ -156,6 +170,30 @@ export interface Runway {
   target?: string | null; // «до зарплаты 30-го», «до зарплаты сегодня»
 }
 
+/** Платёж срока в валюте заморозки: день — ISO-дата (в следующем месяце — его
+ * день там), сумма плюсом. */
+export interface FrozenPayment {
+  day: string;
+  name: string;
+  amount: number;
+}
+
+/** «🧊 Заморожено»: доллары на сейчас без платежей срока — подушка и копилки. */
+export interface Frozen {
+  amount: number;
+  currency: string;
+  uzs: number;
+  change: number; // всегда 0: «с 1-го числа» убрана
+  total: number; // всего на картах в этой валюте
+  payments: FrozenPayment[];
+  piggies: number | null; // копилки на сейчас; null — их не читали
+  cushion: number | null; // заморожено без копилок; null — копилки не читали
+  over: number; // копилки больше карты на столько
+  lacking: number; // копилок нет, а долларов на платежи не хватает
+  lacking_on: string | null; // день платежа, с которого не хватает
+  target: string; // срок платежей, как у «Сумы»: «до зарплаты 30 ноября»
+}
+
 /** Лимит с завтра в день прихода зарплаты: сумы сейчас, срок с завтра. */
 export interface Tomorrow {
   limit: number;
@@ -188,12 +226,7 @@ export interface Dashboard {
   tomorrow?: Tomorrow | null; // день прихода зарплаты: лимит с завтра; иначе null
   salary_came?: number | null; // сколько пришло по строке зарплаты в этот день
   came?: string | null; // «Пришла ЗП» или «Пришёл аванс»; нет — «Пришла ЗП»
-  frozen: {
-    amount: number;
-    currency: string;
-    uzs: number;
-    change: number;
-  } | null;
+  frozen: Frozen | null;
   spending: DaySpend[]; // с 1-го числа по сегодня
   upcoming: ForecastItem[];
   subscriptions: Subscription[];

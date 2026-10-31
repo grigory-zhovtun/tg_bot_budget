@@ -169,6 +169,7 @@ class PiggyAnalytics:
             6,
             percent=percent,
             order=order,
+            groups=groups,
         )
         return SavingsTab(screen, month_savings(found, today), RATES)
 
@@ -227,7 +228,12 @@ def test_savings_screen_shape() -> None:
         6_000_000,
         "on_track",
     )
-    assert found["cushion"]["piggies"] == 500  # 6 млн по курсу 12 000
+    cushion = found["cushion"]
+    assert cushion["piggies"] == 500  # 6 млн по курсу 12 000
+    assert cushion["card"] == 1000  # всего на долларовой карте сейчас
+    # обязательные группы — те, что есть в справочнике тестового приложения
+    assert cushion["life_groups"] == ["🏚️ ДОМ", "🌛 ЕЖЕМЕСЯЧНО"]
+    assert {"payments", "lacking", "lacking_on", "life_months", "steps"} <= set(cushion)
     assert len(found["savings"]["months"]) == 6
     assert set(found["month"]) == {
         "month", "percent", "percent_source", "percent_needed", "capacity",

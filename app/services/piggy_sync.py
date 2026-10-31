@@ -170,6 +170,7 @@ def sync_piggy(
         budget,
         config.SAVE_SHARE,
         config.CUSHION_MONTHS,
+        groups=groups,
     )
     written += _bot_cells(gs, rows, screen)
     written += _formulas(gs, rows)
@@ -226,6 +227,7 @@ def goal_cells(
             None,
             config.SAVE_SHARE,
             config.CUSHION_MONTHS,
+            groups=groups,
         )
         found = goal_of(screen, first)
         return None if found is None else (goal.row, thousands(found.total))

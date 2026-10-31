@@ -68,8 +68,9 @@ SERIAL_ZERO = date(1899, 12, 30)
 PROFILE_MARK = "О НАС"
 MAX_PROFILE = 2000
 CALENDAR_TTL = 60.0  # секунд: лист «Календарь» перечитываем не чаще раза в минуту
-# вкладка месяца, прошлого месяца, курсы, fact и «Календарь» читаются одновременно
-MONTH_SHEETS = 5
+# вкладка месяца, прошлого месяца, курсы, fact, «Календарь» и два листа копилок
+# читаются одновременно
+MONTH_SHEETS = 7
 CALENDAR_HEADER = [
     "ID",
     "Дата",
@@ -1347,13 +1348,16 @@ class MonthSource(Protocol):
 @dataclass(frozen=True)
 class MonthSheets:
     """Листы экранов Mini App: вкладка месяца (None — её нет), курсы, fact, «Календарь»
-    и вкладка прошлого месяца — для переноса недополученных поступлений (None — нет)."""
+    и вкладка прошлого месяца — для переноса недополученных поступлений (None — нет);
+    листы «Копилки» и «Журнал копилок» — для «Заморожено» (None — не просили или не
+    прочитались; листа нет — пусто)."""
 
     month: list[list[Any]] | None
     rates: Rates
     fact: list[list[Any]]
     calendar: list[list[Any]] = field(default_factory=list)
     previous: list[list[Any]] | None = None
+    piggy: tuple[list[list[Any]], list[list[Any]]] | None = None
 
 
 def _tab(read: Future[list[list[Any]]] | None) -> list[list[Any]] | None:
@@ -1372,8 +1376,32 @@ def _optional_tab(
     try:
         return _tab(read)
     except Exception:
-        logger.warning("Last month's tab %s was not read: no carry-over", title)
+        logger.warning(
+            "Last month's tab %s was not read: no carry-over", title, exc_info=True
+        )
         return None
+
+
+def _piggy_sheets(
+    reads: list[Future[list[list[Any]]]] | None,
+) -> tuple[list[list[Any]], list[list[Any]]] | None:
+    """Листы копилок из чтения: листа нет — пусто. Не прочитались — None: экран
+    покажет «Заморожено» без «не трогаем», а не «таблица не ответила»."""
+    if reads is None:
+        return None
+    found: list[list[list[Any]]] = []
+    for read in reads:
+        try:
+            found.append(read.result())
+        except gspread.WorksheetNotFound:
+            found.append([])
+        except Exception:
+            logger.warning(
+                "Piggy sheets were not read: frozen money without piggies",
+                exc_info=True,
+            )
+            return None
+    return found[0], found[1]
 
 
 def read_month_sheets(
@@ -1382,13 +1410,16 @@ def read_month_sheets(
     max_age: float = 0.0,
     calendar: bool = True,
     previous: bool = False,
+    piggy: bool = False,
 ) -> MonthSheets:
-    """Вкладка месяца, вкладка прошлого месяца, курсы, fact и «Календарь» —
-    одновременно: каждое чтение ждёт Google, а не процессор, и экран ждёт самое
-    долгое из них, а не их сумму.
+    """Вкладка месяца, вкладка прошлого месяца, курсы, fact, «Календарь» и листы
+    копилок — одновременно: каждое чтение ждёт Google, а не процессор, и экран ждёт
+    самое долгое из них, а не их сумму.
 
     max_age > 0 — годятся копии листов не старше стольких секунд. previous=True —
     ещё вкладка прошлого месяца: её недополученное «Сводка» показывает во «Впереди».
+    piggy=True — ещё «Копилки» и «Журнал копилок»: «Сводка» вычитает копилки из
+    «Заморожено».
     """
     first = parse_month_title(title)
     last = month_title(first - timedelta(days=1)) if first is not None else ""
@@ -1400,10 +1431,19 @@ def read_month_sheets(
         rates = pool.submit(gs.get_rates, max_age)
         fact = pool.submit(gs.get_values, config.FACT_SHEET_NAME, max_age)
         records = pool.submit(gs.get_calendar, max_age) if calendar else None
+        piggies = (
+            [
+                pool.submit(gs.get_values, name, max_age)
+                for name in (config.PIGGY_SHEET_NAME, config.PIGGY_JOURNAL_NAME)
+            ]
+            if piggy
+            else None
+        )
         return MonthSheets(
             _tab(month),
             rates.result(),
             fact.result(),
             records.result() if records is not None else [],
             _optional_tab(before, last),
+            _piggy_sheets(piggies),
         )

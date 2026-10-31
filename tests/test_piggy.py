@@ -428,6 +428,7 @@ def test_fact_keys_number_repeats_and_ignore_ai() -> None:
 from types import SimpleNamespace  # noqa: E402
 
 from app.domain import Rates  # noqa: E402
+from app.services.day_budget import Payment  # noqa: E402
 from app.services.piggy import (  # noqa: E402
     Balance,
     Enough,
@@ -438,7 +439,13 @@ from app.services.piggy import (  # noqa: E402
     money_day,
     savings_screen,
 )
-from tests.test_day_budget import tab  # noqa: E402
+from tests.test_day_budget import (  # noqa: E402
+    ADVANCE_PAID,
+    RENT_PAID,
+    SALARY_TODAY,
+    tab,
+)
+from tests.test_day_budget import budget as budget_on  # noqa: E402
 
 TODAY = date(2026, 10, 17)
 TRIP = {
@@ -466,7 +473,9 @@ def frozen(amount: float, change: float = 0.0) -> Any:
     """Дневной бюджет — только то, что берут копилки: «Заморожено» в долларах."""
     return SimpleNamespace(
         frozen=amount,
-        frozen_change=change,
+        frozen_start=amount - change,
+        frozen_total=amount,
+        frozen_payments=(),
         frozen_currency="USD",
         frozen_uzs=amount * 12_000,
     )
@@ -481,14 +490,25 @@ def screen(
     rows: list[list[Any]] | None = None,
     share: float = 1.0,
     head: list[Any] | None = None,
+    groups: tuple[str, ...] = (*GROUPS, "🏚️ ДОМ"),
     **options: Any,
 ) -> Screen:
     # список вкладки: аванс 15-го и ЗП 30-го — день денег 30-е, поступлений 12 млн;
-    # 100 % по умолчанию — план без ограничения процентом (как до процента)
+    # 100 % по умолчанию — план без ограничения процентом (как до процента);
+    # справочник — с обязательной группой «🏚️ ДОМ» для месяца жизни
     month = tab() if rows is None else rows
     found = book(*piggies, moves=moves, head=head)
     return savings_screen(
-        found, frame(*fact), month, today, RATES, budget, share, 6, **options
+        found,
+        frame(*fact),
+        month,
+        today,
+        RATES,
+        budget,
+        share,
+        6,
+        groups=groups,
+        **options,
     )
 
 
@@ -611,20 +631,63 @@ def test_a_goal_at_its_target_passes_its_part() -> None:
     )
 
 
-def test_the_cushion_is_frozen_minus_piggies_as_of_last_night() -> None:
-    found = screen(
-        piggy_row(**TRIP),
-        moves=(
-            move_row(id="tr0001", day="16.10.2026", amount=400, currency="USD"),
-            move_row(id="tr0001", day="17.10.2026", amount=100, currency="USD"),
-        ),
-        fact=spending_months(),
-        budget=frozen(1500),
+def test_the_cushion_is_the_frozen_money_without_the_piggies_now() -> None:
+    moves = (
+        move_row(id="tr0001", day="16.10.2026", amount=400, currency="USD"),
+        move_row(id="tr0001", day="17.10.2026", amount=100, currency="USD"),  # сегодня
     )
-    # сегодняшние доллары «Заморожено» увидит только завтра — и копилка тоже
-    assert (found.envelopes, found.over) == (400, 0)
-    assert found.cushion is not None
-    assert found.cushion.amount == 1100
+    found = screen(piggy_row(**TRIP), moves=moves, budget=budget_on(TODAY))
+    cushion = found.cushion
+    assert cushion is not None
+    # 1000 $ на карте − квартплата 18.10 − копилка с сегодняшним взносом
+    assert (cushion.card, cushion.frozen, cushion.piggies, cushion.amount) == (
+        1_000,
+        600,
+        500,
+        100,
+    )
+    assert cushion.payments == (Payment(date(2026, 10, 18), "Квартплата", 400),)
+    assert (found.frozen, found.envelopes, found.over) == (600, 500, 0)
+
+
+def test_a_saving_today_keeps_the_cushion() -> None:
+    # сегодня купили 100 $ и отложили их: «Заморожено» и копилки растут вместе
+    bought = fact_row(TODAY, "💳 СЧЕТА", "обмен валюты", -100, "USD")
+    early = (move_row(id="tr0001", day="16.10.2026", amount=400, currency="USD"),)
+    saved = (
+        *early,
+        move_row(id="tr0001", day="17.10.2026", amount=100, currency="USD"),
+    )
+    before = screen(piggy_row(**TRIP), moves=early, budget=budget_on(TODAY))
+    after = screen(piggy_row(**TRIP), moves=saved, budget=budget_on(TODAY, bought))
+    assert before.cushion is not None and after.cushion is not None
+    assert before.cushion.amount == after.cushion.amount == 200
+
+
+def test_the_cushion_does_not_move_on_the_first() -> None:
+    moves = (move_row(id="tr0001", day="20.10.2026", amount=100, currency="USD"),)
+    paid = (ADVANCE_PAID, RENT_PAID, SALARY_TODAY)
+    days = (date(2026, 10, 31), date(2026, 11, 1))
+    last, first = (
+        screen(piggy_row(**TRIP), moves=moves, today=day, budget=budget_on(day, *paid))
+        for day in days
+    )
+    assert last.cushion is not None and first.cushion is not None
+    assert last.cushion.amount == first.cushion.amount == 100
+
+
+def test_the_cushion_counts_months_of_life() -> None:
+    home = tuple(
+        fact_row(date(2026, m, 5), "🏚️ ДОМ", "квартплата", 12_000_000)
+        for m in (7, 8, 9)
+    )
+    found = screen(fact=(*home, *spending_months()), budget=frozen(1_300))
+    cushion = found.cushion
+    assert cushion is not None and cushion.life is not None
+    # «🍔 ЕДА» по 10 млн — не обязательные: месяц жизни — только дом
+    assert (cushion.monthly, cushion.life.groups) == (12_000_000, ("🏚️ ДОМ",))
+    assert cushion.shown_months == 1.3
+    assert [step.months for step in cushion.steps] == [3, 6]
 
 
 def test_piggies_over_the_frozen_money_warn() -> None:
@@ -998,6 +1061,7 @@ def test_an_income_in_rubles_counts_by_the_table_rate() -> None:
         None,
         0.1,
         6,
+        groups=GROUPS,
     )
     assert (found.received, found.due) == (
         pytest.approx(9_000_000),

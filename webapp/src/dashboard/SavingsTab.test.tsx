@@ -2,7 +2,12 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { Api, SavingsScreen } from "../api";
-import { bootstrapFixture, savingsFixture } from "../mocks/fixtures";
+import {
+  bootstrapFixture,
+  dashboardFixture,
+  savingsFixture,
+} from "../mocks/fixtures";
+import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
 import { nb } from "../test/text";
 import SavingsTab from "./SavingsTab";
@@ -186,9 +191,18 @@ describe("SavingsTab", () => {
 
   it("shows the cushion without the money of the piggies", async () => {
     render(<SavingsTab api={fakeApi()} boot={null} />);
-    expect(await screen.findByText("заморожено 1 500 $")).toBeTruthy();
-    expect(screen.getByText("минус копилки 400 $")).toBeTruthy();
-    expect(screen.getByText("на вечер вчера")).toBeTruthy();
+    const table = await screen.findByRole("table", { name: "Расчёт подушки" });
+    expect(
+      within(table)
+        .getAllByRole("row")
+        .map((row) => row.textContent?.replace(/\s/g, " ")),
+    ).toEqual([
+      "доллары на карте1 900 $",
+      "Квартплата 18.10−400 $",
+      "копилки−400 $",
+      "подушка1 100 $",
+    ]);
+    expect(screen.queryByText("на вечер вчера")).toBeNull();
   });
 
   it("warns when the piggies hold more than the frozen money", async () => {
@@ -302,6 +316,25 @@ describe("SavingsTab", () => {
     await user.click(screen.getByRole("button", { name: "Сохранить" }));
     expect(api.updatePiggy).toHaveBeenCalled();
     await vi.waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("asks «Сводка» again after a piggy save: its frozen card shows the piggies", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    const store = new Store();
+    store.put("dashboard", dashboardFixture);
+    render(
+      <StoreProvider value={store}>
+        <SavingsTab api={api} boot={bootstrapFixture} />
+      </StoreProvider>,
+    );
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Открыть копилку «Новый год»",
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+    await vi.waitFor(() => expect(store.get("dashboard").at).toBe(0));
   });
 
   it("starts a new piggy and sets a sum aside from the top", async () => {

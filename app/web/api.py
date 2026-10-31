@@ -42,10 +42,14 @@ from app.services.calendar import CalendarRecord, new_id, read_calendar, record_
 from app.services.cards import CardBalance
 from app.services.dashboard import Dashboard
 from app.services.day_budget import (
+    DayBudget,
     allowance_until,
     came_word,
+    frozen_split,
+    frozen_until,
     payday_on,
     runway_until,
+    short_on,
     until_text,
 )
 from app.services.forecast import DayArticle, Dip, Evening, MonthForecast, PastDay
@@ -98,6 +102,7 @@ from app.web.schemas import (
     CategoryLineOut,
     CategoryOut,
     CushionOut,
+    CushionStepOut,
     DashboardOut,
     DayArticleOut,
     DayPointOut,
@@ -120,6 +125,7 @@ from app.web.schemas import (
     ForecastRecordOut,
     ForecastTotalOut,
     FrozenOut,
+    FrozenPaymentOut,
     GroupOut,
     GroupPlanOut,
     HintOut,
@@ -345,18 +351,42 @@ def savings_out(savings: Savings | None) -> SavingsOut | None:
 
 
 def cushion_out(cushion: Cushion | None) -> CushionOut | None:
+    """«🛟 Подушка»: подушка на сейчас, её расчёт от долларов на карте, месяц жизни и
+    ступени; месяцы — как на экране, один знак вниз."""
     if cushion is None:
         return None
-    months = cushion.months
+    code, life = cushion.currency, cushion.life
     return CushionOut(
-        amount=_rounded(cushion.amount, cushion.currency),
-        currency=cushion.currency,
+        amount=_rounded(cushion.amount, code),
+        currency=code,
         uzs=float(round(cushion.uzs)),
         monthly=float(round(cushion.monthly)),
-        months=None if months is None else round(months, 2),
+        months=cushion.shown_months,
         target_months=cushion.target_months,
         short_uzs=float(round(cushion.short_uzs)),
-        short=_rounded(cushion.short, cushion.currency),
+        short=_rounded(cushion.short, code),
+        frozen=_rounded(cushion.frozen, code),
+        piggies=_rounded(cushion.piggies, code),
+        over=_rounded(cushion.over, code),
+        card=_rounded(cushion.card, code),
+        payments=[
+            FrozenPaymentOut(day=payment.day, name=payment.name, amount=payment.amount)
+            for payment in cushion.payments
+        ],
+        lacking=_rounded(cushion.lacking, code),
+        lacking_on=(
+            short_on(cushion.card - cushion.piggies, cushion.payments)
+            if cushion.lacking > 0
+            else None
+        ),
+        life_months=[f"{month:%Y-%m}" for month in life.months] if life else [],
+        life_groups=list(life.groups) if life else [],
+        steps=[
+            CushionStepOut(
+                months=step.months, short=step.short, short_uzs=step.short_uzs
+            )
+            for step in cushion.steps
+        ],
     )
 
 
@@ -526,19 +556,6 @@ def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOu
             cushion=float(round(screen.cushion_now)),
             saved=float(round(saved)),
         )
-    cushion = cushion_out(screen.cushion)
-    if cushion is not None:
-        cushion = cushion.model_copy(
-            update={
-                "frozen": (
-                    None
-                    if screen.frozen is None
-                    else _rounded(screen.frozen, cushion.currency)
-                ),
-                "piggies": _rounded(screen.envelopes, cushion.currency),
-                "over": _rounded(screen.over, cushion.currency),
-            }
-        )
     found_goal = goal_of(screen, first.month) if first is not None else None
     goal = None
     if found_goal is not None and any(
@@ -556,7 +573,7 @@ def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOu
         today=today,
         month=month,
         goal=goal,
-        cushion=cushion,
+        cushion=cushion_out(screen.cushion),
         piggies=[piggy_out(state) for state in screen.piggies],
         plan=[
             MonthPlanOut(
@@ -587,6 +604,35 @@ def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOu
         ),
         savings=savings_out(savings),
         rates=dict(rates.to_uzs),
+    )
+
+
+def frozen_out(budget: DayBudget) -> FrozenOut | None:
+    """«🧊 Заморожено» «Сводки» — те же числа, что в утре: что не трогаем (подушка и
+    копилки), что не сходится и платежи срока; заморозку не считаем — None."""
+    if budget.frozen is None or not budget.frozen_currency:
+        return None
+    piggies = budget.piggies or 0.0
+    cushion, over, lacking = frozen_split(budget.frozen, piggies, budget.frozen_total)
+    return FrozenOut(
+        amount=budget.frozen,
+        currency=budget.frozen_currency,
+        uzs=budget.frozen_uzs,
+        total=budget.frozen_total,
+        payments=[
+            FrozenPaymentOut(day=payment.day, name=payment.name, amount=payment.amount)
+            for payment in budget.frozen_payments
+        ],
+        piggies=budget.piggies,
+        cushion=None if budget.piggies is None else cushion,
+        over=over,
+        lacking=lacking,
+        lacking_on=(
+            short_on(budget.frozen_total - piggies, budget.frozen_payments)
+            if lacking > 0
+            else None
+        ),
+        target=frozen_until(budget),
     )
 
 
@@ -695,14 +741,6 @@ def dashboard_out(
             advances=t.advances,
             advance_on=t.advance_on,
         )
-    frozen = None
-    if budget.frozen is not None and budget.frozen_currency:
-        frozen = FrozenOut(
-            amount=budget.frozen,
-            currency=budget.frozen_currency,
-            uzs=budget.frozen_uzs,
-            change=budget.frozen_change,
-        )
     return DashboardOut(
         status="ok",
         month=month,
@@ -726,7 +764,7 @@ def dashboard_out(
         came=(
             _capital(came_word(budget.salary_name)) if tomorrow is not None else None
         ),
-        frozen=frozen,
+        frozen=frozen_out(budget),
         groups=groups,
         daily=[
             DayPointOut(day=point.day, plan=point.plan, fact=point.fact)

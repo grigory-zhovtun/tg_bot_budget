@@ -139,7 +139,8 @@ def parse_amount(text: str) -> float | None:
     return amount if amount > 0 else None
 
 
-# Подушка безопасности — «Заморожено»; цель — столько месяцев средних трат
+# Подушка безопасности — «Заморожено» без копилок; цель — столько месяцев жизни
+# (средних трат обязательных групп)
 CUSHION_MONTHS = parse_months(os.getenv("CUSHION_MONTHS", "6"))
 # «Сначала заплати себе»: какую долю поступления бот предлагает отложить; 0 — молчать
 SAVE_SHARE = parse_share(os.getenv("SAVE_SHARE", "0.10"))
