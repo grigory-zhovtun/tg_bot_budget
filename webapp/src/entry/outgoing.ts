@@ -13,6 +13,7 @@ export interface Outgoing {
   entry: ExpenseInput;
   title: string; // строка очереди: «кофе 48 000 UZS»
   head: string | null; // первая строка панели; null — без неё
+  card?: string; // карта «Ввода» после записи (у перевода — «Куда»)
 }
 
 /** «✓ Списано 48 000 UZS». */

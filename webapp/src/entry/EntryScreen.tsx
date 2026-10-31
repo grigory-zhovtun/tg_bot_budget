@@ -16,7 +16,7 @@ import {
   type Group,
   type Subcategory,
 } from "../api";
-import { botDay, dayLabel, shiftDay, withCurrency } from "../format";
+import { botDay, dayLabel, withCurrency } from "../format";
 import { useResource, useStore } from "../store";
 import {
   haptic,
@@ -32,13 +32,13 @@ import {
   type Key,
 } from "./amount";
 import {
-  BIG_FIELD,
   ErrorLine,
   GOOD_BUTTON,
   GOOD_COLOR,
   PRIMARY,
   SPEND_BUTTON,
 } from "../dashboard/controls";
+import { AmountText, CommentField, DayField } from "./EntryFields";
 import Keypad from "./Keypad";
 import {
   dropPending,
@@ -62,10 +62,6 @@ import { retryable, sendExpense, sleep, type Wait } from "./send";
 import SourceChips from "./SourceChips";
 import { GroupTiles, SubTiles } from "./Tiles";
 
-const MAX_DAYS_BACK = 31;
-// «12 345 678» — ещё 40 px; длиннее — на ступень мельче, чтобы сумма с валютой
-// осталась в строке (как у главной цифры «Сводки»)
-const AMOUNT_FITS = 10;
 const CATALOG_FIELDS = ["source", "category", "subcategory"];
 // трата и её отмена меняют сводку, прогноз, факт плана и траты из копилок
 const CHANGED_BY_WRITES = ["dashboard", "forecast", "plan:", "savings"];
@@ -627,39 +623,9 @@ export default function EntryScreen({
             parts={[group.name, `${sub.icon} ${sub.name}`]}
             onBack={tg ? null : back}
           />
-          <p
-            className={`text-center font-black tabular-nums ${
-              shown.length > AMOUNT_FITS ? "text-big-long" : "text-big"
-            }`}
-            aria-live="polite"
-          >
-            {/* число не рвётся между группами цифр; валюта может уйти ниже */}
-            <span className="whitespace-nowrap">{shown}</span>{" "}
-            <span className="text-fact font-extrabold">{currency}</span>
-          </p>
-          <label className="flex flex-col gap-1 text-line font-bold">
-            Комментарий
-            <input
-              className={`${BIG_FIELD} min-h-12`}
-              value={comment}
-              maxLength={200}
-              onChange={(event) => setComment(event.target.value)}
-            />
-          </label>
-          <label className="flex items-center justify-between gap-3 text-line font-bold">
-            <span>Дата: {dayLabel(day ?? boot.today, boot.today)}</span>
-            <input
-              type="date"
-              className={BIG_FIELD}
-              value={day ?? boot.today}
-              min={shiftDay(boot.today, -MAX_DAYS_BACK)}
-              max={boot.today}
-              onChange={(event) => {
-                const picked = event.target.value;
-                setDay(picked && picked !== boot.today ? picked : null);
-              }}
-            />
-          </label>
+          <AmountText text={shown} currency={currency} center />
+          <CommentField value={comment} onChange={setComment} />
+          <DayField day={day} today={boot.today} onChange={setDay} />
           <Keypad
             big
             decimals={decimals}
