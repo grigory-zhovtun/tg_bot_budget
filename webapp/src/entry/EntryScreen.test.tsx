@@ -742,15 +742,14 @@ describe("EntryScreen", () => {
     expect(back.className).toContain("text-line");
     expect(back.className).toContain("font-bold");
     const title = screen.getByRole("heading", {
-      name: "🍔 ЕДА · ☕ кофе",
+      name: /^🍔\sЕДА · ☕\sкофе$/,
     });
     expect(title.className).toContain("text-fact");
-    // длинная пара переносится только между группой и подкатегорией
+    // части переносятся, но иконка не отрывается от слова
     expect(
-      [...title.querySelectorAll(".whitespace-nowrap")].map(
-        (part) => part.textContent,
-      ),
-    ).toEqual(["🍔 ЕДА", "☕ кофе"]);
+      [...title.querySelectorAll("span")].map((part) => part.textContent),
+    ).toEqual(["🍔\u00a0ЕДА", "☕\u00a0кофе"]);
+    expect(title.querySelector(".whitespace-nowrap")).toBeNull();
     const amount = screen.getByText("48 000");
     expect(amount.className).toContain("whitespace-nowrap");
     expect(amount.parentElement?.className).toContain("text-big");
@@ -963,7 +962,7 @@ describe("EntryScreen", () => {
     await user.click(screen.getByRole("button", { name: "СЧЕТА" }));
     await user.click(screen.getByRole("button", { name: "переводы" }));
     expect(
-      screen.getByRole("heading", { name: "💳 СЧЕТА · 🔄 переводы" }),
+      screen.getByRole("heading", { name: /^💳\sСЧЕТА · 🔄\sпереводы$/ }),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Откуда/ })).toBeTruthy();
     // карта здесь — «Откуда»: ряда карт «Ввода» нет
@@ -976,6 +975,20 @@ describe("EntryScreen", () => {
     await user.click(screen.getByRole("button", { name: "выравнивание" }));
     expect(screen.getByRole("button", { name: "Зачислить" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Списать" })).toBeTruthy();
+  });
+
+  it("lets a long step heading wrap, keeping the icon with its word", async () => {
+    const user = userEvent.setup();
+    renderEntry(fakeApi(), vi.fn(), ALL_GROUPS);
+    await user.click(screen.getByRole("button", { name: "СЧЕТА" }));
+    await user.click(screen.getByRole("button", { name: "обмен валюты" }));
+    const title = screen.getByRole("heading", { name: /обмен валюты/ });
+    const part = [...title.querySelectorAll("span")].find((span) =>
+      span.textContent?.includes("обмен"),
+    );
+    expect(part?.className ?? "").not.toContain("whitespace-nowrap");
+    // между иконкой и словом — неразрывный пробел, между словами — обычный
+    expect(part?.textContent).toBe("💱\u00a0обмен валюты");
   });
 
   it("writes a transfer, shows it and makes «Куда» the card", async () => {
@@ -1047,6 +1060,39 @@ describe("EntryScreen", () => {
     const queue = screen.getByRole("region", { name: "Не отправлено" });
     expect(queue.textContent?.replace(/\s/g, " ")).toContain(
       "переводы 500 000 UZS → HUMO 2222 UZS, сегодня",
+    );
+  });
+
+  it("keeps an exchange on the phone with both sums", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-10T12:00:00Z"));
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(new ApiError(0, "network", "Нет связи"));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }), vi.fn(), ALL_GROUPS);
+    await user.click(screen.getByRole("button", { name: "СЧЕТА" }));
+    await user.click(screen.getByRole("button", { name: "обмен валюты" }));
+    await user.click(screen.getByRole("button", { name: /^Куда/ }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: "Куда" })).getByRole("button", {
+        name: /VISA 3434 USD/,
+      }),
+    );
+    for (const key of ["1", "0", "0"]) {
+      await user.click(screen.getByRole("button", { name: key }));
+    }
+    await user.click(screen.getByRole("button", { name: /^Списано/ }));
+    for (const key of ["1", "2", "1", "0", "8", "0", "0"]) {
+      await user.click(screen.getByRole("button", { name: key }));
+    }
+    await user.click(screen.getByRole("button", { name: "Записать обмен" }));
+    expect(
+      await screen.findByText("📤 Обмен сохранён на телефоне"),
+    ).toBeTruthy();
+    const queue = screen.getByRole("region", { name: "Не отправлено" });
+    expect(queue.textContent?.replace(/\s/g, " ")).toContain(
+      "обмен валюты 1 210 800 UZS → 100 USD, VISA 3434 USD, сегодня",
     );
   });
 
@@ -1180,6 +1226,25 @@ describe("EntryScreen in Telegram", () => {
     expect(screen.getByRole("button", { name: "Списать" })).toBeTruthy();
     expect(main.setParams).not.toHaveBeenCalled(); // панель не показана
     expect(second.setParams).not.toHaveBeenCalled();
+  });
+
+  it("goes back from «Откуда → Куда» with Telegram's back button", async () => {
+    const { main, back } = inTelegram();
+    const user = userEvent.setup();
+    renderEntry(fakeApi(), vi.fn(), ALL_GROUPS);
+    await user.click(screen.getByRole("button", { name: "СЧЕТА" }));
+    await user.click(screen.getByRole("button", { name: "переводы" }));
+    expect(screen.getByRole("button", { name: /^Откуда/ })).toBeTruthy();
+    // в Telegram «← Назад» в экране нет — его кнопка на панели
+    expect(screen.queryByRole("button", { name: "← Назад" })).toBeNull();
+    const handler = back.onClick.mock.lastCall?.[0];
+    if (!handler) throw new Error("no handler on Telegram's back button");
+    await act(async () => {
+      handler();
+    });
+    expect(screen.getByRole("button", { name: "переводы" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Откуда/ })).toBeNull();
+    expect(main.hide).toHaveBeenCalled(); // кнопка перевода ушла с экраном
   });
 
   it("keeps one «Записать» on Telegram's bar for incomes", async () => {

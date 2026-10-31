@@ -162,6 +162,10 @@ describe("TransferScreen", () => {
     const out = onSubmit.mock.calls[0]?.[0];
     expect(out?.entry).toMatchObject({ amount: "1210800", to_amount: "100" });
     expect(out?.head).toBe("✓ Записан обмен");
+    // в очереди видна и вторая сумма
+    expect(plain(out?.title)).toBe(
+      "обмен валюты 1 210 800 UZS → 100 USD, VISA 3333 USD",
+    );
   });
 
   it("clears the sum of the card that changed", async () => {
@@ -210,6 +214,34 @@ describe("TransferScreen", () => {
       "✓ Зачислено 300 000 UZS — в таблицу −300 000",
     );
     expect(out?.card).toBe("HUMO 2222 UZS");
+  });
+
+  it("drops a sum of «не моя карта» typed before a card of another currency", async () => {
+    const user = userEvent.setup();
+    show();
+    await pick(user, "from", /не моя карта/);
+    await keys(user, "3", "0", "0", "000"); // «Куда» не выбрана — в сумах
+    await pick(user, "to", /VISA 3333 USD/);
+    const sum = screen.getByRole("button", { name: /^Сумма/ });
+    expect(within(sum).getByText("0")).toBeTruthy();
+    expect(within(sum).getByText("USD")).toBeTruthy();
+    expect(screen.queryByRole("table", { name: "В таблицу" })).toBeNull();
+    expect(
+      screen
+        .getByRole("button", { name: "Зачислить" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
+  });
+
+  it("keeps a sum of «не моя карта» for a card of the same currency", async () => {
+    const user = userEvent.setup();
+    show();
+    await pick(user, "from", /не моя карта/);
+    await keys(user, "3", "0", "0", "000");
+    await pick(user, "to", /HUMO 2222 UZS/);
+    const sum = screen.getByRole("button", { name: /^Сумма/ });
+    expect(within(sum).getByText("300 000")).toBeTruthy();
+    expect(factRows()).toEqual([["HUMO 2222 UZS", "−300 000"]]);
   });
 
   it("sends the comment and the date", async () => {

@@ -18,6 +18,10 @@ import { creditHead, type Outgoing } from "./outgoing";
 import { balanceOf, EXCHANGE_SUB, factLines, rateLine } from "./transfer";
 
 type Side = "from" | "to";
+
+/** «100 USD», «1 210 800 UZS»: копейки — только у дробной суммы, как в таблице. */
+const inSheet = (value: number, currency: string) =>
+  `${sheetAmount(value, currency)} ${currency}`;
 type Field = "sent" | "got"; // «Списано» — в валюте «Откуда», «Зачислено» — «Куда»
 
 interface Props {
@@ -182,7 +186,10 @@ export default function TransferScreen({
               amount: apiAmount(sent),
               ...(two ? { to_amount: apiAmount(got) } : {}),
             },
-            title: `${sub.name} ${withCurrency(sentValue, sentCurrency)} → ${to}`,
+            // разные валюты — в очереди видны обе суммы, как в банке
+            title: two
+              ? `${sub.name} ${inSheet(sentValue, sentCurrency)} → ${inSheet(gotValue, gotCurrency)}, ${to}`
+              : `${sub.name} ${withCurrency(sentValue, sentCurrency)} → ${to}`,
             head:
               sub.name === EXCHANGE_SUB
                 ? "✓ Записан обмен"
@@ -265,9 +272,13 @@ export default function TransferScreen({
     setPicking(null);
   }
 
-  // замена выбранной «Куда» стирает её сумму; первый выбор ничего не стирает
+  // замена выбранной «Куда» стирает её сумму. Сумма «Куда» набрана в её валюте
+  // (до выбора — в сумах): карта другой валюты её стирает, иначе 300 000 сумов
+  // «не моя карта» молча стали бы 300 000 USD; той же валюты — сохраняет
   function pickTo(name: string) {
-    if (to !== null && name !== to) setGot("");
+    const otherCurrency = (currencyOf(name) ?? "UZS") !== gotCurrency;
+    const replaced = to !== null && name !== to && from !== null;
+    if (otherCurrency || replaced) setGot("");
     setTo(name);
     setActive("got");
     setPicking(null);

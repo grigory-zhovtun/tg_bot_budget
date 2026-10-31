@@ -154,8 +154,8 @@ function rowsText({ first, last }: { first: number; last: number }): string {
   return first === last ? `строка ${first}` : `строки ${first}–${last}`;
 }
 
-/** Заголовок шага: «🍔 ЕДА» или «🍔 ЕДА · ☕ кофе»; длинная пара переносится
- * только между частями. */
+/** Заголовок шага: «🍔 ЕДА» или «🍔 ЕДА · ☕ кофе». Длинный переносится между
+ * словами («💱 обмен валюты» на 320 px), иконка не отрывается от первого слова. */
 function Header({
   parts,
   onBack,
@@ -178,7 +178,7 @@ function Header({
         {parts.map((part, index) => (
           <Fragment key={part}>
             {index > 0 && " · "}
-            <span className="whitespace-nowrap">{part}</span>
+            <span>{part.replace(" ", "\u00a0")}</span>
           </Fragment>
         ))}
       </h2>

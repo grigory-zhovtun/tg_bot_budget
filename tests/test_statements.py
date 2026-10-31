@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import pytest
 
 from app import statements as st
-from app.domain import Catalog, MerchantBook, merchant_core
+from app.domain import Catalog, MerchantBook, SheetRow, entry_row, merchant_core
 from app.transfers import transfer_rows
 
 SOURCES = ["VISA 9090 UZS", "UZCARD 5656 UZS", "HUMO 7007 UZS", "VISA 3434 USD"]
@@ -651,12 +651,8 @@ def test_transfer_pairs_with_an_already_loaded_half() -> None:
     assert item.review == ""
 
 
-def test_a_transfer_from_the_app_is_not_written_again() -> None:
-    # «Ввод» записал перевод 5-го; выписки видят снятие 5-го и зачисление 6-го
-    day = date(2026, 10, 5)
-    rows = transfer_rows(
-        500_000, None, "", "VISA 9090 UZS", "HUMO 7007 UZS", "💳 СЧЕТА", "переводы", day
-    )
+def app_import(rows: list[SheetRow], *txns: st.Txn) -> st.ImportPlan:
+    """Выписки карт (по одной на операцию) после записи «Ввода» строками rows."""
     values = fact_values(
         *(
             [serial(r.day), r.category, r.subcategory, r.amount, "", r.comment]
@@ -664,15 +660,67 @@ def test_a_transfer_from_the_app_is_not_written_again() -> None:
             for r in rows
         )
     )
+    statements = [
+        st.Statement(t.source, [t], (date(2026, 10, 1), STATEMENT_DAY), STATEMENT_DAY)
+        for t in txns
+    ]
+    return st.plan_import(statements, CATALOG, values, {})
+
+
+def test_a_transfer_from_the_app_is_not_written_again() -> None:
+    # «Ввод» записал перевод 5-го; выписки видят снятие 5-го и зачисление 6-го
+    day = date(2026, 10, 5)
+    rows = transfer_rows(
+        500_000, None, "", "VISA 9090 UZS", "HUMO 7007 UZS", "💳 СЧЕТА", "переводы", day
+    )
     details = "Перевод с VISA UZS KB на HUMO KB через МП"
     out = txn("VISA 9090 UZS", -500_000, details, date(2026, 10, 5))
     inc = txn("HUMO 7007 UZS", 500_000, details, date(2026, 10, 6))
-    statements = [
-        st.Statement(t.source, [t], (date(2026, 10, 1), STATEMENT_DAY), STATEMENT_DAY)
-        for t in (out, inc)
-    ]
-    plan = st.plan_import(statements, CATALOG, values, {})
+    plan = app_import(rows, out, inc)
     assert (plan.rows, plan.already) == ([], 2)
+
+
+def test_an_exchange_from_the_app_is_not_written_again() -> None:
+    # обмен «Ввода»: сумы на VISA 9090, доллары на VISA 3434 — как в банке
+    day = date(2026, 10, 5)
+    rows = transfer_rows(
+        1_210_800,
+        100,
+        "",
+        "VISA 9090 UZS",
+        "VISA 3434 USD",
+        "💳 СЧЕТА",
+        "обмен валюты",
+        day,
+    )
+    out = txn(
+        "VISA 9090 UZS",
+        -1_210_800,
+        "Перевод с VISA UZS KB на VISA UZS KB ТЕR.ID: TM0092;",
+        day,
+    )
+    inc = txn(
+        "VISA 3434 USD",
+        100,
+        "Перевод с VISA USD KB на VISA USD KB ТЕR.ID: TM0093;",
+        day,
+    )
+    plan = app_import(rows, out, inc)
+    assert (plan.rows, plan.already) == ([], 2)
+
+
+def test_money_from_someone_else_from_the_app_is_not_written_again() -> None:
+    # «не моя карта»: одна строка «Зачислить» на HUMO 7007, в выписке — входящий
+    day = date(2026, 10, 5)
+    row = entry_row(300_000, True, "", "HUMO 7007 UZS", "💳 СЧЕТА", "переводы", day)
+    inc = txn(
+        "HUMO 7007 UZS",
+        300_000,
+        "Зачисление средств на карту через устройство 12345678",
+        day,
+    )
+    plan = app_import([row], inc)
+    assert (plan.rows, plan.already) == ([], 1)
 
 
 def test_first_word_match_is_optional() -> None:
