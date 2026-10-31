@@ -2,8 +2,20 @@
 
 export type HomeScreenStatus = "unsupported" | "unknown" | "added" | "missed";
 
+/** Параметры кнопки панели (Bot API 7.10): цвета — строкой «#rrggbb», position —
+ * только у второй кнопки. */
+export interface BottomButtonParams {
+  text?: string;
+  color?: string;
+  text_color?: string;
+  position?: "left" | "right" | "top" | "bottom";
+  is_active?: boolean;
+  is_visible?: boolean;
+}
+
 export interface BottomButton {
   setText(text: string): BottomButton;
+  setParams(params: BottomButtonParams): BottomButton;
   show(): BottomButton;
   hide(): BottomButton;
   enable(): BottomButton;
@@ -29,6 +41,7 @@ export interface WebApp {
   expand(): void;
   isVersionAtLeast(version: string): boolean;
   MainButton: BottomButton;
+  SecondaryButton?: BottomButton; // с Bot API 7.10
   BackButton: BackButton;
   HapticFeedback: {
     notificationOccurred(type: "error" | "success" | "warning"): void;
@@ -70,6 +83,12 @@ export function followScheme(
   };
   apply();
   app.onEvent("themeChanged", apply);
+}
+
+/** Вторая кнопка панели — с Bot API 7.10; в старом Telegram и вне его — null. */
+export function secondaryButton(app: WebApp | null): BottomButton | null {
+  if (!app || !app.isVersionAtLeast("7.10")) return null;
+  return app.SecondaryButton ?? null;
 }
 
 export function haptic(type: "error" | "success"): void {

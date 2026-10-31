@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { GOOD_COLOR } from "./dashboard/controls";
 
 // vitest отдаёт CSS пустым даже с ?raw — читаем файл; тесты идут из папки webapp
 const CSS = readFileSync(resolve(process.cwd(), "src/index.css"), "utf-8");
@@ -116,6 +117,11 @@ describe("theme colors", () => {
     for (const [name, color] of badges) {
       expect(contrast("#ffffff", color), name).toBeGreaterThanOrEqual(6);
     }
+  });
+
+  it("paints Telegram's «Зачислить» with the green badge colour", () => {
+    // родной кнопке цвет задаётся строкой — он тот же, что у зелёной плашки
+    expect(CSS).toContain(`--color-chip-good: ${GOOD_COLOR};`);
   });
 
   it("warns in orange, never in red text", () => {

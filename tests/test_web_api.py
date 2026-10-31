@@ -159,6 +159,39 @@ def test_cents_on_a_dollar_card() -> None:
     assert (sheets.rows[0][3], sheets.rows[0][6]) == (12.5, "USD")
 
 
+@pytest.mark.parametrize(
+    ("changes", "expected", "line"),
+    [
+        ({}, 48000.0, "✅ 48 000 UZS • 🍔 ЕДА (☕ кофе)"),
+        ({"incoming": False}, 48000.0, "✅ 48 000 UZS • 🍔 ЕДА (☕ кофе)"),
+        ({"incoming": True}, -48000.0, "✅ +48 000 UZS • 🍔 ЕДА (☕ кофе)"),
+        # «не моя карта» второй части — это она: зачисление на карту в «💳 СЧЕТА»
+        (
+            {"incoming": True, "category": "💳 СЧЕТА", "subcategory": "переводы"},
+            -48000.0,
+            "✅ +48 000 UZS • 💳 СЧЕТА (переводы)",
+        ),
+        # доход — всегда плюсом
+        (
+            {"incoming": True, "category": "💰 ДОХОДЫ", "subcategory": "зарплата"},
+            48000.0,
+            "✅ +48 000 UZS • 💰 ДОХОДЫ (зарплата)",
+        ),
+    ],
+)
+def test_incoming_is_minus_in_the_sheet_except_for_incomes(
+    changes: dict[str, Any], expected: float, line: str
+) -> None:
+    sheets = FakeSheets()
+    response = client_for(make_application(sheets)).post(
+        "/api/expenses", json=expense(**changes), headers=auth()
+    )
+    assert response.status_code == 200
+    assert sheets.rows[0][3] == expected
+    # ответ бота не меняется: «+» — деньги пришли
+    assert response.json()["lines"][0].startswith(line)
+
+
 def test_same_entry_twice_is_written_once() -> None:
     sheets = FakeSheets()
     client = client_for(make_application(sheets))
@@ -203,6 +236,8 @@ async def test_double_tap_while_the_first_write_runs_writes_once() -> None:
         ({"day": (TODAY + timedelta(days=1)).isoformat()}, "day"),
         ({"day": (TODAY - timedelta(days=32)).isoformat()}, "day"),
         ({"entry_id": "not-a-uuid"}, "entry_id"),
+        ({"incoming": "yes"}, "incoming"),
+        ({"incoming": 1}, "incoming"),
     ],
 )
 def test_bad_fields_are_named(changes: dict[str, Any], field: str) -> None:

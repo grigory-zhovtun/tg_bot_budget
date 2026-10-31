@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ApiError,
   type Api,
+  type Bootstrap,
   type Dashboard,
   type ExpenseInput,
   type ExpenseResult,
@@ -21,8 +22,10 @@ import {
   savingsFixture,
   writtenFixture,
 } from "../mocks/fixtures";
+import { GOOD_COLOR } from "../dashboard/controls";
 import { Store, StoreProvider } from "../store";
 import { fakeApi } from "../test/fakeApi";
+import { inTelegram, lastCall, tapPanel } from "../test/telegram";
 import { nb } from "../test/text";
 import EntryScreen from "./EntryScreen";
 import { enqueue, readOutbox, writeOutbox } from "./outbox";
@@ -31,14 +34,46 @@ type User = ReturnType<typeof userEvent.setup>;
 
 const OWNER = bootstrapFixture.user.id;
 
+// справочник с доходами и счетами: bootstrapFixture общий для девяти файлов
+const ALL_GROUPS: Bootstrap = {
+  ...bootstrapFixture,
+  sources: [
+    ...bootstrapFixture.sources,
+    { name: "HUMO 2222 UZS", currency: "UZS" },
+  ],
+  groups: [
+    ...bootstrapFixture.groups,
+    {
+      name: "💳 СЧЕТА",
+      emoji: "💳",
+      title: "СЧЕТА",
+      subcategories: [
+        { name: "переводы", icon: "🔄" },
+        { name: "обмен валюты", icon: "💱" },
+        { name: "выравнивание", icon: "⚖️" },
+      ],
+    },
+    {
+      name: "💰 ДОХОДЫ",
+      emoji: "💰",
+      title: "ДОХОДЫ",
+      subcategories: [{ name: "зарплата", icon: "💵" }],
+    },
+  ],
+};
+
 // повторы без пауз: тесты не ждут 2 и 5 секунд
 const noWait = () => Promise.resolve();
 
-function renderEntry(api: Api, onCatalogChanged: () => void = vi.fn()): void {
+function renderEntry(
+  api: Api,
+  onCatalogChanged: () => void = vi.fn(),
+  boot: Bootstrap = bootstrapFixture,
+): void {
   render(
     <EntryScreen
       api={api}
-      boot={bootstrapFixture}
+      boot={boot}
       onCatalogChanged={onCatalogChanged}
       wait={noWait}
     />,
@@ -92,9 +127,7 @@ describe("EntryScreen", () => {
     renderEntry(api);
     await fillCoffee(user);
     await user.type(screen.getByLabelText("Комментарий"), "латте");
-    await user.click(
-      screen.getByRole("button", { name: /Записать 48\s000 UZS/ }),
-    );
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     expect(sent(api)).toMatchObject({
       source: "VISA 9090 UZS",
       category: "🍔 ЕДА",
@@ -115,7 +148,7 @@ describe("EntryScreen", () => {
     renderEntry(api);
     await fillCoffee(user);
     expect(screen.getByText("Дата: Сегодня")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     // не отправляем день вообще: приложение могло пролежать открытым до утра,
     // и сегодняшнее число знает только бот
     expect(sent(api).day).toBeUndefined();
@@ -130,7 +163,7 @@ describe("EntryScreen", () => {
       target: { value: "2026-10-09" },
     });
     expect(screen.getByText("Дата: Вчера")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     expect(sent(api).day).toBe("2026-10-09");
   });
 
@@ -149,7 +182,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(api);
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     expect(await screen.findByText(/✅ 48 000 UZS/)).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
     expect(sent(api, 1).entry_id).toBe(sent(api, 0).entry_id);
@@ -167,7 +200,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(api);
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     expect(
       await screen.findByText("📤 Трата сохранена на телефоне"),
     ).toBeTruthy();
@@ -183,6 +216,22 @@ describe("EntryScreen", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("says «Зачисление сохранено» when a credit stays on the phone", async () => {
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(
+        new ApiError(0, "network", "Нет связи с сервером — проверьте интернет"),
+      );
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: "Зачислить" }));
+    expect(
+      await screen.findByText("📤 Зачисление сохранено на телефоне"),
+    ).toBeTruthy();
+    expect(screen.queryByText("📤 Трата сохранена на телефоне")).toBeNull();
+  });
+
   it("dates a kept expense by the bot's day at the tap", async () => {
     // приложение открыли 10-го, трату ввели в 00:30 по Ташкенту уже 12-го
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -193,7 +242,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(fakeApi({ addExpense }));
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     await screen.findByText("📤 Трата сохранена на телефоне");
     expect(readOutbox(OWNER)[0]?.entry.day).toBe("2026-10-12");
     // сам запрос — без даты: её ставит бот
@@ -206,7 +255,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(fakeApi({ addExpense }));
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     expect(
       readOutbox(OWNER).map((item) => item.title.replace(/\s/g, " ")),
     ).toEqual(["кофе 48 000 UZS"]);
@@ -338,6 +387,27 @@ describe("EntryScreen", () => {
     ).toBeTruthy();
   });
 
+  it("says a credit waits on the phone when there is still no connection", async () => {
+    enqueue(OWNER, {
+      entry: { ...sentLike("q8"), incoming: true, day: bootstrapFixture.today },
+      title: "кофе 48 000 UZS",
+    });
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(new ApiError(0, "network", "Нет связи"));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await waitFor(() => expect(addExpense).toHaveBeenCalledTimes(1));
+    const button = await screen.findByRole("button", {
+      name: "Отправить сейчас",
+    });
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+    await user.click(button);
+    expect(
+      await screen.findByText("📵 Связи нет — зачисление ждёт на телефоне"),
+    ).toBeTruthy();
+  });
+
   it("drops «Отменить» once the queue sent an expense", async () => {
     // сервер отменяет последнюю запись — ею стала трата из очереди
     const user = userEvent.setup();
@@ -346,7 +416,7 @@ describe("EntryScreen", () => {
       .mockResolvedValue(writtenFixture);
     renderEntry(fakeApi({ addExpense }));
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     expect(
       await screen.findByRole("button", { name: "↩️ Отменить" }),
     ).toBeTruthy();
@@ -375,7 +445,7 @@ describe("EntryScreen", () => {
       );
     renderEntry(fakeApi({ addExpense }));
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     const undo = await screen.findByRole("button", { name: "↩️ Отменить" });
     enqueue(OWNER, {
       entry: { ...sentLike("q7"), day: bootstrapFixture.today },
@@ -401,7 +471,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(fakeApi({ addExpense }));
     await fillCoffee(user);
-    const button = screen.getByRole("button", { name: /Записать/ });
+    const button = screen.getByRole("button", { name: "Списать" });
     fireEvent.click(button);
     fireEvent.click(button);
     expect(addExpense).toHaveBeenCalledTimes(1);
@@ -419,7 +489,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(fakeApi({ addExpense }), onCatalogChanged);
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     expect(
       await screen.findByText("Справочник обновился — выберите заново"),
     ).toBeTruthy();
@@ -437,9 +507,7 @@ describe("EntryScreen", () => {
     for (const key of ["1", "2", ",", "5"]) {
       await user.click(screen.getByRole("button", { name: key }));
     }
-    await user.click(
-      screen.getByRole("button", { name: /Записать 12,50 USD/ }),
-    );
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     expect(sent(api)).toMatchObject({
       source: "VISA 3434 USD",
       amount: "12.5",
@@ -451,7 +519,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(api);
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     await user.click(
       await screen.findByRole("button", { name: "↩️ Отменить" }),
     );
@@ -472,7 +540,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(fakeApi({ undo }));
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     const button = await screen.findByRole("button", { name: "↩️ Отменить" });
     fireEvent.click(button);
     fireEvent.click(button);
@@ -510,7 +578,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(api);
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     await screen.findByText(/✅ 48 000 UZS/);
     expect(api.dashboard).toHaveBeenCalledTimes(2);
   });
@@ -530,7 +598,7 @@ describe("EntryScreen", () => {
       </StoreProvider>,
     );
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     await screen.findByText(/✅ 48 000 UZS/);
     // трата по статье копилки меняет её остаток — вкладка спросит сервер заново
     expect(store.get("savings").at).toBe(0);
@@ -556,7 +624,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(fakeApi({ dashboard }));
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     await waitFor(() => {
       expect(tilePlan("ЕДА")).toBe(nb("⚠️ сверх на 400 000"));
     });
@@ -577,7 +645,7 @@ describe("EntryScreen", () => {
       expect(tilePlan("ЕДА")).toBe(nb("⚠️ сверх на 300 000"));
     });
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     await screen.findByText(/✅ 48 000 UZS/);
     await waitFor(() => {
       expect(tilePlan("ЕДА")).toBeNull();
@@ -590,7 +658,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(api);
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     await user.click(await screen.findByRole("button", { name: /Отменить/ }));
     await screen.findByText(/Удалил из таблицы/);
     expect(api.dashboard).toHaveBeenCalledTimes(3);
@@ -683,9 +751,6 @@ describe("EntryScreen", () => {
     expect(screen.getByLabelText("Комментарий").className).toContain("text-lg");
     const five = screen.getByRole("button", { name: "5" });
     expect(five.className).toContain("text-[28px]");
-    const write = screen.getByRole("button", { name: /Записать 48\s000 UZS/ });
-    expect(write.className).toContain("text-lg");
-    expect(write.className).toContain("font-extrabold");
   });
 
   it("makes a long amount a step smaller so it stays on one line", async () => {
@@ -705,7 +770,7 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(fakeApi());
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     const answer = await screen.findByRole("status");
     expect(answer.className).toContain("text-line");
     expect(answer.className).not.toContain("text-sm");
@@ -720,6 +785,163 @@ describe("EntryScreen", () => {
     expect(notice.className).toContain("text-line");
   });
 
+  it("puts «Зачислить» left in green and «Списать» right", async () => {
+    const user = userEvent.setup();
+    renderEntry(fakeApi());
+    await fillCoffee(user);
+    const spend = screen.getByRole("button", { name: "Списать" });
+    const row = spend.parentElement;
+    expect(row?.className).toContain("grid-cols-2");
+    expect(
+      [...(row?.children ?? [])].map((child) => child.textContent),
+    ).toEqual(["Зачислить", "Списать"]);
+    const credit = screen.getByRole("button", { name: "Зачислить" });
+    for (const name of [
+      "bg-chip-good",
+      "text-white",
+      "text-lg",
+      "font-extrabold",
+    ]) {
+      expect(credit.className).toContain(name);
+    }
+    for (const name of [
+      "bg-button",
+      "text-button-text",
+      "text-lg",
+      "font-extrabold",
+    ]) {
+      expect(spend.className).toContain(name);
+    }
+    // в половине ряда слово при крупном шрифте переносится, а не обрезается
+    for (const button of [credit, spend]) {
+      const classes = button.className.split(" ");
+      expect(classes).toContain("min-h-12");
+      expect(classes).toContain("px-1");
+      expect(classes).not.toContain("h-12");
+    }
+  });
+
+  it("turns both buttons off at zero and while one is sending", async () => {
+    let finish: (result: ExpenseResult) => void = () => undefined;
+    const addExpense = vi.fn<Api["addExpense"]>(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await user.click(screen.getByRole("button", { name: "ЕДА" }));
+    await user.click(screen.getByRole("button", { name: "кофе" }));
+    const off = () =>
+      ["Зачислить", "Списать"].map((name) =>
+        screen.getByRole("button", { name }).hasAttribute("disabled"),
+      );
+    expect(off()).toEqual([true, true]);
+    for (const key of ["4", "8", "000"]) {
+      await user.click(screen.getByRole("button", { name: key }));
+    }
+    expect(off()).toEqual([false, false]);
+    await user.click(screen.getByRole("button", { name: "Зачислить" }));
+    expect(off()).toEqual([true, true]);
+    await act(async () => finish(writtenFixture));
+  });
+
+  it("sends only «Зачислить» when «Списать» is tapped right after it", async () => {
+    const addExpense = vi.fn<Api["addExpense"]>(() => new Promise(() => {}));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await fillCoffee(user);
+    fireEvent.click(screen.getByRole("button", { name: "Зачислить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Списать" }));
+    expect(addExpense).toHaveBeenCalledOnce();
+    expect(addExpense.mock.calls[0]?.[0].incoming).toBe(true);
+  });
+
+  it("writes «Зачислить» with the sign and says what went into the table", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    renderEntry(api);
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: "Зачислить" }));
+    expect(sent(api)).toMatchObject({ amount: "48000", incoming: true });
+    const head = await screen.findByText(
+      "✓ Зачислено 48 000 UZS — в таблицу −48 000",
+    );
+    expect(head.className).toContain("text-fact");
+    expect(head.className).toContain("font-extrabold");
+    // строки сервера — под первой строкой
+    const line = screen.getByText(/✅ 48 000 UZS/);
+    expect(
+      head.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("writes «Списать» without the sign field", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    renderEntry(api);
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: "Списать" }));
+    expect(sent(api)).not.toHaveProperty("incoming");
+    expect(await screen.findByText("✓ Списано 48 000 UZS")).toBeTruthy();
+  });
+
+  it("keeps one «Записать» for incomes", async () => {
+    const api = fakeApi();
+    const user = userEvent.setup();
+    renderEntry(api, vi.fn(), ALL_GROUPS);
+    await user.click(screen.getByRole("button", { name: "ДОХОДЫ" }));
+    await user.click(screen.getByRole("button", { name: "зарплата" }));
+    for (const key of ["4", "8", "000"]) {
+      await user.click(screen.getByRole("button", { name: key }));
+    }
+    expect(screen.queryByRole("button", { name: "Зачислить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Списать" })).toBeNull();
+    await user.click(
+      screen.getByRole("button", { name: /^Записать 48\s000 UZS$/ }),
+    );
+    expect(sent(api)).not.toHaveProperty("incoming");
+    expect(await screen.findByText(/✅ 48 000 UZS/)).toBeTruthy();
+    expect(screen.queryByText(/^✓ (Списано|Зачислено)/)).toBeNull();
+  });
+
+  it("names a credit «зачисление» in the queue and keeps old entries spends", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-10T12:00:00Z"));
+    const today = bootstrapFixture.today;
+    enqueue(OWNER, {
+      entry: { ...sentLike("old"), day: today },
+      title: "кофе 48 000 UZS",
+    });
+    enqueue(OWNER, {
+      entry: { ...sentLike("credit"), incoming: true, day: today },
+      title: "кофе 48 000 UZS",
+    });
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValueOnce(new ApiError(0, "network", "Нет связи"))
+      .mockResolvedValue(writtenFixture);
+    renderEntry(fakeApi({ addExpense }));
+    await waitFor(() => expect(addExpense).toHaveBeenCalledTimes(1));
+    const queue = screen.getByRole("region", { name: "Не отправлено" });
+    expect(
+      within(queue)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent?.replace(/\s/g, " ")),
+    ).toEqual([
+      "кофе 48 000 UZS, сегодня",
+      "зачисление: кофе 48 000 UZS, сегодня",
+    ]);
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+    });
+    expect(await screen.findByText("✅ Отправлено из очереди: 2")).toBeTruthy();
+    // сохранённая до обновления — без признака, то есть трата
+    expect(addExpense.mock.calls[1]?.[0]).not.toHaveProperty("incoming");
+    expect(addExpense.mock.calls[2]?.[0].incoming).toBe(true);
+  });
+
   it("writes an error at 17 px", async () => {
     const addExpense = vi
       .fn<Api["addExpense"]>()
@@ -727,9 +949,142 @@ describe("EntryScreen", () => {
     const user = userEvent.setup();
     renderEntry(fakeApi({ addExpense }));
     await fillCoffee(user);
-    await user.click(screen.getByRole("button", { name: /Записать/ }));
+    await user.click(screen.getByRole("button", { name: "Списать" }));
     const alert = await screen.findByRole("alert");
     expect(alert.className).toContain("text-line");
     expect(alert.className).not.toContain("text-sm");
   });
+});
+
+describe("EntryScreen in Telegram", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    writeOutbox(OWNER, []);
+    localStorage.clear();
+  });
+
+  it("puts «Зачислить» left of «Списать» on Telegram's bar from 7.10", async () => {
+    const { main, second } = inTelegram();
+    const api = fakeApi();
+    const user = userEvent.setup();
+    renderEntry(api);
+    await fillCoffee(user);
+    expect(second.setParams).toHaveBeenCalledWith({
+      text: "Зачислить",
+      color: GOOD_COLOR,
+      text_color: "#ffffff",
+      position: "left",
+      is_visible: true,
+    });
+    // текст — в том же вызове, что показ: кадра с прежним текстом нет
+    expect(main.setParams).toHaveBeenLastCalledWith({
+      text: "Списать",
+      is_visible: true,
+    });
+    expect(main.show).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Зачислить" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Списать" })).toBeNull();
+    await tapPanel(second);
+    expect(sent(api)).toMatchObject({ amount: "48000", incoming: true });
+    expect(
+      await screen.findByText("✓ Зачислено 48 000 UZS — в таблицу −48 000"),
+    ).toBeTruthy();
+    expect(second.hide).toHaveBeenCalled(); // форма вернулась к группам
+  });
+
+  it("keeps Telegram's buttons off at zero and while one is sending", async () => {
+    const { main, second } = inTelegram();
+    const addExpense = vi.fn<Api["addExpense"]>(() => new Promise(() => {}));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await user.click(screen.getByRole("button", { name: "ЕДА" }));
+    await user.click(screen.getByRole("button", { name: "кофе" }));
+    // hideProgress снова включает кнопку — выключаем после него
+    for (const button of [main, second]) {
+      expect(lastCall(button.disable)).toBeGreaterThan(
+        lastCall(button.hideProgress),
+      );
+    }
+    for (const key of ["4", "8", "000"]) {
+      await user.click(screen.getByRole("button", { name: key }));
+    }
+    for (const button of [main, second]) {
+      expect(lastCall(button.enable)).toBeGreaterThan(lastCall(button.disable));
+    }
+    await tapPanel(main);
+    expect(addExpense.mock.calls[0]?.[0]).not.toHaveProperty("incoming");
+    expect(main.showProgress).toHaveBeenLastCalledWith(false);
+    expect(second.showProgress).not.toHaveBeenCalled(); // крутится только нажатая
+    expect(lastCall(second.disable)).toBeGreaterThan(lastCall(second.enable));
+  });
+
+  it("hides «Зачислить» when the sum step closes", async () => {
+    const { second } = inTelegram();
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <EntryScreen
+        api={fakeApi()}
+        boot={bootstrapFixture}
+        onCatalogChanged={vi.fn()}
+        wait={noWait}
+      />,
+    );
+    await fillCoffee(user);
+    expect(second.hide).not.toHaveBeenCalled(); // сумма набирается — кнопка на месте
+    unmount(); // другая вкладка
+    expect(second.hide).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the two buttons in the screen on an older Telegram", async () => {
+    const { main, second } = inTelegram(false);
+    const user = userEvent.setup();
+    renderEntry(fakeApi());
+    await fillCoffee(user);
+    expect(screen.getByRole("button", { name: "Зачислить" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Списать" })).toBeTruthy();
+    expect(main.setParams).not.toHaveBeenCalled(); // панель не показана
+    expect(second.setParams).not.toHaveBeenCalled();
+  });
+
+  it("keeps one «Записать» on Telegram's bar for incomes", async () => {
+    const { main, second } = inTelegram();
+    const user = userEvent.setup();
+    renderEntry(fakeApi(), vi.fn(), ALL_GROUPS);
+    await user.click(screen.getByRole("button", { name: "ДОХОДЫ" }));
+    await user.click(screen.getByRole("button", { name: "зарплата" }));
+    for (const key of ["4", "8", "000"]) {
+      await user.click(screen.getByRole("button", { name: key }));
+    }
+    expect(main.setParams.mock.lastCall?.[0]).toEqual({
+      text: expect.stringMatching(/^Записать 48\s000 UZS$/),
+      is_visible: true,
+    });
+    expect(second.setParams).not.toHaveBeenCalled();
+  });
+
+  // 2. после записи панель прячется без крутилки: иначе она осталась бы на кнопке
+  it.each(["main", "second"] as const)(
+    "stops the %s button spinning once the sum step closes",
+    async (which) => {
+      const buttons = inTelegram();
+      let finish: (result: ExpenseResult) => void = () => undefined;
+      const addExpense = vi.fn<Api["addExpense"]>(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const user = userEvent.setup();
+      renderEntry(fakeApi({ addExpense }));
+      await fillCoffee(user);
+      const pressed = buttons[which];
+      await tapPanel(pressed);
+      expect(pressed.showProgress).toHaveBeenCalled(); // крутится, пока ждёт
+      await act(async () => finish(writtenFixture));
+      expect(screen.getByRole("button", { name: "ЕДА" })).toBeTruthy(); // шаг ушёл
+      expect(lastCall(pressed.hideProgress)).toBeGreaterThan(
+        lastCall(pressed.showProgress),
+      );
+    },
+  );
 });

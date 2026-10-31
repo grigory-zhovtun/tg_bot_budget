@@ -34,6 +34,20 @@ export function BigFieldError({ text }: { text: string | undefined }) {
 export const PRIMARY =
   "h-12 rounded-xl bg-button text-lg font-extrabold text-button-text disabled:opacity-50";
 
+/** Зелёная кнопка «Зачислить» — фон плашки «хорошо», белый сверхжирный текст.
+ * Стоит в половине ряда: растёт с шрифтом, слово переносится, а не обрезается. */
+export const GOOD_BUTTON =
+  "min-h-12 rounded-xl bg-chip-good px-1 text-lg font-extrabold text-white disabled:opacity-50";
+
+/** «Списать» рядом с «Зачислить» — цветом кнопки Telegram, растёт с шрифтом так же.
+ * PRIMARY не трогаем: она — во всю ширину во многих окнах. */
+export const SPEND_BUTTON =
+  "min-h-12 rounded-xl bg-button px-1 text-lg font-extrabold text-button-text disabled:opacity-50";
+
+/** Тот же зелёный для «Зачислить» на панели Telegram: родной кнопке цвет задаётся
+ * строкой, а не классом (совпадает с --color-chip-good). */
+export const GOOD_COLOR = "#146c2e";
+
 /** Ошибка над кнопкой — 17 px жирно. */
 export function ErrorLine({ text }: { text: string | null }) {
   return text ? (

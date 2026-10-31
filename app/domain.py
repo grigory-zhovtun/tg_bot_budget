@@ -462,15 +462,21 @@ def build_row(
 
 # Сумма в начале сообщения, за ней пробел или конец текста.
 # «12.10.2026 оплата…» не сумма: после «12.10» идёт точка, а не пробел.
+# Знак перед суммой — «+», «-» или длинный минус «−» (U+2212).
 _MANUAL = re.compile(
-    rf"^\s*([+-]?)\s*(\d{{1,3}}(?:[ {NBSP}]\d{{3}})+|\d+)(?:[.,](\d{{1,2}}))?"
-    rf"(?:\s+(.*))?$",
+    r"^\s*([+\-\u2212]?)\s*"
+    rf"(\d{{1,3}}(?:[ {NBSP}]\d{{3}})+|\d+)(?:[.,](\d{{1,2}}))?"
+    r"(?:\s+(.*))?$",
     re.S,
 )
 
 
 def parse_manual_entry(text: str) -> tuple[float, bool, str] | None:
-    """«5000 кофе», «5 000,50», «+20000 возврат» → (сумма, приход?, комментарий)."""
+    """«5000 кофе», «5 000,50», «+20000 возврат», «-20000», «−20000» → кортеж.
+
+    Кортеж — (сумма, приход?, комментарий). Любой знак перед суммой — приход:
+    «-» и «−» — то же, что «+», а не трата.
+    """
     match = _MANUAL.match(text or "")
     if not match:
         return None
@@ -478,7 +484,7 @@ def parse_manual_entry(text: str) -> tuple[float, bool, str] | None:
     number = float(f"{re.sub(r'[^0-9]', '', whole)}.{fraction or 0}")
     if number <= 0:
         return None
-    return number, sign == "+", (comment or "").strip()
+    return number, sign != "", (comment or "").strip()
 
 
 def entry_row(

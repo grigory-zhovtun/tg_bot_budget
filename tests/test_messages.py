@@ -193,6 +193,15 @@ async def test_manual_incoming_with_plus_is_negative() -> None:
     assert summary(update).startswith("✅ +1 000 000 UZS")
 
 
+@pytest.mark.parametrize("text", ["-1 000 000 с HUMO", "−1 000 000 с HUMO"])
+async def test_manual_incoming_with_minus_is_negative(text: str) -> None:
+    state = manual_state("💳 СЧЕТА", "переводы")
+    update, context, sheets = make_chat(text, state)
+    await messages.text_handler(update, context)
+    assert sheets.rows[0][3] == -1000000.0
+    assert summary(update).startswith("✅ +1 000 000 UZS")  # ответ бота — как у «+»
+
+
 async def test_pasted_sms_in_manual_state_goes_to_ai() -> None:
     ai = FakeAI([])
     update, context, sheets = make_chat(
