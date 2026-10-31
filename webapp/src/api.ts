@@ -129,6 +129,9 @@ export interface SavingMonth {
 export interface Savings {
   rate: number | null; // за 3 последних полных месяца
   months: SavingMonth[]; // 6 полных месяцев, от старых
+  half_rate: number | null; // за 6 полных месяцев; null — дохода не было
+  current: SavingMonth | null; // текущий месяц с 1-го по сегодня
+  worst: string | null; // «2026-07» — откуда минус за 3 месяца; null — не минус
 }
 
 /** День месяца: траты без платежей из списка и лимит, с которым день начался. */

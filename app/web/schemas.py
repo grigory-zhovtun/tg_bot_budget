@@ -260,6 +260,9 @@ class SavingMonthOut(ApiModel):
 class SavingsOut(ApiModel):
     rate: float | None  # за 3 последних полных месяца
     months: list[SavingMonthOut]  # 6 полных месяцев, от старых
+    half_rate: float | None = None  # за 6 полных месяцев; None — дохода не было
+    current: SavingMonthOut | None = None  # текущий месяц с 1-го по сегодня
+    worst: str | None = None  # «2026-07» — откуда минус за 3 месяца; None — плюс
 
 
 class RunwayOut(ApiModel):

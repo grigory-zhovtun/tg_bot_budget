@@ -906,6 +906,14 @@ export const savingsFixture: SavingsScreen = {
       { month: "2026-08", income: 45_000_000, spent: 36_000_000, rate: 0.2 },
       { month: "2026-09", income: 45_000_000, spent: 36_000_000, rate: 0.2 },
     ],
+    half_rate: -0.1667,
+    current: {
+      month: "2026-10",
+      income: 16_000_000,
+      spent: 12_000_000,
+      rate: 0.25,
+    },
+    worst: "2026-07",
   },
   rates: { UZS: 1, USD: 12_000, RUB: 150 },
 };

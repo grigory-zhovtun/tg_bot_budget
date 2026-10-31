@@ -90,7 +90,7 @@ from app.services.plan import (
 )
 from app.services.plan_advice import advice_numbers, checked_points, gather_advice
 from app.services.receipts import NOTHING, Line, Receipt, receipt_status
-from app.services.savings import Cushion, Savings
+from app.services.savings import Cushion, MonthSaving, Savings
 from app.web.auth import WebUser, authenticate
 from app.web.schemas import (
     AdviceApplyOut,
@@ -336,20 +336,26 @@ def card_out(card: CardBalance, today: date) -> CardOut:
     )
 
 
+def saving_month_out(item: MonthSaving) -> SavingMonthOut:
+    """Месяц нормы сбережений: доход, траты и доля, 4 знака."""
+    return SavingMonthOut(
+        month=f"{item.month:%Y-%m}",
+        income=float(round(item.income)),
+        spent=float(round(item.spent)),
+        rate=None if item.rate is None else round(item.rate, 4),
+    )
+
+
 def savings_out(savings: Savings | None) -> SavingsOut | None:
     if savings is None:
         return None
+    half, worst, current = savings.half_rate, savings.worst, savings.current
     return SavingsOut(
         rate=None if savings.rate is None else round(savings.rate, 4),
-        months=[
-            SavingMonthOut(
-                month=f"{item.month:%Y-%m}",
-                income=float(round(item.income)),
-                spent=float(round(item.spent)),
-                rate=None if item.rate is None else round(item.rate, 4),
-            )
-            for item in savings.months
-        ],
+        months=[saving_month_out(item) for item in savings.months],
+        half_rate=None if half is None else round(half, 4),
+        current=None if current is None else saving_month_out(current),
+        worst=None if worst is None else f"{worst.month:%Y-%m}",
     )
 
 

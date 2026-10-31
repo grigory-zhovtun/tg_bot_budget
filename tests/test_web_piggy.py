@@ -605,6 +605,21 @@ def test_the_month_counts_what_the_piggies_got_since_the_1st() -> None:
     assert "next_month" in piggy  # взнос следующего месяца плана
 
 
+def test_savings_answer_names_half_a_year_and_now() -> None:
+    came = fact_row(TODAY, "💰 ДОХОДЫ", "зарплата", 4_000_000)
+    application, _ = setup(PiggySheets([ROW], []), came)
+    savings = (
+        client_for(application).get("/api/savings", headers=auth()).json()["savings"]
+    )
+    assert savings["current"] == {
+        "month": f"{TODAY:%Y-%m}",
+        "income": 4_000_000,
+        "spent": 0,
+        "rate": 1.0,
+    }
+    assert (savings["half_rate"], savings["worst"]) == (None, None)
+
+
 def test_a_dollar_piggy_counts_in_sums_by_the_tabs_rate() -> None:
     moves = [saved(100, "tr0001", "USD", day=TODAY)]
     application, _ = setup(PiggySheets([ROW, TRIP_ROW], moves))
