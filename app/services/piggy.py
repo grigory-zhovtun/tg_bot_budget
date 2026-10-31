@@ -1466,14 +1466,37 @@ def _month_goals(
     return tuple(goals)
 
 
+def cushion_room(screen: Screen) -> float:
+    """Сколько подушке ещё не отложено из её части месяца, сумы: её часть «сейчас»
+    минус настоящий рост с 1-го; «пополам» не действует — 0 (подушке сначала
+    ничего)."""
+    if screen.cushion_need <= 0:
+        return 0.0
+    return max(screen.cushion_now - screen.cushion_saved, 0.0)
+
+
 def parts_of(screen: Screen, amount: float, *, after_saved: bool) -> dict[str, float]:
-    """Раскладка суммы в сумах: копилкам порядка — до взноса месяца, копилкам
-    «short» — до «не хватит», долгим целям — до их доли; остаток — подушке, в
-    словарь не входит. after_saved — пределы за вычетом отложенного с 1-го."""
+    """Раскладка суммы в сумах: пока подушка меньше месяца жизни (1.7), сначала
+    подушке её половина, потом копилкам порядка — до взноса месяца, копилкам
+    «short» — до «не хватит», долгим целям — до их доли; подушке и остаток — в
+    словарь она не входит. after_saved («Отложил…») — пределы за вычетом
+    отложенного с 1-го, а подушке — не больше того, что ей ещё не отложено из её
+    части (cushion_room), и не меньше того, что копилкам «сейчас» не нужно."""
     rates = screen.rates
     if rates is None or amount <= 0:
         return {}
-    rest = amount
+    first = 0.0
+    if screen.cushion_need > 0:
+        if after_saved:
+            piggies_now = sum(
+                state.now * rates.to_uzs.get(state.piggy.currency, 0.0)
+                for state in screen.piggies
+                if state.status != "broken"
+            )
+            first = min(max(amount / 2, amount - piggies_now), cushion_room(screen))
+        else:
+            first = min(amount / 2, screen.cushion_need)
+    rest = amount - first
     parts: dict[str, float] = {}
 
     def give(state: PiggyState, cap: float) -> None:
@@ -1504,7 +1527,8 @@ def parts_of(screen: Screen, amount: float, *, after_saved: bool) -> dict[str, f
 
 def income_cushion(screen: Screen, amount: float) -> float:
     """Часть подушки одного поступления (сумы); экран — уже с ним: его процент
-    минус то, на сколько поступление увеличило части копилок и долгих целей."""
+    минус то, на сколько поступление увеличило части копилок и долгих целей (пока
+    подушка меньше месяца — с её половиной, parts_of)."""
     share = screen.percent * amount
     before = parts_of(screen, max(screen.due - share, 0.0), after_saved=False)
     after = parts_of(screen, screen.due, after_saved=False)
@@ -1515,7 +1539,8 @@ def distribute(
     screen: Screen, amount: float, currency: str, rates: Rates
 ) -> list[tuple[str, float]]:
     """«Отложил…» одной суммой: раскладка parts_of за вычетом отложенного с 1-го —
-    в валютах копилок; остальное — подушке, его не пишут."""
+    в валютах копилок; остальное — подушке (пока она меньше месяца — сначала то,
+    что ей ещё не отложено из её части), его не пишут."""
     total = rates.convert(amount, currency, "UZS")
     if total is None or total <= 0:
         return []

@@ -442,6 +442,7 @@ from app.services.piggy import (  # noqa: E402
     Enough,
     PiggyState,
     Screen,
+    cushion_room,
     distribute,
     income_cushion,
     money_day,
@@ -1233,6 +1234,70 @@ def test_distribute_follows_the_order_and_tops_up_short_piggies() -> None:
         ("tr0001", 1_800.0),
         ("p3k9za", 12_000_000.0),
     ]
+
+
+def test_now_puts_half_into_the_cushion_first() -> None:
+    came = income_row(date(2026, 11, 5), 8_000_000)
+    found = screen(
+        piggy_row(),
+        fact=(*HOME, came),
+        share=0.5,
+        today=NOVEMBER_10,
+        budget=frozen(500),
+    )
+    # 50 % от 8 млн — 4 млн: подушке половина (ей до месяца 6 млн), «Новому году» 2 млн
+    assert state(found, "p3k9za").now == 2_000_000
+    assert found.cushion_now == pytest.approx(2_000_000)
+    assert income_cushion(found, 8_000_000) == pytest.approx(2_000_000)
+
+
+def test_now_in_october_gives_the_piggies_the_whole_share() -> None:
+    def on(day: date) -> Screen:
+        came = income_row(day, 8_000_000)
+        return screen(
+            piggy_row(), fact=(*HOME, came), share=0.5, today=day, budget=frozen(500)
+        )
+
+    last, first = on(date(2026, 10, 31)), on(date(2026, 11, 1))
+    assert (state(last, "p3k9za").now, last.cushion_now) == (4_000_000, 0)
+    assert (state(first, "p3k9za").now, first.cushion_now) == (
+        2_000_000,
+        pytest.approx(2_000_000),
+    )
+
+
+def test_set_aside_gives_the_cushion_what_it_still_lacks_of_its_part() -> None:
+    def on(budget: Any) -> Screen:
+        came = income_row(date(2026, 11, 5), 8_000_000)
+        return screen(
+            piggy_row(), fact=(*HOME, came), share=0.5, today=NOVEMBER_10, budget=budget
+        )
+
+    # 50 % от 8 млн — 4 млн: подушке 2 млн, «Новому году» 2 млн
+    calm = on(frozen(500))
+    assert cushion_room(calm) == pytest.approx(2_000_000)
+    assert distribute(calm, 4_000_000, "UZS", RATES) == [("p3k9za", 2_000_000)]
+    # подушка уже выросла на 100 $ (1,2 млн): ей ещё 800 000, «Новому году» — его 2 млн
+    grown = on(frozen(600, change=100))
+    assert grown.cushion_saved == pytest.approx(1_200_000)
+    assert cushion_room(grown) == pytest.approx(800_000)
+    assert distribute(grown, 2_800_000, "UZS", RATES) == [("p3k9za", 2_000_000)]
+    assert distribute(grown, 1_000_000, "UZS", RATES) == [
+        ("p3k9za", 500_000)
+    ]  # пополам
+    # доллары на всё купили до записи: подушке сначала ничего, копилке — её 2 млн
+    bought = on(frozen(833, change=333))
+    assert cushion_room(bought) == 0
+    assert distribute(bought, 2_000_000, "UZS", RATES) == [("p3k9za", 2_000_000)]
+    # подушке до месяца — 600 000: остальное «Новому году»
+    small = on(frozen(950))
+    assert state(small, "p3k9za").now == 3_400_000
+
+
+def test_october_has_no_room_for_the_cushion_first() -> None:
+    came = income_row(date(2026, 10, 15), 8_000_000)
+    found = screen(piggy_row(), fact=(*HOME, came), share=0.5, budget=frozen(500))
+    assert cushion_room(found) == 0
 
 
 def test_the_month_goal_is_the_capacity_minus_spending() -> None:

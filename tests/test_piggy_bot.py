@@ -14,6 +14,7 @@ from tests.test_day_budget import fact_row
 from tests.test_web_piggy import PiggyAnalytics, PiggySheets
 
 TODAY = date(2026, 10, 17)
+NOVEMBER_10 = date(2026, 11, 10)  # «пополам» (1.7) уже действует
 OWNER, WIFE = 42, 77
 NEW_YEAR = ["p3k9za", "Новый год", 12000000, "UZS", "20.12.2026", "каждый год",
             "🎉 ПРАЗДНИК", "сезонный", "", "", "", "", "Иван", ""]  # fmt: skip
@@ -113,6 +114,30 @@ async def test_the_cushion_part_names_only_this_income() -> None:
     assert context.bot.send_message.await_args.kwargs["text"] == (
         "🐷 С поступления 12 000 000 UZS — 50 %: 6 000 000 UZS. "
         "За октябрь отложить: «Новый год» 6 000 000 UZS "
+        "· в подушку с этого поступления 2 000 000 UZS"
+    )
+
+
+async def test_the_piggy_message_gives_the_cushion_its_half(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 10.11: 50 % от 8 млн — 4 млн; подушка на 1-е — 600 $ (7,2 млн), ей до месяца
+    # жизни 12 млн не хватает 4,8 млн: половина — подушке, половина — «Новому году»
+    monkeypatch.setattr(piggy, "local_today", lambda zone: NOVEMBER_10)
+    home = [
+        fact_row(date(2026, month, 5), "🏚️ ДОМ", "квартплата", 12_000_000)
+        for month in (8, 9, 10)
+    ]
+    came_now = fact_row(NOVEMBER_10, "💰 ДОХОДЫ", "зарплата", 8_000_000)
+    context = context_with(PiggySheets([NEW_YEAR], [], percent=50), *home, came_now)
+    context.bot_data["categories"] = [*CATALOG["categories"], "🏚️ ДОМ"]
+    row = SheetRow(
+        NOVEMBER_10, "💰 ДОХОДЫ", "зарплата", 8_000_000, "", "UZS", "VISA 1111 UZS"
+    )
+    await piggy.income_prompt(context, OWNER, OWNER, [row])
+    assert context.bot.send_message.await_args.kwargs["text"] == (
+        "🐷 С поступления 8 000 000 UZS — 50 %: 4 000 000 UZS. "
+        "За ноябрь отложить: «Новый год» 2 000 000 UZS "
         "· в подушку с этого поступления 2 000 000 UZS"
     )
 
