@@ -216,6 +216,22 @@ describe("EntryScreen", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("says «Зачисление сохранено» when a credit stays on the phone", async () => {
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(
+        new ApiError(0, "network", "Нет связи с сервером — проверьте интернет"),
+      );
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await fillCoffee(user);
+    await user.click(screen.getByRole("button", { name: "Зачислить" }));
+    expect(
+      await screen.findByText("📤 Зачисление сохранено на телефоне"),
+    ).toBeTruthy();
+    expect(screen.queryByText("📤 Трата сохранена на телефоне")).toBeNull();
+  });
+
   it("dates a kept expense by the bot's day at the tap", async () => {
     // приложение открыли 10-го, трату ввели в 00:30 по Ташкенту уже 12-го
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -368,6 +384,27 @@ describe("EntryScreen", () => {
     });
     expect(
       await screen.findByText("📵 Связи нет — трата ждёт на телефоне"),
+    ).toBeTruthy();
+  });
+
+  it("says a credit waits on the phone when there is still no connection", async () => {
+    enqueue(OWNER, {
+      entry: { ...sentLike("q8"), incoming: true, day: bootstrapFixture.today },
+      title: "кофе 48 000 UZS",
+    });
+    const addExpense = vi
+      .fn<Api["addExpense"]>()
+      .mockRejectedValue(new ApiError(0, "network", "Нет связи"));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await waitFor(() => expect(addExpense).toHaveBeenCalledTimes(1));
+    const button = await screen.findByRole("button", {
+      name: "Отправить сейчас",
+    });
+    await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+    await user.click(button);
+    expect(
+      await screen.findByText("📵 Связи нет — зачисление ждёт на телефоне"),
     ).toBeTruthy();
   });
 
@@ -775,6 +812,13 @@ describe("EntryScreen", () => {
     ]) {
       expect(spend.className).toContain(name);
     }
+    // в половине ряда слово при крупном шрифте переносится, а не обрезается
+    for (const button of [credit, spend]) {
+      const classes = button.className.split(" ");
+      expect(classes).toContain("min-h-12");
+      expect(classes).toContain("px-1");
+      expect(classes).not.toContain("h-12");
+    }
   });
 
   it("turns both buttons off at zero and while one is sending", async () => {
@@ -801,6 +845,17 @@ describe("EntryScreen", () => {
     await user.click(screen.getByRole("button", { name: "Зачислить" }));
     expect(off()).toEqual([true, true]);
     await act(async () => finish(writtenFixture));
+  });
+
+  it("sends only «Зачислить» when «Списать» is tapped right after it", async () => {
+    const addExpense = vi.fn<Api["addExpense"]>(() => new Promise(() => {}));
+    const user = userEvent.setup();
+    renderEntry(fakeApi({ addExpense }));
+    await fillCoffee(user);
+    fireEvent.click(screen.getByRole("button", { name: "Зачислить" }));
+    fireEvent.click(screen.getByRole("button", { name: "Списать" }));
+    expect(addExpense).toHaveBeenCalledOnce();
+    expect(addExpense.mock.calls[0]?.[0].incoming).toBe(true);
   });
 
   it("writes «Зачислить» with the sign and says what went into the table", async () => {
@@ -921,7 +976,12 @@ describe("EntryScreen in Telegram", () => {
       position: "left",
       is_visible: true,
     });
-    expect(main.setText).toHaveBeenLastCalledWith("Списать");
+    // текст — в том же вызове, что показ: кадра с прежним текстом нет
+    expect(main.setParams).toHaveBeenLastCalledWith({
+      text: "Списать",
+      is_visible: true,
+    });
+    expect(main.show).not.toHaveBeenCalled();
     expect(screen.queryByRole("button", { name: "Зачислить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Списать" })).toBeNull();
     await tapPanel(second);
@@ -952,6 +1012,7 @@ describe("EntryScreen in Telegram", () => {
       expect(lastCall(button.enable)).toBeGreaterThan(lastCall(button.disable));
     }
     await tapPanel(main);
+    expect(addExpense.mock.calls[0]?.[0]).not.toHaveProperty("incoming");
     expect(main.showProgress).toHaveBeenLastCalledWith(false);
     expect(second.showProgress).not.toHaveBeenCalled(); // крутится только нажатая
     expect(lastCall(second.disable)).toBeGreaterThan(lastCall(second.enable));
@@ -981,7 +1042,7 @@ describe("EntryScreen in Telegram", () => {
     await fillCoffee(user);
     expect(screen.getByRole("button", { name: "Зачислить" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Списать" })).toBeTruthy();
-    expect(main.show).not.toHaveBeenCalled();
+    expect(main.setParams).not.toHaveBeenCalled(); // панель не показана
     expect(second.setParams).not.toHaveBeenCalled();
   });
 
@@ -994,7 +1055,36 @@ describe("EntryScreen in Telegram", () => {
     for (const key of ["4", "8", "000"]) {
       await user.click(screen.getByRole("button", { name: key }));
     }
-    expect(main.setText.mock.lastCall?.[0]).toMatch(/^Записать 48\s000 UZS$/);
+    expect(main.setParams.mock.lastCall?.[0]).toEqual({
+      text: expect.stringMatching(/^Записать 48\s000 UZS$/),
+      is_visible: true,
+    });
     expect(second.setParams).not.toHaveBeenCalled();
   });
+
+  // 2. после записи панель прячется без крутилки: иначе она осталась бы на кнопке
+  it.each(["main", "second"] as const)(
+    "stops the %s button spinning once the sum step closes",
+    async (which) => {
+      const buttons = inTelegram();
+      let finish: (result: ExpenseResult) => void = () => undefined;
+      const addExpense = vi.fn<Api["addExpense"]>(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const user = userEvent.setup();
+      renderEntry(fakeApi({ addExpense }));
+      await fillCoffee(user);
+      const pressed = buttons[which];
+      await tapPanel(pressed);
+      expect(pressed.showProgress).toHaveBeenCalled(); // крутится, пока ждёт
+      await act(async () => finish(writtenFixture));
+      expect(screen.getByRole("button", { name: "ЕДА" })).toBeTruthy(); // шаг ушёл
+      expect(lastCall(pressed.hideProgress)).toBeGreaterThan(
+        lastCall(pressed.showProgress),
+      );
+    },
+  );
 });

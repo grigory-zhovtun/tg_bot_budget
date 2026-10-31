@@ -37,6 +37,7 @@ import {
   GOOD_BUTTON,
   GOOD_COLOR,
   PRIMARY,
+  SPEND_BUTTON,
 } from "../dashboard/controls";
 import Keypad from "./Keypad";
 import {
@@ -239,6 +240,7 @@ export default function EntryScreen({
   // пара «Зачислить» и «Списать» — с 7.10; иначе те же кнопки в экране
   const native = tg !== null && (income || second !== null);
   const onSum = step === "amount";
+  const mainText = income ? label : "Списать"; // MainButton на сумме
 
   const plan = useMemo(() => planIndex(dashboard), [dashboard]);
 
@@ -264,12 +266,18 @@ export default function EntryScreen({
             expired.current = true;
             setError(stopped.message);
           }
+          const left = items.filter((item) => !item.error); // ждут связи
           if (sent > 0) {
             setDone(null); // «Отменить» под сводкой отменило бы трату из очереди
             setNotice(`✅ Отправлено из очереди: ${sent}`);
             loadPlan();
-          } else if (byHand && !stopped && items.some((item) => !item.error)) {
-            setNotice("📵 Связи нет — трата ждёт на телефоне");
+          } else if (byHand && !stopped && left.length > 0) {
+            // очередь — из нескольких записей: зачисление, только если все такие
+            setNotice(
+              left.every((item) => item.entry.incoming)
+                ? "📵 Связи нет — зачисление ждёт на телефоне"
+                : "📵 Связи нет — трата ждёт на телефоне",
+            );
           }
         })
         .finally(() => setFlushing(false));
@@ -338,7 +346,7 @@ export default function EntryScreen({
           setStep("group");
         })
         .catch((reason: unknown) => {
-          // связи нет и после повторов или вход устарел: трата ждёт на телефоне
+          // связи нет и после повторов или вход устарел: запись ждёт на телефоне
           const keep = retryable(reason) || stopsQueue(reason);
           finishSending(owner, input.entry_id, keep);
           if (keep) {
@@ -348,7 +356,11 @@ export default function EntryScreen({
               setError(reason.message);
               setNotice(null);
             } else {
-              setNotice("📤 Трата сохранена на телефоне");
+              setNotice(
+                out.entry.incoming
+                  ? "📤 Зачисление сохранено на телефоне"
+                  : "📤 Трата сохранена на телефоне",
+              );
             }
             setDone(null);
             setGroup(null);
@@ -424,11 +436,21 @@ export default function EntryScreen({
     };
   }, [tg, step, back]);
 
+  // текст — в том же вызове, что показ: при входе на сумму нет кадра с прежним
+  // текстом; у доходов текст идёт за суммой
   useEffect(() => {
     if (!tg || !native || !onSum) return;
-    tg.MainButton.show();
+    tg.MainButton.setParams({ text: mainText, is_visible: true });
+  }, [tg, native, onSum, mainText]);
+
+  // ушли с суммы — прячем без крутилки: иначе она останется на кнопке до
+  // следующего показа
+  useEffect(() => {
+    if (!tg || !native || !onSum) return;
+    const main = tg.MainButton;
     return () => {
-      tg.MainButton.hide();
+      main.hideProgress();
+      main.hide();
     };
   }, [tg, native, onSum]);
 
@@ -444,14 +466,10 @@ export default function EntryScreen({
       is_visible: true,
     });
     return () => {
+      second.hideProgress();
       second.hide();
     };
   }, [second, income, onSum]);
-
-  useEffect(() => {
-    if (!tg || !native || !onSum) return;
-    tg.MainButton.setText(income ? label : "Списать");
-  }, [tg, native, onSum, income, label]);
 
   // сначала прогресс, потом доступность: hideProgress() снова включает кнопку.
   // Крутится только нажатая, соседняя просто недоступна
@@ -673,7 +691,7 @@ export default function EntryScreen({
                 </button>
                 <button
                   type="button"
-                  className={PRIMARY}
+                  className={SPEND_BUTTON}
                   disabled={off}
                   onClick={spend}
                 >
