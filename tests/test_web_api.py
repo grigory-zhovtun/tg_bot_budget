@@ -83,6 +83,19 @@ def expense(**changes: Any) -> dict[str, Any]:
     return {**body, **changes}
 
 
+def transfer(**changes: Any) -> dict[str, Any]:
+    """Перевод «Ввода»: VISA 9090 → UZCARD 5656, 500 000 сумов."""
+    body = {
+        "source": "VISA 9090 UZS",
+        "to_source": "UZCARD 5656 UZS",
+        "category": "💳 СЧЕТА",
+        "subcategory": "переводы",
+        "amount": "500000",
+        "comment": "",
+    }
+    return expense(**{**body, **changes})
+
+
 def test_requests_without_a_signature_get_401() -> None:
     response = client_for(make_application()).get("/api/bootstrap")
     assert response.status_code == 401
@@ -190,6 +203,124 @@ def test_incoming_is_minus_in_the_sheet_except_for_incomes(
     assert sheets.rows[0][3] == expected
     # ответ бота не меняется: «+» — деньги пришли
     assert response.json()["lines"][0].startswith(line)
+
+
+def test_a_transfer_writes_two_rows_in_one_write() -> None:
+    sheets = FakeSheets()
+    application = make_application(sheets)
+    response = client_for(application).post(
+        "/api/expenses", json=transfer(comment="на отпуск"), headers=auth()
+    )
+    assert response.status_code == 200
+    assert response.json()["rows"] == {"first": 4169, "last": 4170}
+    assert sheets.appends == 1
+    assert [row[1:4] for row in sheets.rows] == [
+        ["💳 СЧЕТА", "переводы", 500000.0],
+        ["💳 СЧЕТА", "переводы", -500000.0],
+    ]
+    assert [row[5:] for row in sheets.rows] == [
+        ["перевод VISA 9090 → UZCARD 5656 (свой), на отпуск", "UZS", "VISA 9090 UZS"],
+        [
+            "перевод UZCARD 5656 ← VISA 9090 (свой), на отпуск",
+            "UZS",
+            "UZCARD 5656 UZS",
+        ],
+    ]
+    assert sheets.rows[0][0] == sheets.rows[1][0] == TODAY.strftime("%d.%m.%Y")
+    # текущая карта «Ввода» — «Куда»
+    assert application.user_data[OWNER]["source"] == "UZCARD 5656 UZS"
+
+
+def test_an_exchange_writes_each_side_in_its_currency() -> None:
+    sheets = FakeSheets()
+    application = make_application(sheets)
+    application.bot_data["subcategories"] = {
+        **SUBCATEGORIES,
+        "💳 СЧЕТА": ["переводы", "обмен валюты"],
+    }
+    response = client_for(application).post(
+        "/api/expenses",
+        json=transfer(
+            to_source="VISA 3434 USD",
+            subcategory="обмен валюты",
+            amount="1210800",
+            to_amount="100",
+        ),
+        headers=auth(),
+    )
+    assert response.status_code == 200
+    assert [(r[3], r[5], r[6]) for r in sheets.rows] == [
+        (1210800.0, "конвертация VISA 9090 → VISA 3434 USD (свой)", "UZS"),
+        (-100.0, "конвертация VISA 3434 USD ← VISA 9090 (свой)", "USD"),
+    ]
+
+
+def test_the_same_sum_twice_is_fine_in_one_currency() -> None:
+    sheets = FakeSheets()
+    response = client_for(make_application(sheets)).post(
+        "/api/expenses", json=transfer(to_amount="500000.00"), headers=auth()
+    )
+    assert response.status_code == 200
+    assert [row[3] for row in sheets.rows] == [500000.0, -500000.0]
+
+
+def test_a_transfer_is_repeated_and_undone_as_one_write() -> None:
+    sheets = FakeSheets()
+    client = client_for(make_application(sheets))
+    body = transfer()
+    assert client.post("/api/expenses", json=body, headers=auth()).status_code == 200
+    again = client.post("/api/expenses", json=body, headers=auth()).json()
+    assert (again["status"], again["rows"]) == (
+        "duplicate",
+        {"first": 4169, "last": 4170},
+    )
+    assert len(sheets.rows) == 2
+    undone = client.post("/api/expenses/undo", headers=auth()).json()
+    assert undone["message"] == "↩️ Удалил из таблицы: строки 4169–4170."
+
+
+def test_a_failed_transfer_leaves_no_half_and_the_retry_writes_both() -> None:
+    class FlakySheets(FakeSheets):
+        failing = True
+
+        def append_transactions(self, rows: list[Any]) -> tuple[int, int]:
+            if self.failing:
+                self.failing = False
+                raise ConnectionError("Google is down")
+            return super().append_transactions(rows)
+
+    sheets = FlakySheets()
+    client = client_for(make_application(sheets))
+    body = transfer()
+    failed = client.post("/api/expenses", json=body, headers=auth())
+    assert failed.status_code == 503
+    assert sheets.rows == []
+    retried = client.post("/api/expenses", json=body, headers=auth())
+    assert retried.json()["status"] == "written"
+    assert len(sheets.rows) == 2
+
+
+@pytest.mark.parametrize(
+    ("changes", "field"),
+    [
+        ({"category": "🍔 ЕДА", "subcategory": "кофе"}, "to_source"),
+        ({"to_source": "VISA 9090 UZS"}, "to_source"),
+        ({"to_source": "MIR 0000 RUB"}, "to_source"),
+        ({"to_source": "VISA 3434 USD"}, "to_amount"),  # разные валюты — нужна
+        ({"to_amount": "400000"}, "to_amount"),  # одна валюта — только та же
+        ({"to_source": "VISA 3434 USD", "to_amount": "0"}, "to_amount"),
+        ({"to_source": None, "to_amount": "500000"}, "to_amount"),
+        ({"incoming": True}, "incoming"),
+    ],
+)
+def test_bad_transfers_are_named(changes: dict[str, Any], field: str) -> None:
+    sheets = FakeSheets()
+    response = client_for(make_application(sheets)).post(
+        "/api/expenses", json=transfer(**changes), headers=auth()
+    )
+    assert response.status_code == 422
+    assert list(response.json()["error"]["fields"]) == [field]
+    assert sheets.rows == []
 
 
 def test_same_entry_twice_is_written_once() -> None:

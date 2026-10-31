@@ -1,6 +1,6 @@
 import { act } from "@testing-library/react";
 import { vi, type Mock } from "vitest";
-import type { BottomButton, WebApp } from "../telegram";
+import type { BackButton, BottomButton, WebApp } from "../telegram";
 
 /** Кнопка панели Telegram в тестах: каждый метод — шпион. */
 export type FakeButton = { [K in keyof BottomButton]: Mock<BottomButton[K]> };
@@ -20,32 +20,37 @@ function fakeButton(): FakeButton {
   };
 }
 
+/** «Назад» Telegram в тестах: каждый метод — шпион. */
+export type FakeBack = { [K in keyof BackButton]: Mock<BackButton[K]> };
+
 /** Приложение открыто в Telegram; version — есть ли Bot API 7.10 (вторая кнопка
  * панели). Снимать — vi.unstubAllGlobals(). */
 export function inTelegram(version = true): {
   main: FakeButton;
   second: FakeButton;
+  back: FakeBack;
 } {
   const main = fakeButton();
   const second = fakeButton();
+  const back: FakeBack = {
+    show: vi.fn<BackButton["show"]>(),
+    hide: vi.fn<BackButton["hide"]>(),
+    onClick: vi.fn<BackButton["onClick"]>(),
+    offClick: vi.fn<BackButton["offClick"]>(),
+  };
   const app = {
     platform: "ios",
     isVersionAtLeast: () => version,
     MainButton: main,
     SecondaryButton: second,
-    BackButton: {
-      show: vi.fn(),
-      hide: vi.fn(),
-      onClick: vi.fn(),
-      offClick: vi.fn(),
-    },
+    BackButton: back,
     HapticFeedback: {
       notificationOccurred: vi.fn(),
       selectionChanged: vi.fn(),
     },
   };
   vi.stubGlobal("Telegram", { WebApp: app as unknown as WebApp });
-  return { main, second };
+  return { main, second, back };
 }
 
 /** Нажать кнопку панели: обработчик, который на неё повесили последним. */

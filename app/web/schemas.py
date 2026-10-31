@@ -55,9 +55,9 @@ class BootstrapOut(ApiModel):
 
 
 class ExpenseIn(ApiModel):
-    """Запись «Ввода»: трата или зачисление; сумма строкой («12.50»).
+    """Запись «Ввода»: трата, зачисление или перевод между своими картами.
 
-    Строкой — чтобы центы не терялись во float.
+    Сумма строкой («12.50»), чтобы центы не терялись во float.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -71,6 +71,12 @@ class ExpenseIn(ApiModel):
     day: date | None = None  # нет — сегодня по часам бота, а не телефона
     # «Зачислить»: в D минус, у «💰 ДОХОДЫ» плюс; нет поля — трата
     incoming: StrictBool = False
+    # перевод между своими картами («💳 СЧЕТА»): карта «Куда» и «Зачислено» в её
+    # валюте; в одной валюте вторая сумма не нужна
+    to_source: str | None = Field(default=None, min_length=1, max_length=100)
+    to_amount: Decimal | None = Field(
+        default=None, gt=0, le=Decimal(10) ** 12, decimal_places=2
+    )
 
 
 class CalendarIn(ApiModel):

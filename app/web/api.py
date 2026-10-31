@@ -1,4 +1,5 @@
-"""JSON API Mini App: справочник для ввода, запись траты, отмена последней записи.
+"""JSON API Mini App: справочник для ввода, запись траты, зачисления или перевода
+между своими картами (две строки одной записью), отмена последней записи.
 
 Запись идёт той же функцией, что ручной ввод в чате (save_rows): в чат приходит
 обычная сводка с «Исправить»/«Отменить», а /undo и /fix видят эту запись. Повтор с
@@ -91,6 +92,7 @@ from app.services.plan import (
 from app.services.plan_advice import advice_numbers, checked_points, gather_advice
 from app.services.receipts import NOTHING, Line, Receipt, receipt_status
 from app.services.savings import Cushion, MonthSaving, Savings
+from app.transfers import transfer_rows
 from app.web.auth import WebUser, authenticate
 from app.web.schemas import (
     AdviceApplyOut,
@@ -195,6 +197,11 @@ FIELD_MESSAGES = {
     "name": "Название — до 60 символов",
     "repeat": "Такого повтора нет — обновите приложение",
     "incoming": "Знак записи не читается — обновите приложение",
+    "to_source": "«Куда» — другая своя карта, перевод — только в «💳 СЧЕТА»",
+    "to_amount": (
+        "«Зачислено» — больше нуля; в разных валютах — обязательно, в одной — "
+        "как «Списано»"
+    ),
 }
 SHEETS_DOWN = "Таблица не ответила — попробуйте ещё раз"
 PLAN_LOCK = "plan_lock"  # bot_data: одно сохранение плана за раз — проверка и запись
@@ -303,9 +310,10 @@ def screen_age(request: Request) -> float:
 
 
 def check_entry(entry: ExpenseIn, bot_data: dict[str, Any], today: date) -> set[str]:
-    """Поля, которых нет в справочнике бота, и дата вне окна."""
+    """Поля, которых нет в справочнике бота, дата вне окна и неверная пара."""
     bad: set[str] = set()
-    if entry.source not in bot_data.get("sources", []):
+    sources: list[str] = bot_data.get("sources", [])
+    if entry.source not in sources:
         bad.add("source")
     if entry.category not in bot_data.get("categories", []):
         bad.add("category")
@@ -317,6 +325,26 @@ def check_entry(entry: ExpenseIn, bot_data: dict[str, Any], today: date) -> set[
         today - timedelta(days=MAX_DAYS_BACK) <= entry.day <= today
     ):
         bad.add("day")
+    if entry.to_source is None:
+        if entry.to_amount is not None:  # «Зачислено» без «Куда»
+            bad.add("to_amount")
+        return bad
+    if entry.incoming:  # у пары знак каждой строки свой — не «Зачислить»
+        bad.add("incoming")
+    if (
+        entry.category != TRANSFERS_GROUP
+        or entry.to_source not in sources
+        or entry.to_source == entry.source
+    ):
+        bad.add("to_source")
+    elif entry.source in sources:
+        two = currency_of(entry.source) != currency_of(entry.to_source)
+        if two and entry.to_amount is None:  # разные валюты — нужна вторая сумма
+            bad.add("to_amount")
+        elif (
+            not two and entry.to_amount is not None and entry.to_amount != entry.amount
+        ):
+            bad.add("to_amount")  # одна валюта — суммы сторон равны
     return bad
 
 
@@ -1343,19 +1371,37 @@ def routes(application: Application) -> list[Route]:
         if fingerprint in pending:
             return error_response(409, "in_progress", "Эта запись ещё сохраняется")
         pending.add(fingerprint)
+        day = entry.day or today
         try:
-            row = entry_row(
-                float(entry.amount),
-                entry.incoming,
-                entry.comment,
-                entry.source,
-                entry.category,
-                entry.subcategory,
-                entry.day or today,
+            # перевод — снятие и пополнение одной записью: отмена, повтор и /fix
+            # видят обе строки, полупары не бывает
+            rows = (
+                transfer_rows(
+                    float(entry.amount),
+                    None if entry.to_amount is None else float(entry.to_amount),
+                    entry.comment,
+                    entry.source,
+                    entry.to_source,
+                    entry.category,
+                    entry.subcategory,
+                    day,
+                )
+                if entry.to_source is not None
+                else [
+                    entry_row(
+                        float(entry.amount),
+                        entry.incoming,
+                        entry.comment,
+                        entry.source,
+                        entry.category,
+                        entry.subcategory,
+                        day,
+                    )
+                ]
             )
             chat = private_chat(application.bot, user.id)
             result = await save_rows(
-                context, chat, [row], [], fingerprint, notify_failure=False
+                context, chat, rows, [], fingerprint, notify_failure=False
             )
         finally:
             pending.discard(fingerprint)

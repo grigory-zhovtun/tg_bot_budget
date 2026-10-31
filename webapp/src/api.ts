@@ -36,6 +36,8 @@ export interface ExpenseInput {
   comment: string;
   day?: string; // нет — сегодня по часам бота
   incoming?: boolean; // true — «Зачислить»: в таблицу минус (у доходов — плюс); нет поля — трата
+  to_source?: string; // перевод между своими картами: карта «Куда»
+  to_amount?: string; // «Зачислено» в валюте «Куда»; в одной валюте не отправляется
 }
 
 export interface ExpenseResult {
