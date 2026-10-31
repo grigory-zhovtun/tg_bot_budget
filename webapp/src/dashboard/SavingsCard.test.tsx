@@ -11,15 +11,42 @@ function fixture(): Savings {
   return savings;
 }
 
+/** Июль–сентябрь в плюсе: пришло 120 млн, потрачено 90 млн. */
+function plus(): Savings {
+  const months = fixture().months.map((item, index) =>
+    index < 3 ? item : { ...item, income: 40_000_000, spent: 30_000_000 },
+  );
+  return { ...fixture(), rate: 0.25, months, worst: null };
+}
+
 describe("SavingsCard", () => {
-  it("shows the savings rate of three months and a bar for each month", () => {
+  it("says why three months are in minus", () => {
     render(<SavingsCard savings={fixture()} />);
-    // минус — красной плашкой со знаком
-    expect(screen.getByText("⚠️ −10 %").className).toContain("bg-chip-bad");
-    expect(screen.getByText("за июль–сентябрь")).toBeTruthy();
-    expect(screen.getByText("пришло 120 000 000")).toBeTruthy();
-    expect(screen.getByText("потрачено 132 000 000")).toBeTruthy();
+    // минус — красной плашкой со знаком, в одной строке с заголовком
+    const chip = screen.getByText("⚠️ −10 %");
+    expect(chip.className).toContain("bg-chip-bad");
+    const row = screen.getByRole("heading", {
+      name: "Норма сбережений",
+    }).parentElement;
+    expect(row?.className).toContain("justify-between");
+    expect(row?.contains(chip)).toBe(true);
+    expect(
+      screen.getByText("за июль–сентябрь траты больше дохода на 12 000 000"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "больше всего — июль: потрачено 60 000 000, пришло 30 000 000",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("за полгода −17 %")).toBeTruthy();
+    expect(screen.getByText("вверх — отложили, вниз — проели")).toBeTruthy();
+    expect(screen.queryByText("числа над столбиками — в %")).toBeNull();
+  });
+
+  it("draws six months and the current one dashed", () => {
+    render(<SavingsCard savings={fixture()} />);
     const months = screen.getAllByRole("img");
+    expect(months).toHaveLength(7);
     expect(months.map((item) => item.getAttribute("aria-label"))).toEqual(
       [
         "апрель: пришло 40 000 000, потрачено 30 000 000, +25 %",
@@ -28,57 +55,59 @@ describe("SavingsCard", () => {
         "июль: пришло 30 000 000, потрачено 60 000 000, −100 %",
         "август: пришло 45 000 000, потрачено 36 000 000, +20 %",
         "сентябрь: пришло 45 000 000, потрачено 36 000 000, +20 %",
+        "октябрь пока: пришло 16 000 000, потрачено 12 000 000, +25 %",
       ].map(nb),
     );
-    // от 10 % — мятным, меньше — жёлтым, минус — оранжевым; подписи крупнее
-    const april = months[0];
-    const june = months[2];
-    const july = months[3];
-    if (!april || !june || !july) throw new Error("months");
-    // над столбиком — число без «%»: крупно и в свою колонку; «%» — в подписи
-    const label = within(april).getByText("+25");
-    expect(label.className).toContain("text-ok");
-    expect(label.className).toContain("text-[15px]");
-    expect(within(june).getByText("+4").className).toContain("text-warn");
-    expect(within(july).getByText("−100").className).toContain("text-danger");
-    expect(screen.getByText("числа над столбиками — в %")).toBeTruthy();
-    const may = months[1];
-    if (!may) throw new Error("may");
-    expect(within(may).getByText("—")).toBeTruthy();
+    const [april, may, , , , , now] = months;
+    if (!april || !may || !now) throw new Error("months");
+    // чисел над столбиками нет — подпись под столбиком, месяц
+    expect(within(april).queryByText("+25")).toBeNull();
+    expect(within(april).getByText("апр")).toBeTruthy();
     // траты без дохода — запас проели: столбик вниз, а не «нет данных»
     expect(may.querySelector('[data-bar="down"]')).not.toBeNull();
-    // маленькая доля всё равно видна
-    expect((june.querySelector("[data-bar]") as HTMLElement).style.height).toBe(
-      "max(2%, 3px)",
-    );
+    // текущий — пунктиром, с подписью «пока»
+    expect(now.hasAttribute("data-current")).toBe(true);
+    expect(within(now).getByText("пока")).toBeTruthy();
+    const bar = now.querySelector("[data-bar]");
+    expect(bar?.className).toContain("border-dashed");
+    expect(bar?.className).toContain("border-2");
+    expect(bar?.className).not.toContain("bg-");
+    expect(screen.getByText("октябрь пока +25 %")).toBeTruthy();
   });
 
-  it("keeps a huge share short and paints by the rounded number", () => {
-    render(
-      <SavingsCard
-        savings={{
-          rate: 0.096,
-          months: [
-            { month: "2026-09", income: 1_000_000, spent: 80e6, rate: -79 },
-          ],
-        }}
-      />,
-    );
-    expect(screen.getByText("< −999")).toBeTruthy();
-    // 9,6 % пишется «10 %» — и плашка как у 10 %
-    expect(screen.getByText("✓ 10 %").className).toContain("bg-chip-good");
+  it("puts every other month label one line lower", () => {
+    render(<SavingsCard savings={fixture()} />);
+    // на 320 px с крупным шрифтом жирное «июн» шире колонки: соседи — в разных рядах
+    const lower = ["май", "июл", "сен"];
+    const upper = ["апр", "июн", "авг", "пока"];
+    for (const text of lower) {
+      expect(screen.getByText(text).className).toContain("mt-[1.25em]");
+    }
+    for (const text of upper) {
+      expect(screen.getByText(text).className).not.toContain("mt-[1.25em]");
+    }
+    for (const text of [...lower, ...upper]) {
+      expect(screen.getByText(text).className).toContain("whitespace-nowrap");
+      expect(screen.getByText(text).className).toContain("text-[15px]");
+    }
   });
 
-  it("paints a small positive rate yellow", () => {
-    render(<SavingsCard savings={{ ...fixture(), rate: 0.05 }} />);
-    expect(screen.getByText("5 %").className).toContain("bg-chip-mid");
+  it("says the share saved in plus", () => {
+    render(<SavingsCard savings={plus()} />);
+    expect(
+      screen.getByText("за июль–сентябрь отложено 30 000 000 — 25 % дохода"),
+    ).toBeTruthy();
+    expect(screen.queryByText(/больше всего/)).toBeNull();
   });
 
-  it("says when there was no income for three months", () => {
+  it("says when there was no income", () => {
     render(
       <SavingsCard
         savings={{
           rate: null,
+          half_rate: null,
+          worst: null,
+          current: null,
           months: fixture().months.map((item) => ({
             ...item,
             income: 0,
@@ -88,6 +117,48 @@ describe("SavingsCard", () => {
       />,
     );
     expect(screen.getByText("за июль–сентябрь дохода не было")).toBeTruthy();
+    expect(screen.getByText("за полгода дохода не было")).toBeTruthy();
     expect(screen.queryByText(/✓|⚠️/)).toBeNull();
+    expect(screen.getAllByRole("img")).toHaveLength(6); // без текущего месяца
+  });
+
+  it("says the month so far has no income yet", () => {
+    render(
+      <SavingsCard
+        savings={{
+          ...fixture(),
+          current: {
+            month: "2026-10",
+            income: 0,
+            spent: 3_000_000,
+            rate: null,
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("октябрь пока: дохода ещё не было")).toBeTruthy();
+  });
+
+  it("keeps a huge share short and paints by the rounded number", () => {
+    render(
+      <SavingsCard
+        savings={{
+          rate: 0.096,
+          half_rate: 0.096,
+          worst: null,
+          current: null,
+          months: [
+            { month: "2026-09", income: 1_000_000, spent: 80e6, rate: -79 },
+          ],
+        }}
+      />,
+    );
+    // 9,6 % пишется «10 %» — и плашка как у 10 %
+    expect(screen.getByText("✓ 10 %").className).toContain("bg-chip-good");
+  });
+
+  it("paints a small positive rate yellow", () => {
+    render(<SavingsCard savings={{ ...fixture(), rate: 0.05 }} />);
+    expect(screen.getByText("5 %").className).toContain("bg-chip-mid");
   });
 });

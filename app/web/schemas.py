@@ -260,6 +260,9 @@ class SavingMonthOut(ApiModel):
 class SavingsOut(ApiModel):
     rate: float | None  # за 3 последних полных месяца
     months: list[SavingMonthOut]  # 6 полных месяцев, от старых
+    half_rate: float | None = None  # за 6 полных месяцев; None — дохода не было
+    current: SavingMonthOut | None = None  # текущий месяц с 1-го по сегодня
+    worst: str | None = None  # «2026-07» — откуда минус за 3 месяца; None — плюс
 
 
 class RunwayOut(ApiModel):
@@ -716,6 +719,8 @@ class PiggyOut(ApiModel):
     order: int | None = None  # номер важности; null — не в порядке
     forecast: float | None = None  # будет к ближайшему сроку по плану
     now: float = 0.0  # отложить сейчас
+    saved_month: float = 0.0  # отложено в этом месяце
+    next_month: float = 0.0  # взнос следующего месяца плана
     history: list[MoveOut]
     spends: list[SpendOut]
 
@@ -724,7 +729,7 @@ class MonthPlanOut(ApiModel):
     month: str  # «2026-10»
     total: float  # взносы копилок со сроком, сумы
     items: list[AmountOut]
-    cushion: float  # доля 10 % подушке
+    cushion: float  # доля процента подушке
     goals: list[AmountOut]  # доля 10 % долгим целям
     ready: list[str]  # копилки, собранные к сроку в этом месяце
 
@@ -752,6 +757,10 @@ class SavingsMonthOut(ApiModel):
     left: float  # отложить сейчас — копилкам и долгим целям
     cushion: float  # часть подушке
     saved: float  # отложено копилкам с 1-го числа
+    cushion_saved: float = 0.0  # «Отложено подушке»: её настоящий рост с 1-го
+    # сколько подушке ещё не отложено из её части, пока действует «пополам» (1.7);
+    # 0 — подушке сначала ничего
+    cushion_room: float = 0.0
 
 
 class EnoughOut(ApiModel):
@@ -810,6 +819,12 @@ class OrderIn(ApiModel):
     """Порядок важности: ID копилок со сроком, самая важная — первой."""
 
     ids: list[str] = Field(min_length=1, max_length=50)
+
+
+class LifeIn(ApiModel):
+    """Обязательные группы месяца жизни подушки — группы трат справочника."""
+
+    groups: list[str] = Field(min_length=1, max_length=40)
 
 
 class SaveIn(ApiModel):

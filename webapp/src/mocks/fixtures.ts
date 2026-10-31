@@ -747,6 +747,8 @@ function piggy(changes: Partial<Piggy>): Piggy {
     order: 1,
     forecast: 12_000_000,
     now: 4_000_000,
+    saved_month: 0,
+    next_month: 0,
     history: [],
     spends: [],
     ...changes,
@@ -774,6 +776,8 @@ export const savingsFixture: SavingsScreen = {
     left: 4_000_000,
     cushion: 0,
     saved: 0,
+    cushion_saved: 0,
+    cushion_room: 0,
   },
   // 1 900 $ на карте − квартплата 400 $ − копилки 400 $ = 1 100 $; месяц жизни —
   // 12 млн по дому и ежемесячным
@@ -902,6 +906,14 @@ export const savingsFixture: SavingsScreen = {
       { month: "2026-08", income: 45_000_000, spent: 36_000_000, rate: 0.2 },
       { month: "2026-09", income: 45_000_000, spent: 36_000_000, rate: 0.2 },
     ],
+    half_rate: -0.1667,
+    current: {
+      month: "2026-10",
+      income: 16_000_000,
+      spent: 12_000_000,
+      rate: 0.25,
+    },
+    worst: "2026-07",
   },
   rates: { UZS: 1, USD: 12_000, RUB: 150 },
 };

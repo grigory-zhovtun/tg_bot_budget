@@ -1,18 +1,18 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, type ReactNode } from "react";
 import type {
   Api,
   Bootstrap,
   Enough,
   Piggy,
-  SavingsGoal,
   SavingsMonth,
   SavingsScreen,
 } from "../api";
-import { money } from "../format";
-import { monthName } from "../plan/months";
+import { money, moneyText } from "../format";
+import { capital, monthName } from "../plan/months";
 import { useResource, useStore } from "../store";
-import { Card, Good, Line, Warn } from "./blocks";
+import { Card, Good, Line, Table, Warn } from "./blocks";
 import CushionCard from "./CushionCard";
+import LifeSheet from "./LifeSheet";
 import OrderSheet from "./OrderSheet";
 import PercentSheet from "./PercentSheet";
 import PiggyCard from "./PiggyCard";
@@ -31,34 +31,20 @@ interface Props {
 interface SetAsideProps {
   month: SavingsMonth;
   enough: Enough | null;
-  goal: SavingsGoal | null;
+  piggies: Piggy[];
   onSave: (() => void) | null; // null — откладывать нечего
   onPercent: (() => void) | null; // null — каталога ещё нет
 }
 
-const GOAL_STEP = 1000; // в таблицу цель пишется до тысячи
 const NBSP = "\u00a0";
 
-/** Q20 вкладки разошлась с копилками: сколько в плане и сколько нужно; сходится — null. */
-function goalDiffers(
-  goal: SavingsGoal | null,
-): { inPlan: number; needed: number } | null {
-  if (!goal) return null;
-  const inPlan = goal.in_plan ?? 0;
-  if (goal.in_plan !== null && Math.abs(inPlan - goal.suggested) < GOAL_STEP) {
-    return null;
-  }
-  return { inPlan, needed: goal.suggested };
-}
-
-/** Полоса: какая часть доли копилок (сумма месяца без подушки) отложена; доходит
- * до конца, когда откладывать больше нечего. */
+/** Полоса: какая часть суммы месяца отложена — копилкам и подушке. */
 function SavedBar({ share }: { share: number }) {
   const percent = Math.round(share * 100);
   return (
     <div
       role="progressbar"
-      aria-label="Отложено копилкам"
+      aria-label="Отложено за месяц"
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={percent}
@@ -72,16 +58,33 @@ function SavedBar({ share }: { share: number }) {
   );
 }
 
-/** «Откладываем N %» коротко: сколько отложить за месяц, полоса отложенного и
- * предупреждения по одной строке; подробности — в окне процента. */
-function SetAside({ month, enough, goal, onSave, onPercent }: SetAsideProps) {
-  const differs = goalDiffers(goal);
+/** «Откладываем N %»: сколько отложить за месяц, сколько уже отложено — копилкам
+ * и подушке (её настоящий рост с 1-го, доллары куплены), куда ушло и
+ * предупреждения — каждое с тем, что делать. */
+function SetAside({
+  month,
+  enough,
+  piggies,
+  onSave,
+  onPercent,
+}: SetAsideProps) {
   const named = MONTHS_IN[monthIndex(month.month)] ?? month.month;
   const needed = month.percent_needed;
   const percent = `${percentText(month.percent)}${NBSP}%`;
-  const piggies = Math.max(month.due - month.cushion, 0); // доля копилок
-  const share =
-    piggies > 0 ? Math.min(Math.max(1 - month.left / piggies, 0), 1) : 0;
+  const due = month.due; // отложить за месяц
+  const saved = month.saved + month.cushion_saved; // отложено копилкам и подушке
+  const more = Math.max(due - saved, 0); // ещё
+  // длинное имя копилки одним словом переносится внутри клетки
+  const rows: ReactNode[][] = piggies
+    .filter((piggy) => piggy.status !== "broken" && piggy.saved_month > 0)
+    .map((piggy) => [
+      <span className="wrap-anywhere">{piggy.name}</span>,
+      moneyText(piggy.saved_month, piggy.currency),
+    ]);
+  rows.push(["подушка", money(month.cushion_saved)]);
+  const needs = needed !== null && month.percent < needed;
+  const short = enough !== null && enough.gap < 0;
+  const lacks = enough ? money(-enough.gap) : "";
   return (
     <Card label="Откладываем с поступлений">
       {/* «Изменить» справа; на узком экране с крупным шрифтом — строкой ниже */}
@@ -103,22 +106,27 @@ function SetAside({ month, enough, goal, onSave, onPercent }: SetAsideProps) {
       )}
       {month.received > 0 ? (
         <>
-          <Line>{`за ${monthName(month.month)} отложить ${money(month.due)}`}</Line>
-          {piggies > 0 && (
+          {due > 0 && more <= 0 && (
+            <Good>{`${capital(monthName(month.month))}: отложено ${money(saved)}`}</Good>
+          )}
+          {due > 0 && more > 0 && (
             <>
-              <SavedBar share={share} />
-              {month.left > 0 ? (
-                <Line>
-                  {`отложено ${money(month.saved)}, ещё ${money(month.left)}`}
-                </Line>
-              ) : (
-                <Good>{`Отложено ${money(month.saved)} из ${money(piggies)}`}</Good>
+              <Line>{`за ${monthName(month.month)} отложить ${money(due)}`}</Line>
+              <SavedBar share={Math.min(saved / due, 1)} />
+              <Line>{`отложено ${money(saved)}, ещё ${money(more)}`}</Line>
+              {month.left <= 0 && (
+                // копилки записаны: остаток — доля подушки, окно её не пишет
+                <Line>ещё — доля подушки: купите на неё долларов</Line>
               )}
             </>
           )}
-          {month.cushion > 0 && (
-            <Line>{`подушке — ${money(month.cushion)}`}</Line>
-          )}
+          <Line>{`${percent} от пришедших ${money(month.received)}`}</Line>
+          <Table
+            label="Куда"
+            head={["куда", "отложено"]}
+            align="lr"
+            rows={rows}
+          />
         </>
       ) : (
         <Line>{`в ${named} поступлений ещё не было`}</Line>
@@ -132,16 +140,26 @@ function SetAside({ month, enough, goal, onSave, onPercent }: SetAsideProps) {
           Отложил…
         </button>
       )}
-      {needed !== null && month.percent < needed && (
-        <Warn>{`К срокам нужно ${needed}${NBSP}%`}</Warn>
+      {needs && short && (
+        <>
+          <Warn>Цели не сходятся с тратами</Warn>
+          <Line>{`копилкам к срокам нужно ${needed}${NBSP}%,`}</Line>
+          <Line>{`а траты и при ${percent} больше`}</Line>
+          <Line>{`дохода на ${lacks} в месяц`}</Line>
+          <Line>сдвиньте сроки копилок или сократите траты</Line>
+        </>
       )}
-      {enough && enough.gap < 0 && (
-        <Warn>{`На жизнь не хватит ${money(-enough.gap)}`}</Warn>
+      {needs && !short && (
+        <>
+          <Warn>{`Копилкам к срокам нужно ${needed}${NBSP}%`}</Warn>
+          <Line>поднимите процент или сдвиньте сроки копилок</Line>
+        </>
       )}
-      {differs && (
-        <Warn>
-          {`В плане «Отложить» ${money(differs.inPlan)}, нужно ${money(differs.needed)}`}
-        </Warn>
+      {short && !needs && (
+        <>
+          <Warn>{`На жизнь не хватит ${lacks} в месяц`}</Warn>
+          <Line>сократите траты или уменьшите процент</Line>
+        </>
       )}
     </Card>
   );
@@ -175,7 +193,9 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
   );
   const [opened, setOpened] = useState<Piggy | "new" | null>(null);
   const [saving, setSaving] = useState(false);
-  const [setting, setSetting] = useState<"percent" | "order" | null>(null);
+  const [setting, setSetting] = useState<"percent" | "order" | "life" | null>(
+    null,
+  );
   const saved = useCallback(
     (fresh: SavingsScreen) => {
       store.put("savings", fresh);
@@ -258,13 +278,17 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
         <SetAside
           month={data.month}
           enough={data.enough}
-          goal={data.goal ?? null}
+          piggies={data.piggies}
           onSave={canSave ? () => setSaving(true) : null}
           onPercent={boot ? () => setSetting("percent") : null}
         />
       )}
       {data.cushion && (
-        <CushionCard cushion={data.cushion} today={data.today} />
+        <CushionCard
+          cushion={data.cushion}
+          today={data.today}
+          onLife={boot ? () => setSetting("life") : undefined}
+        />
       )}
       <section className="flex flex-col gap-2" aria-label="Копилки">
         {/* крупный шрифт на 320 px: кнопки переносятся строкой ниже, а не за экран */}
@@ -297,6 +321,7 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
               <PiggyCard
                 key={`${piggy.row}-${piggy.id}`}
                 piggy={piggy}
+                month={data.month?.month ?? data.today.slice(0, 7)}
                 onOpen={boot ? setOpened : undefined}
               />
             ))}
@@ -335,6 +360,15 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
           data={data}
           onSaved={saved}
           onRefresh={(fresh) => store.put("savings", fresh)}
+          onClose={() => setSetting(null)}
+        />
+      )}
+      {boot && setting === "life" && (
+        <LifeSheet
+          api={api}
+          boot={boot}
+          data={data}
+          onSaved={saved}
           onClose={() => setSetting(null)}
         />
       )}

@@ -16,6 +16,7 @@ from app.handlers.receipts import DIRTY
 from app.services.analytics_service import SavingsTab
 from app.services.day_budget import day_budget
 from app.services.google_sheets import (
+    LIFE_LABEL,
     PERCENT_LABEL,
     PIGGY_JOURNAL_HEADER,
     PIGGY_LIST_HEADER,
@@ -72,6 +73,7 @@ class PiggySheets:
         self.updates: list[tuple[str, dict[str, Any]]] = []
         self.percents: list[float] = []
         self.orders: list[dict[str, int]] = []
+        self.lives: list[list[str]] = []
 
     def get_piggy(self, max_age: float = 0.0) -> tuple[list[Any], list[Any]]:
         return [list(r) for r in self.list or []], [list(r) for r in self.journal or []]
@@ -130,6 +132,16 @@ class PiggySheets:
             row[14] = number
         self.orders.append(dict(numbers))
         return True
+
+    def write_life_groups(self, groups: list[str]) -> None:
+        if self.fail:
+            raise ConnectionError("Google is down")
+        self.ensure_piggy_sheets()
+        assert self.list is not None
+        head = self.list[0] + [""] * (19 - len(self.list[0]))
+        head[17:19] = [LIFE_LABEL, ", ".join(groups)]
+        self.list[0] = head
+        self.lives.append(list(groups))
 
 
 class PiggyAnalytics:
@@ -237,7 +249,8 @@ def test_savings_screen_shape() -> None:
     assert len(found["savings"]["months"]) == 6
     assert set(found["month"]) == {
         "month", "percent", "percent_source", "percent_needed", "capacity",
-        "received", "due", "left", "cushion", "saved",
+        "received", "due", "left", "cushion", "saved", "cushion_saved",
+        "cushion_room",
     }  # fmt: skip
 
 
@@ -554,6 +567,18 @@ TRIP_ROW = ["tr0001", "Отпуск", 2500, "USD", f"{TODAY + timedelta(days=200
             "каждый год", "", "", "", "", "", "", "Иван", ""]  # fmt: skip
 
 
+def test_the_month_names_what_the_cushion_got() -> None:
+    bought = fact_row(TODAY, "💳 СЧЕТА", "обмен валюты", -300, "USD")
+    moves = [saved(100, "tr0001", "USD", day=TODAY)]
+    application, _ = setup(PiggySheets([ROW, TRIP_ROW], moves), bought)
+    found = client_for(application).get("/api/savings", headers=auth()).json()
+    # из 300 $ — 100 $ «Отпуску», 200 $ подушке; обязательных трат нет — комнаты нет
+    month = found["month"]
+    assert (month["cushion_saved"], month["cushion_room"]) == (2_400_000, 0)
+    trip = next(item for item in found["piggies"] if item["id"] == "tr0001")
+    assert trip["saved_month"] == 100
+
+
 def test_savings_answer_has_the_percent_and_the_month() -> None:
     came = fact_row(TODAY, "💰 ДОХОДЫ", "зарплата", 4_000_000)
     application, _ = setup(PiggySheets([ROW], [], percent=10), came)
@@ -575,6 +600,24 @@ def test_the_month_counts_what_the_piggies_got_since_the_1st() -> None:
     application, _ = setup(PiggySheets([ROW], [saved(400_000, day=TODAY)]))
     found = client_for(application).get("/api/savings", headers=auth()).json()
     assert found["month"]["saved"] == 400_000
+    piggy = found["piggies"][0]
+    assert piggy["saved_month"] == 400_000
+    assert "next_month" in piggy  # взнос следующего месяца плана
+
+
+def test_savings_answer_names_half_a_year_and_now() -> None:
+    came = fact_row(TODAY, "💰 ДОХОДЫ", "зарплата", 4_000_000)
+    application, _ = setup(PiggySheets([ROW], []), came)
+    savings = (
+        client_for(application).get("/api/savings", headers=auth()).json()["savings"]
+    )
+    assert savings["current"] == {
+        "month": f"{TODAY:%Y-%m}",
+        "income": 4_000_000,
+        "spent": 0,
+        "rate": 1.0,
+    }
+    assert (savings["half_rate"], savings["worst"]) == (None, None)
 
 
 def test_a_dollar_piggy_counts_in_sums_by_the_tabs_rate() -> None:
@@ -654,3 +697,57 @@ def test_a_stale_or_bad_order_is_rejected(
     )
     assert (response.status_code, response.json()["error"]["code"]) == (status, code)
     assert sheets.orders == []
+
+
+def test_put_life_writes_s1_and_notes_the_other() -> None:
+    application, sheets = setup(PiggySheets([ROW], []))
+    client = client_for(application)
+    response = client.put(
+        "/api/piggy/life", json={"groups": ["🌛 ЕЖЕМЕСЯЧНО", "🏚️ ДОМ"]}, headers=auth()
+    )
+    assert response.status_code == 200
+    assert sheets.lives == [["🏚️ ДОМ", "🌛 ЕЖЕМЕСЯЧНО"]]  # в порядке справочника
+    assert response.json()["cushion"]["life_groups"] == ["🏚️ ДОМ", "🌛 ЕЖЕМЕСЯЧНО"]
+    assert told(application) == ["🐷 Иван — месяц жизни: 🏚️ ДОМ, 🌛 ЕЖЕМЕСЯЧНО"]
+    only = client.put("/api/piggy/life", json={"groups": ["🍔 ЕДА"]}, headers=auth())
+    assert only.json()["cushion"]["life_groups"] == ["🍔 ЕДА"]
+
+
+@pytest.mark.parametrize(
+    "groups", [[], ["🚀 КОСМОС"], ["💰 ДОХОДЫ"], ["🏚️ ДОМ", "🏚️ ДОМ"]]
+)
+def test_bad_life_groups_are_rejected(groups: list[str]) -> None:
+    application, sheets = setup(PiggySheets([ROW], []))
+    response = client_for(application).put(
+        "/api/piggy/life", json={"groups": groups}, headers=auth()
+    )
+    assert response.status_code == 422
+    assert list(response.json()["error"]["fields"]) == ["groups"]
+    assert sheets.lives == []
+
+
+def test_a_group_with_a_comma_is_not_stored() -> None:
+    application, sheets = setup(PiggySheets([ROW], []))
+    application.bot_data["categories"] = [
+        *application.bot_data["categories"],
+        "🧩 А, Б",
+    ]
+    response = client_for(application).put(
+        "/api/piggy/life", json={"groups": ["🧩 А, Б"]}, headers=auth()
+    )
+    assert response.status_code == 422
+    assert list(response.json()["error"]["fields"]) == ["groups"]
+    assert sheets.lives == []
+
+
+def test_a_failed_life_write_is_503() -> None:
+    application, sheets = setup(PiggySheets([ROW], []))
+    sheets.fail = True
+    response = client_for(application).put(
+        "/api/piggy/life", json={"groups": ["🏚️ ДОМ"]}, headers=auth()
+    )
+    assert (response.status_code, response.json()["error"]["code"]) == (
+        503,
+        "sheets_unavailable",
+    )
+    assert sheets.lives == []

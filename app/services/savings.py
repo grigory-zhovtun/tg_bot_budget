@@ -5,9 +5,9 @@
 вычетом копилок на сейчас, в месяцах жизни: средних тратах обязательных групп
 (LIFE_GROUPS, какие есть в справочнике бота) за полные месяцы, без доходов и
 переводов. Ступени — 1 месяц, 3 месяца и цель CUSHION_MONTHS. Норма сбережений —
-доля дохода, которая осталась за месяц: (доход − траты) / доход. Считаются только
-полные месяцы: в текущем зарплата могла ещё не прийти, и доля была бы огромным
-минусом.
+доля дохода, которая осталась за месяц: (доход − траты) / доход. Плашка, итог и
+худший месяц — по полным месяцам: в текущем зарплата могла ещё не прийти, и доля
+была бы огромным минусом; текущий месяц — отдельно, «пока»: с 1-го по сегодня.
 """
 
 from __future__ import annotations
@@ -140,9 +140,11 @@ class MonthSaving:
 
 @dataclass(frozen=True)
 class Savings:
-    """Норма сбережений по полным месяцам, от старых к новым."""
+    """Норма сбережений по полным месяцам, от старых к новым, и текущий месяц
+    «пока»."""
 
     months: tuple[MonthSaving, ...]
+    current: MonthSaving | None = None  # с 1-го числа по сегодня
 
     @property
     def rate(self) -> float | None:
@@ -152,6 +154,33 @@ class Savings:
         if earned <= 0:
             return None
         return (earned - sum(item.spent for item in recent)) / earned
+
+    @property
+    def half_rate(self) -> float | None:
+        """Норма за все полные месяцы months (полгода); None — дохода не было."""
+        earned = sum(item.income for item in self.months)
+        if earned <= 0:
+            return None
+        return (earned - sum(item.spent for item in self.months)) / earned
+
+    @property
+    def worst(self) -> MonthSaving | None:
+        """Откуда минус: месяц с самой низкой нормой из RATE_MONTHS последних — только
+        когда за них норма меньше нуля. Траты без дохода — ниже всех, месяц без дохода
+        и трат не в счёт; равные — с большей разницей «потрачено − пришло», потом
+        поздний."""
+        rate = self.rate
+        if rate is None or rate >= 0:
+            return None
+        found = [
+            item for item in self.months[-RATE_MONTHS:] if item.income or item.spent
+        ]
+
+        def key(item: MonthSaving) -> tuple[float, float, int]:
+            low = item.rate if item.rate is not None else -math.inf
+            return (low, item.income - item.spent, -item.month.toordinal())
+
+        return min(found, key=key, default=None)
 
 
 def full_months(today: date, count: int) -> list[date]:
@@ -218,10 +247,13 @@ def _bare(group: str) -> str:
     return leading_emoji(group)[1].strip().casefold()
 
 
-def life_groups(catalog: Iterable[str]) -> tuple[str, ...]:
-    """Обязательные группы справочника (LIFE_GROUPS по названию без эмодзи), в его
-    порядке; каких нет в справочнике — пропущены."""
-    names = {_bare(group) for group in LIFE_GROUPS}
+def life_groups(
+    catalog: Iterable[str], chosen: Iterable[str] = LIFE_GROUPS
+) -> tuple[str, ...]:
+    """Обязательные группы справочника — chosen (по умолчанию LIFE_GROUPS, иначе S1
+    листа «Копилки») по названию без эмодзи, в порядке справочника; каких нет в
+    справочнике — пропущены."""
+    names = {_bare(group) for group in chosen}
     return tuple(group for group in catalog if _bare(group) in names)
 
 
@@ -235,19 +267,33 @@ def life_month(frame: pd.DataFrame, today: date, groups: Sequence[str]) -> LifeM
     )
 
 
+def _so_far(rows: pd.DataFrame, month: date, today: date) -> float:
+    """Сумма в сумах с первого числа month по today: строки позже сегодня не в счёт."""
+    if rows.empty:
+        return 0.0
+    inside = (rows["day"] >= month) & (rows["day"] <= today)
+    return float(rows.loc[inside, "amount_uzs"].sum())
+
+
 def month_savings(
     frame: pd.DataFrame, today: date, count: int = CHART_MONTHS
 ) -> Savings:
-    """Доход и траты count полных месяцев перед месяцем today."""
-    spent = _by_month(expenses(frame))
-    earned = _by_month(income(frame))
+    """Доход и траты count полных месяцев перед месяцем today и текущего месяца с
+    1-го по today."""
+    spending, earning = expenses(frame), income(frame)
+    spent = _by_month(spending)
+    earned = _by_month(earning)
+    month = today.replace(day=1)
     return Savings(
         tuple(
             MonthSaving(
                 month, float(earned.get(month, 0.0)), float(spent.get(month, 0.0))
             )
             for month in full_months(today, count)
-        )
+        ),
+        MonthSaving(
+            month, _so_far(earning, month, today), _so_far(spending, month, today)
+        ),
     )
 
 

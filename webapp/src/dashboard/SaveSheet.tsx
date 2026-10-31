@@ -28,9 +28,11 @@ interface Part {
   text: string;
 }
 
-/** Как сервер разложит сумму: копилкам порядка — их «осталось в этом месяце»,
- * копилкам «не хватит» — до «не хватит», долгим целям — их «осталось»; остальное
- * — подушке (в журнал не пишется). */
+/** Как сервер разложит сумму: пока подушка меньше месяца жизни, сначала подушке —
+ * не больше того, что ей ещё не отложено из её части (cushion_room), пополам с
+ * копилками или всё, что копилкам сейчас не нужно; дальше копилкам порядка — их
+ * «осталось в этом месяце», копилкам «не хватит» — до «не хватит», долгим целям —
+ * их «осталось»; остальное — тоже подушке (в журнал не пишется). */
 function layout(
   data: SavingsScreen,
   uzs: number,
@@ -38,7 +40,10 @@ function layout(
   const ordered = data.piggies
     .filter((piggy) => piggy.order !== null && piggy.status !== "broken")
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  let rest = uzs;
+  const left = data.month?.left ?? 0; // копилкам отложить сейчас
+  const room = data.month?.cushion_room ?? 0;
+  const first = Math.min(Math.max(uzs / 2, uzs - left), room);
+  let rest = uzs - first;
   const taken = new Map<Piggy, number>();
   function give(piggy: Piggy, cap: number) {
     const rate = data.rates[piggy.currency];
@@ -49,7 +54,12 @@ function layout(
   }
   for (const piggy of ordered) give(piggy, piggy.left_this_month);
   for (const piggy of ordered) {
-    if (piggy.status === "short") give(piggy, piggy.short);
+    // как сервер: отложенное в этом месяце сверх взноса уже закрыло часть «не хватит»
+    if (piggy.status === "short")
+      give(
+        piggy,
+        piggy.short - Math.max(piggy.saved_month - piggy.this_month, 0),
+      );
   }
   for (const piggy of data.piggies) {
     if (piggy.deadline === null && piggy.status !== "broken")
@@ -67,7 +77,7 @@ function layout(
       ),
     };
   });
-  return { parts, rest };
+  return { parts, rest: rest + first };
 }
 
 /** Окно «Отложил…»: одна сумма на все копилки, раскладка — до записи. */
@@ -80,7 +90,8 @@ export default function SaveSheet({
 }: Props) {
   const currencies = boot ? cardCurrencies(boot, undefined) : ["UZS"];
   const [currency, setCurrency] = useState("UZS");
-  const left = data.month?.left ?? 0; // «отложить сейчас», сумы
+  // «отложить сейчас», сумы: копилкам и то, что подушке ещё не отложено
+  const left = (data.month?.left ?? 0) + (data.month?.cushion_room ?? 0);
   const [text, setText] = useState(amountText(left, false));
   const [entryId] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);

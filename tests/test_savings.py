@@ -12,6 +12,7 @@ from app.services.analytics_service import transactions_frame
 from app.services.savings import (
     Cushion,
     LifeMonth,
+    MonthSaving,
     full_months,
     life_groups,
     life_month,
@@ -113,6 +114,42 @@ def test_without_income_the_rate_is_unknown() -> None:
     assert month_savings(frame(*rows), TODAY).rate is None
 
 
+MONTHS = {4: (40, 30), 5: (0, 35), 6: (50, 48), 7: (30, 60), 8: (45, 36), 9: (45, 36)}
+
+
+def test_the_rate_names_the_worst_month_half_a_year_and_now() -> None:
+    rows = [
+        fact_row(date(2026, month, 2), "🍔 ЕДА", "кафе", spent * 1_000_000)
+        for month, (_, spent) in MONTHS.items()
+    ] + [
+        fact_row(date(2026, month, 1), "💰 ДОХОДЫ", "зарплата", came * 1_000_000)
+        for month, (came, _) in MONTHS.items()
+        if came
+    ]
+    rows += [
+        fact_row(date(2026, 10, 1), "💰 ДОХОДЫ", "зарплата", 16_000_000),
+        fact_row(date(2026, 10, 2), "🍔 ЕДА", "кафе", 12_000_000),
+        fact_row(date(2026, 10, 30), "🍔 ЕДА", "кафе", 9_000_000),  # позже сегодня
+    ]
+    found = month_savings(frame(*rows), TODAY)
+    assert found.rate == pytest.approx(-0.1)  # июль–сентябрь: 120 пришло, 132 ушло
+    assert found.worst == MonthSaving(date(2026, 7, 1), 30_000_000, 60_000_000)
+    assert found.half_rate == pytest.approx(-35 / 210)
+    assert found.current == MonthSaving(date(2026, 10, 1), 16_000_000, 12_000_000)
+
+
+def test_a_month_without_income_is_the_worst_and_a_plus_names_none() -> None:
+    rows = [
+        fact_row(date(2026, 7, 1), "💰 ДОХОДЫ", "зарплата", 30_000_000),
+        fact_row(date(2026, 7, 2), "🍔 ЕДА", "кафе", 60_000_000),
+        fact_row(date(2026, 9, 2), "🍔 ЕДА", "кафе", 20_000_000),  # дохода не было
+    ]
+    worst = month_savings(frame(*rows), TODAY).worst
+    assert worst is not None and worst.month == date(2026, 9, 1)
+    plus = [fact_row(date(2026, 9, 1), "💰 ДОХОДЫ", "зарплата", 50_000_000)]
+    assert month_savings(frame(*plus), TODAY).worst is None
+
+
 def test_the_month_of_life_counts_only_the_mandatory_groups() -> None:
     rows = [
         *(
@@ -145,6 +182,16 @@ def test_the_mandatory_groups_are_the_defaults_in_the_catalog() -> None:
     # нет 🚑 ЗДОРОВЬЕ, 👶 ДЕТИ, 🎓 ОБРАЗОВАНИЕ — пропущены; «🏚 ДОМ» — та же группа
     assert life_groups(catalog) == ("🚌 ТРАНСПОРТ", "🏚 ДОМ", "🌛 ЕЖЕМЕСЯЧНО")
     assert life_groups(["🍔 ЕДА"]) == ()
+
+
+def test_the_chosen_groups_are_found_in_the_catalog() -> None:
+    catalog = ["🍔 ЕДА", "🚌 ТРАНСПОРТ", "🏚 ДОМ", "🌛 ЕЖЕМЕСЯЧНО"]
+    # в порядке справочника; «🏚️ ДОМ» — та же группа, «🚀 КОСМОС» нет
+    assert life_groups(catalog, ("🏚️ ДОМ", "🍔 ЕДА", "🚀 КОСМОС")) == (
+        "🍔 ЕДА",
+        "🏚 ДОМ",
+    )
+    assert life_groups(catalog, ()) == ()
 
 
 @pytest.mark.parametrize(

@@ -199,7 +199,11 @@ def goal_cells(
     subcategories: Mapping[str, Sequence[str]],
 ) -> GoalCells:
     """«Отложить за месяц» новой вкладки по копилкам (спека 4.7): строка цели по
-    подписи и сумма до тысячи; без открытых копилок ячейку владельца не трогаем."""
+    подписи и сумма до тысячи; без открытых копилок ячейку владельца не трогаем.
+
+    Подушка — по дневному бюджету текущей вкладки (новая вкладка — этот месяц или
+    вкладка today): в месяц срока «из копилок» зависит от её половины (1.7). Вкладки
+    нет — без подушки, как раньше."""
 
     def cells(rows: list[list[Any]], first: date) -> tuple[int, float] | None:
         goal = read_plan(rows).goal
@@ -214,9 +218,15 @@ def goal_cells(
             for piggy in book.piggies
         ):
             return None
-        rates = gs.get_rates(SHEET_AGE)
-        frame = transactions_frame(
-            gs.get_values(config.FACT_SHEET_NAME, SHEET_AGE), rates
+        sheets = read_month_sheets(gs, month_title(today), SHEET_AGE, calendar=False)
+        rates = sheets.rates
+        frame = transactions_frame(sheets.fact, rates)
+        same = (first.year, first.month) == (today.year, today.month)
+        current = rows if same else sheets.month
+        budget = (
+            day_budget(frame, current, today, rates, config.FROZEN_CURRENCY)
+            if current is not None
+            else None
         )
         screen = savings_screen(
             book,
@@ -224,7 +234,7 @@ def goal_cells(
             rows,
             today,
             rates,
-            None,
+            budget,
             config.SAVE_SHARE,
             config.CUSHION_MONTHS,
             groups=groups,

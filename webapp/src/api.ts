@@ -129,6 +129,9 @@ export interface SavingMonth {
 export interface Savings {
   rate: number | null; // за 3 последних полных месяца
   months: SavingMonth[]; // 6 полных месяцев, от старых
+  half_rate: number | null; // за 6 полных месяцев; null — дохода не было
+  current: SavingMonth | null; // текущий месяц с 1-го по сегодня
+  worst: string | null; // «2026-07» — откуда минус за 3 месяца; null — не минус
 }
 
 /** День месяца: траты без платежей из списка и лимит, с которым день начался. */
@@ -292,6 +295,8 @@ export interface Piggy {
   order: number | null; // номер важности; null — не в порядке
   forecast: number | null; // будет к ближайшему сроку по плану
   now: number; // отложить сейчас
+  saved_month: number; // отложено в этом месяце
+  next_month: number; // взнос следующего месяца плана
   history: PiggyMove[];
   spends: PiggySpend[];
 }
@@ -301,7 +306,7 @@ export interface PiggyPlanMonth {
   month: string; // «2026-10»
   total: number; // копилки со сроком
   items: AmountItem[];
-  cushion: number; // доля 10 % подушке
+  cushion: number; // доля процента подушке
   goals: AmountItem[]; // доля 10 % долгим целям
   ready: string[]; // копилки, собранные к сроку в этом месяце
 }
@@ -318,6 +323,8 @@ export interface SavingsMonth {
   left: number; // отложить сейчас — копилкам и долгим целям
   cushion: number; // часть подушке
   saved: number; // отложено копилкам с 1-го числа
+  cushion_saved: number; // «Отложено подушке»: её настоящий рост с 1-го числа
+  cushion_room: number; // подушке ещё не отложено из её части; 0 — сначала ничего
 }
 
 /** Предпросмотр окон «Процент» и «Порядок»: ничего не пишется. */
@@ -836,6 +843,12 @@ export const api = {
     request<SavingsScreen>("/piggy/order", {
       method: "PUT",
       body: JSON.stringify({ ids }),
+    }),
+  // обязательные группы месяца жизни подушки — в порядке справочника
+  setLife: (groups: string[]) =>
+    request<SavingsScreen>("/piggy/life", {
+      method: "PUT",
+      body: JSON.stringify({ groups }),
     }),
   addPiggy: (input: PiggyInput) =>
     request<SavingsScreen>("/piggy", {

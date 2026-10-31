@@ -63,6 +63,7 @@ from app.services.piggy import (
     MonthGoal,
     Piggy,
     PiggyState,
+    cushion_room,
     distribute,
     goal_of,
     thousands,
@@ -89,7 +90,7 @@ from app.services.plan import (
 )
 from app.services.plan_advice import advice_numbers, checked_points, gather_advice
 from app.services.receipts import NOTHING, Line, Receipt, receipt_status
-from app.services.savings import Cushion, Savings
+from app.services.savings import Cushion, MonthSaving, Savings
 from app.web.auth import WebUser, authenticate
 from app.web.schemas import (
     AdviceApplyOut,
@@ -129,6 +130,7 @@ from app.web.schemas import (
     GroupOut,
     GroupPlanOut,
     HintOut,
+    LifeIn,
     MessageOut,
     MonthPlanOut,
     MoveIn,
@@ -225,6 +227,7 @@ PIGGY_FIELDS = {
     "key": "Трата не подходит — обновите «Накопления»",
     "percent": "Процент — от 0 до 100, не больше одного знака после запятой",
     "ids": "Копилки не те — обновите «Накопления»",
+    "groups": "Выберите группы трат",
 }
 PIGGY_CHANGED = "Копилки поменялись — обновите «Накопления»"
 PIGGY_GONE = "Копилку уже закрыли — обновите «Накопления»"
@@ -333,20 +336,26 @@ def card_out(card: CardBalance, today: date) -> CardOut:
     )
 
 
+def saving_month_out(item: MonthSaving) -> SavingMonthOut:
+    """Месяц нормы сбережений: доход, траты и доля, 4 знака."""
+    return SavingMonthOut(
+        month=f"{item.month:%Y-%m}",
+        income=float(round(item.income)),
+        spent=float(round(item.spent)),
+        rate=None if item.rate is None else round(item.rate, 4),
+    )
+
+
 def savings_out(savings: Savings | None) -> SavingsOut | None:
     if savings is None:
         return None
+    half, worst, current = savings.half_rate, savings.worst, savings.current
     return SavingsOut(
         rate=None if savings.rate is None else round(savings.rate, 4),
-        months=[
-            SavingMonthOut(
-                month=f"{item.month:%Y-%m}",
-                income=float(round(item.income)),
-                spent=float(round(item.spent)),
-                rate=None if item.rate is None else round(item.rate, 4),
-            )
-            for item in savings.months
-        ],
+        months=[saving_month_out(item) for item in savings.months],
+        half_rate=None if half is None else round(half, 4),
+        current=None if current is None else saving_month_out(current),
+        worst=None if worst is None else f"{worst.month:%Y-%m}",
     )
 
 
@@ -510,6 +519,8 @@ def piggy_out(state: PiggyState) -> PiggyOut:
         order=state.order,
         forecast=None if state.forecast is None else _rounded(state.forecast, code),
         now=_rounded(state.now, code),
+        saved_month=_rounded(state.saved_month, code),
+        next_month=state.next_month,
         history=[
             MoveOut(day=move.day, amount=move.amount, kind=move.kind, who=move.who)
             for move in state.history
@@ -555,6 +566,8 @@ def savings_screen_out(found: SavingsTab | None, today: date) -> SavingsScreenOu
             left=float(round(left)),
             cushion=float(round(screen.cushion_now)),
             saved=float(round(saved)),
+            cushion_saved=float(round(screen.cushion_saved)),
+            cushion_room=float(round(cushion_room(screen))),
         )
     found_goal = goal_of(screen, first.month) if first is not None else None
     goal = None
@@ -1627,6 +1640,31 @@ def routes(application: Application) -> list[Route]:
         text = " · ".join(f"{n}. {names[piggy_id]}" for piggy_id, n in numbers.items())
         return await written(user.id, author, f"порядок копилок|{text}")
 
+    async def set_life(request: Request) -> JSONResponse:
+        """Обязательные группы месяца жизни — в S1 «Копилок», в порядке справочника:
+        только группы трат, без повторов и запятых (запятая делит ячейку)."""
+        user = current_user(request)
+        body = await piggy_body(request, LifeIn)
+        if isinstance(body, JSONResponse):
+            return body
+        _, groups, _ = catalog()
+        spending = [group for group in groups if group not in CLOSED_GROUPS]
+        chosen = [str(group) for group in body.groups]
+        if len(set(chosen)) != len(chosen) or any(
+            group not in spending or "," in group for group in chosen
+        ):
+            return piggy_error({"groups"})
+        ordered = [group for group in spending if group in chosen]
+        author = await author_name(application.bot, user) or ""
+        gs = application.bot_data["gs_service"]
+        try:
+            async with piggy_lock():
+                await asyncio.to_thread(gs.write_life_groups, ordered)
+        except Exception:
+            logger.exception("Piggy life groups failed for user_id=%s", user.id)
+            return error_response(503, "sheets_unavailable", SHEETS_DOWN)
+        return await written(user.id, author, f"месяц жизни|{', '.join(ordered)}")
+
     async def piggy_body(request: Request, model: Any) -> Any:
         try:
             return model.model_validate_json(await request.body() or b"{}")
@@ -2093,6 +2131,7 @@ def routes(application: Application) -> list[Route]:
         Route("/piggy/save", save_piggies, methods=["POST"]),
         Route("/piggy/percent", set_percent, methods=["PUT"]),
         Route("/piggy/order", set_order, methods=["PUT"]),
+        Route("/piggy/life", set_life, methods=["PUT"]),
         Route("/piggy/{piggy_id}", update_piggy, methods=["PUT"]),
         Route("/piggy/{piggy_id}/close", close_piggy, methods=["POST"]),
         Route("/piggy/{piggy_id}/moves", move_piggy, methods=["POST"]),

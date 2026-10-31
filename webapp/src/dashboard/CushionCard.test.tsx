@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
 import type { Cushion } from "../api";
 import CushionCard from "./CushionCard";
 
@@ -174,5 +175,45 @@ describe("CushionCard", () => {
     );
     expect(screen.getByText("⚠️ Копилки больше карты")).toBeTruthy();
     expect(screen.getByText("разница 300 $")).toBeTruthy();
+  });
+
+  it("opens the month of life window from «Изменить»", async () => {
+    const onLife = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <CushionCard today="2026-10-10" cushion={fixture()} onLife={onLife} />,
+    );
+    const change = screen.getByRole("button", { name: "Изменить месяц жизни" });
+    expect(change.textContent).toBe("Изменить");
+    expect(change.className).toContain("text-link");
+    // в одной строке с «Месяц жизни X»: при крупном шрифте — переносом
+    const row = change.parentElement;
+    expect(row?.className).toContain("flex-wrap");
+    expect(row && within(row).getByText("Месяц жизни 12 000 000")).toBeTruthy();
+    await user.click(change);
+    expect(onLife).toHaveBeenCalled();
+  });
+
+  it("lets the groups be chosen when none is in the catalog", () => {
+    render(
+      <CushionCard
+        today="2026-10-10"
+        cushion={fixture({ life_groups: [], months: null, monthly: 0 })}
+        onLife={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText("обязательных групп нет в справочнике"),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Изменить месяц жизни" }),
+    ).toBeTruthy();
+  });
+
+  it("has no «Изменить» without the window", () => {
+    render(<CushionCard today="2026-10-10" cushion={fixture()} />);
+    expect(
+      screen.queryByRole("button", { name: "Изменить месяц жизни" }),
+    ).toBeNull();
   });
 });

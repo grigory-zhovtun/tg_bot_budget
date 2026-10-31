@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from app.services.google_sheets import PERCENT_LABEL
+from app.services.google_sheets import LIFE_LABEL, PERCENT_LABEL
 from app.services.piggy import JOURNAL_HEADER, LIST_HEADER, Book, Piggy, read_book
 
 CURRENCIES = {"UZS", "USD"}
@@ -118,6 +118,14 @@ def test_reads_the_percent_and_the_order() -> None:
     assert found.percent == pytest.approx(0.025)
     assert found.percent_bad is False
     assert [piggy.order for piggy in found.piggies] == [2, None]
+
+
+def test_reads_the_mandatory_groups_next_to_the_percent() -> None:
+    head = [*LIST_HEADER, PERCENT_LABEL, 5, LIFE_LABEL, "🏚️ ДОМ, 🚌 ТРАНСПОРТ"]
+    assert book(piggy_row(), head=head).life_groups == ("🏚️ ДОМ", "🚌 ТРАНСПОРТ")
+    assert book(piggy_row()).life_groups is None  # пусто — группы по умолчанию
+    blank = [*LIST_HEADER, PERCENT_LABEL, 5, LIFE_LABEL, " , "]
+    assert book(piggy_row(), head=blank).life_groups == ()
 
 
 @pytest.mark.parametrize("cell", ["", "abc", -5, 150])
@@ -434,6 +442,7 @@ from app.services.piggy import (  # noqa: E402
     Enough,
     PiggyState,
     Screen,
+    cushion_room,
     distribute,
     income_cushion,
     money_day,
@@ -523,6 +532,21 @@ def spending_months(amount: float = 10_000_000) -> tuple[list[Any], ...]:
     )
 
 
+def life_months(
+    amount: float = 10_000_000, months: tuple[int, ...] = (7, 8, 9)
+) -> tuple[list[Any], ...]:
+    """Обязательные траты по 10 млн июля–сентября: месяц жизни — 10 млн."""
+    return tuple(
+        fact_row(date(2026, month, 3), "🏚️ ДОМ", "квартплата", amount)
+        for month in months
+    )
+
+
+NOVEMBER_10 = date(2026, 11, 10)
+# по 12 млн с июля по октябрь: месяц жизни 12 млн и в октябре, и в ноябре
+HOME = life_months(12_000_000, (7, 8, 9, 10))
+
+
 def test_money_day_is_the_last_income_of_the_list() -> None:
     assert money_day(tab()) == 30
     assert money_day(None) is None
@@ -579,24 +603,20 @@ def test_done_when_collected_reaches_the_target() -> None:
 
 
 def test_the_share_goes_to_the_cushion_under_a_month() -> None:
-    found = screen(
-        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(500)
-    )
-    assert found.share_to == "cushion"  # 6 млн при тратах 10 млн — 0,6 месяца
+    found = screen(piggy_row(**GOAL), fact=life_months(), share=0.1, budget=frozen(500))
+    assert found.share_to == "cushion"  # 6 млн при месяце жизни 10 млн — 0,6 месяца
     assert state(found, "car001").this_month == 0
 
 
 def test_a_goal_without_a_part_is_not_in_the_month_plan() -> None:
     # иначе экран пишет «пополам: подушка и «Машина»», а план года — «Машина 0»
-    found = screen(
-        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(500)
-    )
+    found = screen(piggy_row(**GOAL), fact=life_months(), share=0.1, budget=frozen(500))
     assert found.plan[0].goals == {}
 
 
 def test_the_share_splits_between_a_month_and_the_target() -> None:
     found = screen(
-        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(2000)
+        piggy_row(**GOAL), fact=life_months(), share=0.1, budget=frozen(2000)
     )
     assert found.share_to == "split"  # 24 млн — 2,4 месяца
     # 10 % от поступлений 12 млн — 1,2 млн, половина цели: 600 000 = $50
@@ -607,7 +627,7 @@ def test_the_share_splits_between_a_month_and_the_target() -> None:
 
 def test_the_share_goes_to_goals_from_the_target() -> None:
     found = screen(
-        piggy_row(**GOAL), fact=spending_months(), share=0.1, budget=frozen(6000)
+        piggy_row(**GOAL), fact=life_months(), share=0.1, budget=frozen(6000)
     )
     assert found.share_to == "goals"  # 72 млн — 7,2 месяца из 6
     assert state(found, "car001").this_month == 100
@@ -620,7 +640,7 @@ def test_a_goal_at_its_target_passes_its_part() -> None:
         piggy_row(**car),
         piggy_row(**laptop),
         moves=(move_row(id="car001", day="01.09.2026", amount=1000, currency="USD"),),
-        fact=spending_months(),
+        fact=life_months(),
         share=0.1,
         budget=frozen(2000),  # подушка 1000 $ = 12 млн — 1,2 месяца
     )
@@ -629,6 +649,79 @@ def test_a_goal_at_its_target_passes_its_part() -> None:
         0,
         50,
     )
+
+
+def test_under_a_month_the_share_splits_in_half_with_the_cushion() -> None:
+    # 50 % от 12 млн — 6 млн в месяц; подушка 500 $ = 6 млн — нехватка 6 млн
+    found = screen(
+        piggy_row(**TRIP), fact=HOME, share=0.5, today=NOVEMBER_10, budget=frozen(500)
+    )
+    assert [(month.items, month.cushion) for month in found.plan[:3]] == [
+        ({"tr0001": pytest.approx(3_000_000)}, pytest.approx(3_000_000)),
+        ({"tr0001": pytest.approx(3_000_000)}, pytest.approx(3_000_000)),
+        # месяц жизни набран — как сейчас: «Отпуску» его ступень, остальное подушке
+        ({"tr0001": pytest.approx(4_800_000)}, pytest.approx(1_200_000)),
+    ]
+    trip = state(found, "tr0001")
+    assert (trip.this_month, trip.status) == (250, "on_track")
+    assert found.cushion_need == pytest.approx(6_000_000)
+
+
+def test_what_the_cushion_does_not_need_goes_to_the_piggies() -> None:
+    # подушке до месяца не хватает 600 000: ей 600 000, «Новому году» — 5,4 млн
+    found = screen(
+        piggy_row(), fact=HOME, share=0.5, today=NOVEMBER_10, budget=frozen(950)
+    )
+    assert found.plan[0].items == {"p3k9za": pytest.approx(5_400_000)}
+    assert found.plan[0].cushion == pytest.approx(600_000)
+    new_year = state(found, "p3k9za")
+    assert (new_year.status, new_year.short) == ("short", 6_600_000)
+
+
+def test_from_a_month_of_life_the_share_goes_as_before() -> None:
+    found = screen(
+        piggy_row(), fact=HOME, share=0.5, today=NOVEMBER_10, budget=frozen(1_300)
+    )
+    assert (found.plan[0].items, found.plan[0].cushion) == (
+        {"p3k9za": pytest.approx(6_000_000)},
+        0,
+    )
+    assert found.cushion_need == 0
+
+
+def test_october_keeps_its_share_the_half_starts_in_november() -> None:
+    found = screen(piggy_row(), fact=HOME, share=0.5, budget=frozen(500))  # 17.10
+    assert (found.plan[0].items, found.plan[0].cushion) == (
+        {"p3k9za": pytest.approx(6_000_000)},
+        0,
+    )
+    assert (found.plan[1].items, found.plan[1].cushion) == (
+        {"p3k9za": pytest.approx(3_000_000)},
+        pytest.approx(3_000_000),
+    )
+    assert found.cushion_need == 0  # «сейчас» в октябре — по-старому
+
+
+def test_the_percent_needed_counts_the_cushions_half() -> None:
+    # «Отпуску» к июню — 30 млн за 7 месяцев, подушке — 6 млн: (30 + 6) / 7 ≈ 5,14
+    # млн из 12 млн — 43 %; с подушкой от месяца — 30 / 7 ≈ 4,29 млн, 36 %
+    found = screen(
+        piggy_row(**TRIP), fact=HOME, share=0.3, today=NOVEMBER_10, budget=frozen(500)
+    )
+    assert found.percent_needed == pytest.approx(0.43)
+    calm = screen(
+        piggy_row(**TRIP), fact=HOME, share=0.3, today=NOVEMBER_10, budget=frozen(1_300)
+    )
+    assert calm.percent_needed == pytest.approx(0.36)
+
+
+def test_a_piggy_names_its_next_months_part() -> None:
+    found = screen(
+        piggy_row(), fact=HOME, share=0.5, today=NOVEMBER_10, budget=frozen(950)
+    )
+    new_year = state(found, "p3k9za")
+    # ноябрь — 5,4 млн к сроку 20.12, с декабря — по 1 млн к следующему
+    assert (new_year.this_month, new_year.next_month) == (5_400_000, 1_000_000)
 
 
 def test_the_cushion_is_the_frozen_money_without_the_piggies_now() -> None:
@@ -676,6 +769,49 @@ def test_the_cushion_does_not_move_on_the_first() -> None:
     assert last.cushion.amount == first.cushion.amount == 100
 
 
+def test_set_aside_for_the_cushion_is_its_growth_since_the_first() -> None:
+    bought = fact_row(TODAY, "💳 СЧЕТА", "обмен валюты", -300, "USD")
+    moves = (move_row(id="tr0001", day="16.10.2026", amount=100, currency="USD"),)
+    found = screen(piggy_row(**TRIP), moves=moves, budget=budget_on(TODAY, bought))
+    # на 1-е: 1000 $ − квартплата 400 $; сейчас: 1300 $ − 400 $ − копилка 100 $
+    assert found.cushion_start == 600 * 12_000
+    assert found.cushion_saved == 200 * 12_000  # из 300 $ — 100 $ копилке
+    # копилке отложили, а долларов не купили — подушка не выросла
+    calm = screen(piggy_row(**TRIP), moves=moves, budget=budget_on(TODAY))
+    assert calm.cushion_saved == 0
+
+
+def test_the_first_starts_the_cushion_saving_from_zero() -> None:
+    paid = (ADVANCE_PAID, RENT_PAID, SALARY_TODAY)
+    moves = (move_row(id="tr0001", day="20.10.2026", amount=100, currency="USD"),)
+    last, first = (
+        screen(piggy_row(**TRIP), moves=moves, today=day, budget=budget_on(day, *paid))
+        for day in (date(2026, 10, 31), date(2026, 11, 1))
+    )
+    assert last.cushion is not None
+    assert first.cushion_start == last.cushion.amount * 12_000 == 100 * 12_000
+    assert first.cushion_saved == 0
+
+
+def test_on_the_salary_day_the_cushion_grows_by_dollars_beyond_the_payments() -> None:
+    day = date(2026, 10, 30)
+    came = (ADVANCE_PAID, RENT_PAID, SALARY_TODAY)
+    rent = fact_row(
+        day, "💳 СЧЕТА", "обмен валюты", -400, "USD"
+    )  # на квартплату ноября
+    more = fact_row(day, "💳 СЧЕТА", "обмен валюты", -500, "USD")  # и ещё 100 $
+    before, bought, extra = (
+        screen(today=day, budget=budget_on(day, *came, *rows))
+        for rows in ((), (rent,), (more,))
+    )
+    # ЗП пришла — квартплата ноября в сроке: подушка меньше, «отложено» не уходит в минус
+    assert (before.cushion_saved, bought.cushion_saved, extra.cushion_saved) == (
+        0,
+        0,
+        100 * 12_000,
+    )
+
+
 def test_the_cushion_counts_months_of_life() -> None:
     home = tuple(
         fact_row(date(2026, m, 5), "🏚️ ДОМ", "квартплата", 12_000_000)
@@ -688,6 +824,23 @@ def test_the_cushion_counts_months_of_life() -> None:
     assert (cushion.monthly, cushion.life.groups) == (12_000_000, ("🏚️ ДОМ",))
     assert cushion.shown_months == 1.3
     assert [step.months for step in cushion.steps] == [3, 6]
+
+
+def test_the_month_of_life_follows_the_groups_in_the_sheet() -> None:
+    home = tuple(
+        fact_row(date(2026, m, 5), "🏚️ ДОМ", "квартплата", 12_000_000)
+        for m in (7, 8, 9)
+    )
+    food = tuple(
+        fact_row(date(2026, m, 6), "🍔 ЕДА", "кафе", 6_000_000) for m in (7, 8, 9)
+    )
+    head = [*LIST_HEADER, PERCENT_LABEL, "", LIFE_LABEL, "🏚️ ДОМ, 🍔 ЕДА, 🚀 КОСМОС"]
+    found = screen(fact=(*home, *food), budget=frozen(1_500), head=head)
+    cushion = found.cushion
+    assert cushion is not None and cushion.life is not None
+    # в порядке справочника; «🚀 КОСМОС» в справочнике нет — пропущен
+    assert cushion.life.groups == ("🍔 ЕДА", "🏚️ ДОМ")
+    assert (cushion.monthly, cushion.shown_months) == (18_000_000, 1.0)
 
 
 def test_piggies_over_the_frozen_money_warn() -> None:
@@ -770,7 +923,7 @@ def test_a_goal_gets_no_more_than_it_lacks() -> None:
     found = screen(
         piggy_row(**car),
         moves=(move_row(id="car001", day="01.09.2026", amount=980, currency="USD"),),
-        fact=spending_months(),
+        fact=life_months(),
         share=0.1,
         budget=frozen(6000),  # подушка 5020 $ ≈ 6 месяцев — вся доля целям
     )
@@ -1090,6 +1243,70 @@ def test_distribute_follows_the_order_and_tops_up_short_piggies() -> None:
         ("tr0001", 1_800.0),
         ("p3k9za", 12_000_000.0),
     ]
+
+
+def test_now_puts_half_into_the_cushion_first() -> None:
+    came = income_row(date(2026, 11, 5), 8_000_000)
+    found = screen(
+        piggy_row(),
+        fact=(*HOME, came),
+        share=0.5,
+        today=NOVEMBER_10,
+        budget=frozen(500),
+    )
+    # 50 % от 8 млн — 4 млн: подушке половина (ей до месяца 6 млн), «Новому году» 2 млн
+    assert state(found, "p3k9za").now == 2_000_000
+    assert found.cushion_now == pytest.approx(2_000_000)
+    assert income_cushion(found, 8_000_000) == pytest.approx(2_000_000)
+
+
+def test_now_in_october_gives_the_piggies_the_whole_share() -> None:
+    def on(day: date) -> Screen:
+        came = income_row(day, 8_000_000)
+        return screen(
+            piggy_row(), fact=(*HOME, came), share=0.5, today=day, budget=frozen(500)
+        )
+
+    last, first = on(date(2026, 10, 31)), on(date(2026, 11, 1))
+    assert (state(last, "p3k9za").now, last.cushion_now) == (4_000_000, 0)
+    assert (state(first, "p3k9za").now, first.cushion_now) == (
+        2_000_000,
+        pytest.approx(2_000_000),
+    )
+
+
+def test_set_aside_gives_the_cushion_what_it_still_lacks_of_its_part() -> None:
+    def on(budget: Any) -> Screen:
+        came = income_row(date(2026, 11, 5), 8_000_000)
+        return screen(
+            piggy_row(), fact=(*HOME, came), share=0.5, today=NOVEMBER_10, budget=budget
+        )
+
+    # 50 % от 8 млн — 4 млн: подушке 2 млн, «Новому году» 2 млн
+    calm = on(frozen(500))
+    assert cushion_room(calm) == pytest.approx(2_000_000)
+    assert distribute(calm, 4_000_000, "UZS", RATES) == [("p3k9za", 2_000_000)]
+    # подушка уже выросла на 100 $ (1,2 млн): ей ещё 800 000, «Новому году» — его 2 млн
+    grown = on(frozen(600, change=100))
+    assert grown.cushion_saved == pytest.approx(1_200_000)
+    assert cushion_room(grown) == pytest.approx(800_000)
+    assert distribute(grown, 2_800_000, "UZS", RATES) == [("p3k9za", 2_000_000)]
+    assert distribute(grown, 1_000_000, "UZS", RATES) == [
+        ("p3k9za", 500_000)
+    ]  # пополам
+    # доллары на всё купили до записи: подушке сначала ничего, копилке — её 2 млн
+    bought = on(frozen(833, change=333))
+    assert cushion_room(bought) == 0
+    assert distribute(bought, 2_000_000, "UZS", RATES) == [("p3k9za", 2_000_000)]
+    # подушке до месяца — 600 000: остальное «Новому году»
+    small = on(frozen(950))
+    assert state(small, "p3k9za").now == 3_400_000
+
+
+def test_october_has_no_room_for_the_cushion_first() -> None:
+    came = income_row(date(2026, 10, 15), 8_000_000)
+    found = screen(piggy_row(), fact=(*HOME, came), share=0.5, budget=frozen(500))
+    assert cushion_room(found) == 0
 
 
 def test_the_month_goal_is_the_capacity_minus_spending() -> None:
