@@ -75,6 +75,23 @@ describe("SavingsCard", () => {
     expect(screen.getByText("октябрь пока +25 %")).toBeTruthy();
   });
 
+  it("puts every other month label one line lower", () => {
+    render(<SavingsCard savings={fixture()} />);
+    // на 320 px с крупным шрифтом жирное «июн» шире колонки: соседи — в разных рядах
+    const lower = ["май", "июл", "сен"];
+    const upper = ["апр", "июн", "авг", "пока"];
+    for (const text of lower) {
+      expect(screen.getByText(text).className).toContain("mt-[1.25em]");
+    }
+    for (const text of upper) {
+      expect(screen.getByText(text).className).not.toContain("mt-[1.25em]");
+    }
+    for (const text of [...lower, ...upper]) {
+      expect(screen.getByText(text).className).toContain("whitespace-nowrap");
+      expect(screen.getByText(text).className).toContain("text-[15px]");
+    }
+  });
+
   it("says the share saved in plus", () => {
     render(<SavingsCard savings={plus()} />);
     expect(

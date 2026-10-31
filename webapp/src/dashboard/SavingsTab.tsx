@@ -114,6 +114,10 @@ function SetAside({
               <Line>{`за ${monthName(month.month)} отложить ${money(due)}`}</Line>
               <SavedBar share={Math.min(saved / due, 1)} />
               <Line>{`отложено ${money(saved)}, ещё ${money(more)}`}</Line>
+              {month.left <= 0 && (
+                // копилки записаны: остаток — доля подушки, окно её не пишет
+                <Line>ещё — доля подушки: купите на неё долларов</Line>
+              )}
             </>
           )}
           <Line>{`${percent} от пришедших ${money(month.received)}`}</Line>

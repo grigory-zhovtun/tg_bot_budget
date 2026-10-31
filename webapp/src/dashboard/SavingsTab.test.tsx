@@ -115,6 +115,8 @@ describe("SavingsTab", () => {
       "wrap-anywhere",
     );
     expect(within(card).getByRole("button", { name: "Отложил…" })).toBeTruthy();
+    // копилкам ещё есть что отложить — про долю подушки скажет окно
+    expect(within(card).queryByText(/доля подушки/)).toBeNull();
   });
 
   it("says in green when the whole month is set aside", async () => {
@@ -152,8 +154,12 @@ describe("SavingsTab", () => {
       await screen.findByText("отложено 3 600 000, ещё 400 000"),
     ).toBeTruthy();
     expect(bar().getAttribute("aria-valuenow")).toBe("90");
-    // копилкам откладывать нечего — «Отложил…» нет
+    // копилкам откладывать нечего — «Отложил…» нет, а «ещё» — доля подушки
     expect(screen.queryByRole("button", { name: "Отложил…" })).toBeNull();
+    inOrder(setAside(), [
+      "отложено 3 600 000, ещё 400 000",
+      "ещё — доля подушки: купите на неё долларов",
+    ]);
   });
 
   it("counts the dollars bought before the piggies are written", async () => {

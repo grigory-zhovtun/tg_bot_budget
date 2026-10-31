@@ -53,8 +53,18 @@ function RateChip({ rate }: { rate: number }) {
  * растёт, маленькая доля — не тоньше 3 px. Траты без дохода — столбик вниз во
  * всю высоту: запас проели, это не «нет данных». Числа — в aria-label: над
  * столбиками их нет. Текущий месяц — пунктиром, без заливки, с подписью «пока».
+ * Подписи — в два ряда через одну (index — номер столбика с нуля): на 320 px с
+ * крупным шрифтом жирное «июн» шире колонки, а в своём ряду у подписи соседей нет.
  */
-function MonthBar({ item, current }: { item: SavingMonth; current: boolean }) {
+function MonthBar({
+  item,
+  current,
+  index,
+}: {
+  item: SavingMonth;
+  current: boolean;
+  index: number;
+}) {
   const eaten = item.rate === null && item.spent > 0;
   const rate = eaten ? -1 : item.rate;
   const tone = rateTone(rate);
@@ -82,7 +92,9 @@ function MonthBar({ item, current }: { item: SavingMonth; current: boolean }) {
           />
         )}
       </div>
-      <span className="text-[15px] font-bold">
+      <span
+        className={`text-[15px] font-bold whitespace-nowrap${index % 2 === 1 ? " mt-[1.25em]" : ""}`}
+      >
         {current ? "пока" : monthShort(item.month)}
       </span>
     </div>
@@ -131,10 +143,17 @@ export default function SavingsCard({ savings }: { savings: Savings }) {
       <div
         className={`mt-2 grid ${current ? "grid-cols-7" : "grid-cols-6"} gap-1`}
       >
-        {savings.months.map((item) => (
-          <MonthBar key={item.month} item={item} current={false} />
+        {savings.months.map((item, index) => (
+          <MonthBar
+            key={item.month}
+            item={item}
+            current={false}
+            index={index}
+          />
         ))}
-        {current && <MonthBar item={current} current />}
+        {current && (
+          <MonthBar item={current} current index={savings.months.length} />
+        )}
       </div>
       <Line>вверх — отложили, вниз — проели</Line>
       {current && (

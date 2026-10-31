@@ -84,6 +84,22 @@ describe("SaveSheet", () => {
     );
   });
 
+  it("tops a short piggy up to its shortfall less what it got ahead", async () => {
+    const user = userEvent.setup();
+    show({
+      ...savingsFixture,
+      piggies: savingsFixture.piggies.map((piggy) =>
+        piggy.name === "Отпуск"
+          ? { ...piggy, this_month: 200, saved_month: 300, left_this_month: 0 }
+          : piggy,
+      ),
+    });
+    await user.click(screen.getByRole("button", { name: "000" }));
+    // «не хватит» 500 $, но в этом месяце отложено на 100 $ больше взноса — как сервер
+    expect(cells("Отпуск")).toEqual(["Отпуск", nb("400 $")]);
+    expect(cells("подушка")[0]).toBe("подушка");
+  });
+
   it("puts it all into the cushion when no piggy needs it", () => {
     show({
       ...savingsFixture,

@@ -54,7 +54,12 @@ function layout(
   }
   for (const piggy of ordered) give(piggy, piggy.left_this_month);
   for (const piggy of ordered) {
-    if (piggy.status === "short") give(piggy, piggy.short);
+    // как сервер: отложенное в этом месяце сверх взноса уже закрыло часть «не хватит»
+    if (piggy.status === "short")
+      give(
+        piggy,
+        piggy.short - Math.max(piggy.saved_month - piggy.this_month, 0),
+      );
   }
   for (const piggy of data.piggies) {
     if (piggy.deadline === null && piggy.status !== "broken")
