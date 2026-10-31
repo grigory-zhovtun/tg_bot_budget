@@ -35,6 +35,7 @@ export interface ExpenseInput {
   amount: string;
   comment: string;
   day?: string; // нет — сегодня по часам бота
+  incoming?: boolean; // true — «Зачислить»: в таблицу минус (у доходов — плюс); нет поля — трата
 }
 
 export interface ExpenseResult {

@@ -43,6 +43,13 @@ export function moneyText(amount: number, currency: string): string {
   return inCurrency(amount, currency, currency !== "UZS" && !whole);
 }
 
+/** Сумма D как в таблице, без единицы: сумы — целиком, другие валюты — с копейками
+ * только у дробной суммы; минус — «−»: «−500 000», «−100», «−100,50». */
+export function sheetAmount(value: number, currency: string): string {
+  const whole = Number.isInteger(Math.round(value * 100) / 100);
+  return money(value, currency !== "UZS" && !whole ? 2 : 0);
+}
+
 /** Строка списка со знаком: «+2 000 000», «−380 $», «−380,50 $». */
 export function signedMoney(amount: number, currency: string): string {
   return `${amount < 0 ? "−" : "+"}${moneyText(Math.abs(amount), currency)}`;

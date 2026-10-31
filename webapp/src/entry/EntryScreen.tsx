@@ -26,7 +26,12 @@ import {
   press,
   type Key,
 } from "./amount";
-import { BIG_FIELD, ErrorLine, PRIMARY } from "../dashboard/controls";
+import {
+  BIG_FIELD,
+  ErrorLine,
+  GOOD_BUTTON,
+  PRIMARY,
+} from "../dashboard/controls";
 import Keypad from "./Keypad";
 import {
   dropPending,
@@ -37,6 +42,13 @@ import {
   unsent,
   type Pending,
 } from "./outbox";
+import {
+  creditHead,
+  INCOME_GROUP,
+  spentHead,
+  type Outgoing,
+  type Sign,
+} from "./outgoing";
 import { groupColor } from "./palette";
 import { planIndex } from "./plan";
 import { retryable, sendExpense, sleep, type Wait } from "./send";
@@ -53,6 +65,12 @@ const CHANGED_BY_WRITES = ["dashboard", "forecast", "plan:", "savings"];
 const OUTBOX_EVERY_MS = 30_000; // очередь на телефоне — снова, пока не пуста
 
 type Step = "group" | "sub" | "amount";
+
+/** Ответ на запись: строки сервера и своя первая строка («✓ Списано …»). */
+interface Done {
+  result: ExpenseResult;
+  head: string | null;
+}
 
 interface Props {
   api: Api;
@@ -91,7 +109,7 @@ function Outbox({
           return (
             <li key={id} className="flex flex-col gap-0.5">
               <span className="font-bold">
-                {`${item.title}, ${dayLabel(item.entry.day ?? today, today).toLowerCase()}`}
+                {`${item.entry.incoming ? "зачисление: " : ""}${item.title}, ${dayLabel(item.entry.day ?? today, today).toLowerCase()}`}
               </span>
               {item.error && (
                 <>
@@ -174,9 +192,9 @@ export default function EntryScreen({
   const [comment, setComment] = useState("");
   const [day, setDay] = useState<string | null>(null); // null — сегодня по боту
   const [entryId, setEntryId] = useState("");
-  const [sending, setSending] = useState(false);
+  const [sending, setSending] = useState<Sign | null>(null); // чей знак ждёт ответа
   const [error, setError] = useState<string | null>(null);
-  const [done, setDone] = useState<ExpenseResult | null>(null);
+  const [done, setDone] = useState<Done | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [undoing, setUndoing] = useState(false);
   const [outbox, setOutbox] = useState<Pending[]>(() => unsent(owner));
@@ -207,7 +225,8 @@ export default function EntryScreen({
   const decimals = currency !== "UZS";
   const value = amountValue(amount);
   const shown = displayAmount(amount);
-  const label = `Записать ${withCurrency(value, currency)}`;
+  const label = `Записать ${withCurrency(value, currency)}`; // у доходов
+  const income = group?.name === INCOME_GROUP;
   const tg = telegram();
 
   const plan = useMemo(() => planIndex(dashboard), [dashboard]);
@@ -278,100 +297,112 @@ export default function EntryScreen({
     setStep((current) => (current === "amount" ? "sub" : "group"));
   }, []);
 
-  const submit = useCallback(() => {
-    if (inFlight.current || value <= 0 || !group || !sub) return;
-    inFlight.current = true;
-    setSending(true);
-    setError(null);
-    const input: ExpenseInput = {
-      entry_id: entryId,
-      source,
-      category: group.name,
-      subcategory: sub.name,
-      amount: apiAmount(amount),
-      comment: comment.trim(),
-      ...(day ? { day } : {}),
-    };
-    // трата на телефоне до первой попытки: закрыли приложение во время повторов —
-    // уйдёт при следующем открытии с датой нажатия (сегодня по боту)
-    enqueueSending(owner, {
-      entry: {
-        ...input,
-        day: input.day ?? botDay(boot.today, boot.utc_offset),
-      },
-      title: `${sub.name} ${withCurrency(value, currency)}`,
-    });
-    sendExpense(api, input, wait)
-      .then((result) => {
-        finishSending(owner, input.entry_id, false);
-        haptic("success");
-        loadPlan();
-        setDone(result);
-        setNotice(null);
-        setGroup(null);
-        setSub(null);
-        setStep("group");
-      })
-      .catch((reason: unknown) => {
-        // связи нет и после повторов или вход устарел: трата ждёт на телефоне
-        const keep = retryable(reason) || stopsQueue(reason);
-        finishSending(owner, input.entry_id, keep);
-        if (keep) {
-          setOutbox(unsent(owner));
-          if (stopsQueue(reason)) {
-            expired.current = true;
-            setError(reason.message);
-            setNotice(null);
-          } else {
-            setNotice("📤 Трата сохранена на телефоне");
-          }
-          setDone(null);
-          setGroup(null);
-          setSub(null);
-          setStep("group");
-          return;
-        }
-        haptic("error");
-        const fields =
-          reason instanceof ApiError ? Object.keys(reason.fields) : [];
-        if (fields.some((field) => CATALOG_FIELDS.includes(field))) {
-          setError("Справочник обновился — выберите заново");
-          setGroup(null);
-          setSub(null);
-          setStep("group");
-          onCatalogChanged();
-          return;
-        }
-        setError(
-          reason instanceof ApiError
-            ? reason.message
-            : "Не получилось — попробуйте ещё раз",
-        );
-      })
-      .finally(() => {
-        inFlight.current = false;
-        setSending(false);
+  // запись уходит на сервер — одна дорога для любой кнопки: очередь на телефоне,
+  // повторы, отказы; знак — из самой записи
+  const send = useCallback(
+    (out: Outgoing) => {
+      if (inFlight.current) return;
+      inFlight.current = true;
+      setSending(out.entry.incoming ? "credit" : "spend");
+      setError(null);
+      const input = out.entry;
+      // трата на телефоне до первой попытки: закрыли приложение во время повторов —
+      // уйдёт при следующем открытии с датой нажатия (сегодня по боту)
+      enqueueSending(owner, {
+        entry: {
+          ...input,
+          day: input.day ?? botDay(boot.today, boot.utc_offset),
+        },
+        title: out.title,
       });
-  }, [
-    amount,
-    api,
-    boot.today,
-    boot.utc_offset,
-    comment,
-    currency,
-    day,
-    entryId,
-    group,
-    loadPlan,
-    onCatalogChanged,
-    owner,
-    source,
-    sub,
-    value,
-    wait,
-  ]);
+      sendExpense(api, input, wait)
+        .then((result) => {
+          finishSending(owner, input.entry_id, false);
+          haptic("success");
+          loadPlan();
+          setDone({ result, head: out.head });
+          setNotice(null);
+          setGroup(null);
+          setSub(null);
+          setStep("group");
+        })
+        .catch((reason: unknown) => {
+          // связи нет и после повторов или вход устарел: трата ждёт на телефоне
+          const keep = retryable(reason) || stopsQueue(reason);
+          finishSending(owner, input.entry_id, keep);
+          if (keep) {
+            setOutbox(unsent(owner));
+            if (stopsQueue(reason)) {
+              expired.current = true;
+              setError(reason.message);
+              setNotice(null);
+            } else {
+              setNotice("📤 Трата сохранена на телефоне");
+            }
+            setDone(null);
+            setGroup(null);
+            setSub(null);
+            setStep("group");
+            return;
+          }
+          haptic("error");
+          const fields =
+            reason instanceof ApiError ? Object.keys(reason.fields) : [];
+          if (fields.some((field) => CATALOG_FIELDS.includes(field))) {
+            setError("Справочник обновился — выберите заново");
+            setGroup(null);
+            setSub(null);
+            setStep("group");
+            onCatalogChanged();
+            return;
+          }
+          setError(
+            reason instanceof ApiError
+              ? reason.message
+              : "Не получилось — попробуйте ещё раз",
+          );
+        })
+        .finally(() => {
+          inFlight.current = false;
+          setSending(null);
+        });
+    },
+    [api, boot.today, boot.utc_offset, loadPlan, onCatalogChanged, owner, wait],
+  );
+
+  // запись из полей экрана суммы: «Списать» (и «Записать» доходов) — без знака,
+  // «Зачислить» — incoming: в таблицу минус
+  const submit = useCallback(
+    (sign: Sign) => {
+      if (value <= 0 || !group || !sub) return;
+      const input: ExpenseInput = {
+        entry_id: entryId,
+        source,
+        category: group.name,
+        subcategory: sub.name,
+        amount: apiAmount(amount),
+        comment: comment.trim(),
+        ...(day ? { day } : {}),
+        ...(sign === "credit" ? { incoming: true } : {}),
+      };
+      send({
+        entry: input,
+        title: `${sub.name} ${withCurrency(value, currency)}`,
+        head:
+          group.name === INCOME_GROUP
+            ? null
+            : sign === "credit"
+              ? creditHead(value, currency)
+              : spentHead(value, currency),
+      });
+    },
+    [amount, comment, currency, day, entryId, group, send, source, sub, value],
+  );
+  const spend = useCallback(() => submit("spend"), [submit]);
+  const credit = useCallback(() => submit("credit"), [submit]);
 
   // Системные кнопки Telegram: «Назад» после первого шага, «Записать» на сумме
+  // у доходов
   useEffect(() => {
     if (!tg || step === "group") return;
     tg.BackButton.show();
@@ -383,29 +414,29 @@ export default function EntryScreen({
   }, [tg, step, back]);
 
   useEffect(() => {
-    if (!tg || step !== "amount") return;
+    if (!tg || step !== "amount" || !income) return;
     tg.MainButton.show();
     return () => {
       tg.MainButton.hide();
     };
-  }, [tg, step]);
+  }, [tg, step, income]);
 
   useEffect(() => {
-    if (!tg || step !== "amount") return;
+    if (!tg || step !== "amount" || !income) return;
     tg.MainButton.setText(label);
     if (value > 0) tg.MainButton.enable();
     else tg.MainButton.disable();
     if (sending) tg.MainButton.showProgress(false);
     else tg.MainButton.hideProgress();
-  }, [tg, step, label, value, sending]);
+  }, [tg, step, income, label, value, sending]);
 
   useEffect(() => {
-    if (!tg || step !== "amount") return;
-    tg.MainButton.onClick(submit);
+    if (!tg || step !== "amount" || !income) return;
+    tg.MainButton.onClick(spend);
     return () => {
-      tg.MainButton.offClick(submit);
+      tg.MainButton.offClick(spend);
     };
-  }, [tg, step, submit]);
+  }, [tg, step, income, spend]);
 
   function chooseSource(name: string) {
     setPicked(name);
@@ -456,10 +487,11 @@ export default function EntryScreen({
   }
 
   const lines = done
-    ? done.lines.length > 0
-      ? done.lines
-      : [`✅ Уже записано: строка ${done.rows.first}`]
+    ? done.result.lines.length > 0
+      ? done.result.lines
+      : [`✅ Уже записано: строка ${done.result.rows.first}`]
     : [];
+  const off = value <= 0 || sending !== null; // кнопки записи недоступны
 
   return (
     <div className="flex flex-col gap-4">
@@ -485,6 +517,7 @@ export default function EntryScreen({
           className="flex flex-col gap-1 rounded-2xl bg-section p-3 text-line"
           role="status"
         >
+          {done.head && <p className="text-fact font-extrabold">{done.head}</p>}
           {lines.map((line, index) => (
             <p key={`${index}-${line}`}>{line}</p>
           ))}
@@ -568,15 +601,37 @@ export default function EntryScreen({
               setAmount((text) => press(text, key, decimals))
             }
           />
-          {!tg && (
-            <button
-              type="button"
-              className={PRIMARY}
-              disabled={value <= 0 || sending}
-              onClick={submit}
-            >
-              {label}
-            </button>
+          {!income ? (
+            // «Списать» справа — ближе к большому пальцу, её жмут чаще
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                className={GOOD_BUTTON}
+                disabled={off}
+                onClick={credit}
+              >
+                Зачислить
+              </button>
+              <button
+                type="button"
+                className={PRIMARY}
+                disabled={off}
+                onClick={spend}
+              >
+                Списать
+              </button>
+            </div>
+          ) : (
+            !tg && (
+              <button
+                type="button"
+                className={PRIMARY}
+                disabled={off}
+                onClick={spend}
+              >
+                {label}
+              </button>
+            )
           )}
         </div>
       )}

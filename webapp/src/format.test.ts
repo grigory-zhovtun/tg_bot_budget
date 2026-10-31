@@ -9,6 +9,7 @@ import {
   itemAmount,
   money,
   moneyText,
+  sheetAmount,
   shiftDay,
   short,
   signedMoney,
@@ -122,5 +123,14 @@ describe("signedMoney", () => {
     expect(signedMoney(2_000_000, "UZS")).toBe(nb("+2 000 000"));
     expect(signedMoney(-380, "USD")).toBe(nb("−380 $"));
     expect(signedMoney(-380.5, "USD")).toBe(nb("−380,50 $"));
+  });
+});
+
+describe("sheetAmount", () => {
+  it("writes D like the sheet: sums whole, cents only for a fractional sum", () => {
+    expect(sheetAmount(500000, "UZS")).toBe(nb("500 000"));
+    expect(sheetAmount(-500000, "UZS")).toBe(nb("−500 000"));
+    expect(sheetAmount(-100, "USD")).toBe("−100");
+    expect(sheetAmount(-100.5, "USD")).toBe("−100,50");
   });
 });
