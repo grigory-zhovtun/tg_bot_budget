@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import type { Cushion, CushionStep } from "../api";
 import { money, moneyText } from "../format";
 import { monthName, monthRange, plural } from "../plan/months";
@@ -118,13 +119,52 @@ function Steps({ cushion }: { cushion: Cushion }) {
   );
 }
 
+/** Первая строка месяца жизни и справа «Изменить» — окно «Месяц жизни»; при
+ * крупном шрифте кнопка уходит строкой ниже. */
+function LifeHead({
+  children,
+  onLife,
+}: {
+  children: ReactNode;
+  onLife?: () => void;
+}) {
+  if (!onLife) return <>{children}</>;
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+      {children}
+      <button
+        type="button"
+        aria-label="Изменить месяц жизни"
+        className="shrink-0 text-line font-extrabold text-link"
+        onClick={onLife}
+      >
+        Изменить
+      </button>
+    </div>
+  );
+}
+
 /** Месяц жизни: средние траты обязательных групп и из каких месяцев. */
-function LifeMonth({ cushion }: { cushion: Cushion }) {
+function LifeMonth({
+  cushion,
+  onLife,
+}: {
+  cushion: Cushion;
+  onLife?: () => void;
+}) {
   if (cushion.life_groups.length === 0) {
-    return <Line>обязательных групп нет в справочнике</Line>;
+    return (
+      <LifeHead onLife={onLife}>
+        <Line>обязательных групп нет в справочнике</Line>
+      </LifeHead>
+    );
   }
   if (cushion.months === null) {
-    return <Line>трат за 3 полных месяца ещё нет</Line>;
+    return (
+      <LifeHead onLife={onLife}>
+        <Line>трат за 3 полных месяца ещё нет</Line>
+      </LifeHead>
+    );
   }
   const [only] = cushion.life_months;
   const months =
@@ -133,7 +173,9 @@ function LifeMonth({ cushion }: { cushion: Cushion }) {
       : monthRange(cushion.life_months);
   return (
     <>
-      <Fact>{`Месяц жизни ${money(cushion.monthly)}`}</Fact>
+      <LifeHead onLife={onLife}>
+        <Fact>{`Месяц жизни ${money(cushion.monthly)}`}</Fact>
+      </LifeHead>
       <Line>{`в среднем за ${months}`}</Line>
       <Line>{`обязательные: ${cushion.life_groups.join(", ")}`}</Line>
     </>
@@ -145,9 +187,11 @@ function LifeMonth({ cushion }: { cushion: Cushion }) {
 export default function CushionCard({
   cushion,
   today,
+  onLife,
 }: {
   cushion: Cushion;
   today: string;
+  onLife?: () => void; // нет — окно «Месяц жизни» не открыть (нет справочника)
 }) {
   const { months, target_months: target, currency } = cushion;
   const sum = (value: number) => moneyText(value, currency);
@@ -180,7 +224,7 @@ export default function CushionCard({
       <div className="my-1">
         <Table label="Расчёт подушки" align="lr" rows={rows} />
       </div>
-      <LifeMonth cushion={cushion} />
+      <LifeMonth cushion={cushion} onLife={onLife} />
       {months !== null && <Steps cushion={cushion} />}
       <FrozenWarnings
         currency={currency}

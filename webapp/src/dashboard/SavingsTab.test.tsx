@@ -299,6 +299,15 @@ describe("SavingsTab", () => {
     ).toBeTruthy();
   });
 
+  it("opens the month of life window", async () => {
+    const user = userEvent.setup();
+    render(<SavingsTab api={fakeApi()} boot={bootstrapFixture} />);
+    await user.click(
+      await screen.findByRole("button", { name: "Изменить месяц жизни" }),
+    );
+    expect(screen.getByRole("dialog", { name: "Месяц жизни" })).toBeTruthy();
+  });
+
   it("shows the cushion without the money of the piggies", async () => {
     render(<SavingsTab api={fakeApi()} boot={null} />);
     const table = await screen.findByRole("table", { name: "Расчёт подушки" });

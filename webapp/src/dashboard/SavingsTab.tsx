@@ -12,6 +12,7 @@ import { capital, monthName } from "../plan/months";
 import { useResource, useStore } from "../store";
 import { Card, Good, Line, Table, Warn } from "./blocks";
 import CushionCard from "./CushionCard";
+import LifeSheet from "./LifeSheet";
 import OrderSheet from "./OrderSheet";
 import PercentSheet from "./PercentSheet";
 import PiggyCard from "./PiggyCard";
@@ -188,7 +189,9 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
   );
   const [opened, setOpened] = useState<Piggy | "new" | null>(null);
   const [saving, setSaving] = useState(false);
-  const [setting, setSetting] = useState<"percent" | "order" | null>(null);
+  const [setting, setSetting] = useState<"percent" | "order" | "life" | null>(
+    null,
+  );
   const saved = useCallback(
     (fresh: SavingsScreen) => {
       store.put("savings", fresh);
@@ -277,7 +280,11 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
         />
       )}
       {data.cushion && (
-        <CushionCard cushion={data.cushion} today={data.today} />
+        <CushionCard
+          cushion={data.cushion}
+          today={data.today}
+          onLife={boot ? () => setSetting("life") : undefined}
+        />
       )}
       <section className="flex flex-col gap-2" aria-label="Копилки">
         {/* крупный шрифт на 320 px: кнопки переносятся строкой ниже, а не за экран */}
@@ -349,6 +356,15 @@ export default function SavingsTab({ api, boot, openSave }: Props) {
           data={data}
           onSaved={saved}
           onRefresh={(fresh) => store.put("savings", fresh)}
+          onClose={() => setSetting(null)}
+        />
+      )}
+      {boot && setting === "life" && (
+        <LifeSheet
+          api={api}
+          boot={boot}
+          data={data}
+          onSaved={saved}
           onClose={() => setSetting(null)}
         />
       )}

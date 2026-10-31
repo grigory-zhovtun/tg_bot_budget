@@ -177,6 +177,19 @@ describe("request", () => {
     expect(JSON.parse(String(fetch.mock.calls[1]?.[1].body))).toEqual(input);
   });
 
+  it("sends the month of life groups", async () => {
+    const fetch = vi
+      .fn<(path: string, init: RequestInit) => Promise<Response>>()
+      .mockImplementation(() =>
+        Promise.resolve(new Response("{}", { status: 200 })),
+      );
+    vi.stubGlobal("fetch", fetch);
+    await api.setLife(["🏚️ ДОМ"]);
+    const [path, init] = fetch.mock.calls[0] ?? [];
+    expect([path, init?.method]).toEqual(["/api/piggy/life", "PUT"]);
+    expect(init?.body).toBe('{"groups":["🏚️ ДОМ"]}');
+  });
+
   it("keeps the body of a conflict with the fresh plan", async () => {
     const body = {
       error: {

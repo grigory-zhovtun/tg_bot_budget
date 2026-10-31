@@ -844,6 +844,12 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ ids }),
     }),
+  // обязательные группы месяца жизни подушки — в порядке справочника
+  setLife: (groups: string[]) =>
+    request<SavingsScreen>("/piggy/life", {
+      method: "PUT",
+      body: JSON.stringify({ groups }),
+    }),
   addPiggy: (input: PiggyInput) =>
     request<SavingsScreen>("/piggy", {
       method: "POST",
