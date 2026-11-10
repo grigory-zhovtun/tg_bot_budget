@@ -898,6 +898,25 @@ describe("ForecastScreen", () => {
       expect(api.forecast).toHaveBeenCalledWith(true, "2026-09");
     });
 
+    it("does not show another month's days under a past month's name", async () => {
+      // сервер без листания отвечает на ?month= текущим месяцем
+      const forecast = vi
+        .fn<Api["forecast"]>()
+        .mockResolvedValue(forecastFixture);
+      const user = userEvent.setup();
+      show(fakeApi({ forecast }));
+      await screen.findByText("Октябрь");
+      await user.click(back());
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "Этот месяц не открылся — нажмите «Обновить»",
+      );
+      expect(screen.getByText("Сентябрь")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^15 октября/ })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: /Запланировать/ }),
+      ).toBeNull();
+    });
+
     it("lets the arrows work while a past month does not load", async () => {
       const forecast = vi
         .fn<Api["forecast"]>()

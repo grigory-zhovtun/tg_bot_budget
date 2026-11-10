@@ -326,8 +326,12 @@ function MonthScreen({
     },
     [data, day],
   );
-  const closed = data?.status === "ok" && data.closed === true;
-  const open = data?.status === "ok" && !closed;
+  // просили прошедший месяц, а пришёл другой (сервер ещё без листания): чужие дни
+  // под его названием не показываем
+  const foreign =
+    month !== null && data?.status === "ok" && data.today.slice(0, 7) !== month;
+  const closed = data?.status === "ok" && !foreign && data.closed === true;
+  const open = data?.status === "ok" && !foreign && !closed;
 
   return (
     <div className="flex flex-col gap-4">
@@ -352,6 +356,9 @@ function MonthScreen({
             Повторить
           </button>
         </div>
+      )}
+      {foreign && (
+        <p role="alert">Этот месяц не открылся — нажмите «Обновить»</p>
       )}
       {data?.status === "no_month_tab" && (
         <p>Нет вкладки месяца — прогноз появится, когда она будет</p>
