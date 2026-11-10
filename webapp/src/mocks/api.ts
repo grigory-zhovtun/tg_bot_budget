@@ -1,7 +1,9 @@
 import type { Api, Bootstrap, SavingsScreen } from "../api";
 import {
+  EARLIEST_MONTH,
   adviceFixture,
   bootstrapFixture,
+  closedForecast,
   dashboardFixture,
   forecastFixture,
   nextPlanFixture,
@@ -68,7 +70,13 @@ export const mockApi: Api = {
   addExpense: () => later(writtenFixture),
   undo: () => later({ message: "↩️ Удалил из таблицы: строка 4169." }),
   dashboard: () => later(dashboardFixture),
-  forecast: () => later(forecastFixture),
+  // мок-режим: прошедшие месяцы — одинаковые, листать можно до августа
+  forecast: (_read, month) =>
+    later(
+      month
+        ? closedForecast(month)
+        : { ...forecastFixture, earliest: EARLIEST_MONTH },
+    ),
   // мок-режим: запись не сохраняется, приходит тот же прогноз
   addRecord: () => later(forecastFixture),
   updateRecord: () => later(forecastFixture),

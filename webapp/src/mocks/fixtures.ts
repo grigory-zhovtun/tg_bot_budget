@@ -640,6 +640,112 @@ const uzsRecords = [
   ...occurrences(groceries, [24]),
 ].sort((a, b) => a.day - b.day);
 
+/** Первый месяц с операциями в мок-режиме: раньше него листать некуда. */
+export const EARLIEST_MONTH = "2026-08";
+
+/**
+ * Прошедший месяц для мок-режима и тестов — дни по факту с 1-го по последний:
+ * в сумах каждый день продукты на 400 000, 5-го аванс 4 млн, 28-го зарплата
+ * 12 млн; 18-го аренда 400 $; рубли лежат.
+ */
+export function closedForecast(month: string): Forecast {
+  const year = Number(month.slice(0, 4));
+  const number = Number(month.slice(5, 7));
+  const last = new Date(Date.UTC(year, number, 0)).getUTCDate();
+  const numbers = Array.from({ length: last }, (_, index) => index + 1);
+  const income = (subcategory: string, amount: number): DayArticle => ({
+    group: "💰 ДОХОДЫ",
+    subcategory,
+    icon: "💼",
+    amount,
+    uzs: amount,
+    income: true,
+  });
+  const days = (
+    start: number,
+    moves: (day: number) => DayArticle[],
+  ): ForecastPast[] => {
+    let evening = start;
+    return numbers.map((day) => {
+      const articles = moves(day);
+      const sum = (earned: boolean) =>
+        articles
+          .filter((article) => article.income === earned)
+          .reduce((total, article) => total + article.amount, 0);
+      const spent = sum(false);
+      const earned = sum(true);
+      evening += earned - spent;
+      return { day, evening, change: earned - spent, spent, earned, articles };
+    });
+  };
+  const uzs = days(5_000_000, (day) => [
+    spend("продукты", "🛒", 400_000),
+    ...(day === 5 ? [income("аванс", 4_000_000)] : []),
+    ...(day === 28 ? [income("зарплата", 12_000_000)] : []),
+  ]);
+  const usd = days(1_800, (day) =>
+    day === 18 ? [spend("аренда", "🏠", 400, 12_000, "🏠 ДОМ")] : [],
+  );
+  const rub = days(20_000, () => []);
+  const line = (code: string, past: ForecastPast[]) => ({
+    code,
+    now: past[past.length - 1]?.evening ?? 0,
+    per_day_plan: 0,
+    per_day_pace: 0,
+    spent_today: 0,
+    in_total: true,
+    events: [],
+    days: [],
+    below_zero: { plan: null, pace: null },
+    records: [],
+    past,
+  });
+  const total = (rate: number): ForecastPast[] =>
+    numbers.map((day, index) => {
+      const part = (
+        line: ForecastPast[],
+        field: (point: ForecastPast) => number,
+      ) => {
+        const point = line[index];
+        return point ? field(point) : 0;
+      };
+      const pick = (field: (point: ForecastPast) => number) =>
+        (part(uzs, field) +
+          part(usd, field) * 12_000 +
+          part(rub, field) * 150) /
+        rate;
+      return {
+        day,
+        evening: pick((point) => point.evening),
+        change: pick((point) => point.change),
+        spent: pick((point) => point.spent),
+        earned: pick((point) => point.earned),
+        articles: [],
+      };
+    });
+  const end = `${month}-${String(last).padStart(2, "0")}`;
+  return {
+    status: "ok",
+    month,
+    today: end,
+    end,
+    closed: true,
+    earliest: EARLIEST_MONTH,
+    currencies: [line("UZS", uzs), line("USD", usd), line("RUB", rub)],
+    total: {
+      uzs: [],
+      usd: [],
+      below_zero: { plan: null, pace: null },
+      past_uzs: total(1),
+      past_usd: total(12_000),
+    },
+    rates: { USD: 12_000, RUB: 150 },
+    calendar: [],
+    articles: [],
+    hints: {},
+  };
+}
+
 export const forecastFixture: Forecast = {
   status: "ok",
   month: "Oct 26",

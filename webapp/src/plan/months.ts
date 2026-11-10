@@ -118,3 +118,12 @@ export function nextMonth(month: string): string {
     ? `${year + 1}-01`
     : `${year}-${String(number + 1).padStart(2, "0")}`;
 }
+
+/** «2027-01» → «2026-12». */
+export function prevMonth(month: string): string {
+  const year = Number(month.slice(0, 4));
+  const number = Number(month.slice(5, 7));
+  return number === 1
+    ? `${year - 1}-12`
+    : `${year}-${String(number - 1).padStart(2, "0")}`;
+}

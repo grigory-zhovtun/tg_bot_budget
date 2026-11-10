@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { Forecast } from "../api";
-import { forecastFixture } from "../mocks/fixtures";
+import { closedForecast, forecastFixture } from "../mocks/fixtures";
 import {
   viewPast,
   DEFAULT_VIEW,
@@ -15,9 +15,12 @@ import {
   minusRange,
   articleText,
   dayArticles,
+  monthArticles,
+  monthTotals,
   pillUnit,
   pillValue,
   storeView,
+  todayOf,
   viewDays,
   warnings,
   type View,
@@ -252,5 +255,81 @@ describe("forecast view", () => {
     expect(viewPast({ ...forecastFixture, total: null }, DEFAULT_VIEW)).toEqual(
       [],
     );
+  });
+});
+
+describe("a past month", () => {
+  const september = closedForecast("2026-09");
+
+  it("has every day behind: today is after its last day", () => {
+    expect(todayOf(september)).toBe(31);
+    expect(todayOf(forecastFixture)).toBe(15);
+  });
+
+  it("sums its days up in the numbers of the view", () => {
+    expect(monthTotals(september, UZS)).toEqual({
+      spent: 12_000_000,
+      earned: 16_000_000,
+      evening: 9_000_000,
+    });
+    expect(monthTotals(september, DEFAULT_VIEW)).toEqual({
+      spent: 16_800_000,
+      earned: 16_000_000,
+      evening: 28_800_000,
+    });
+    expect(monthTotals(september, DOLLARS)?.spent).toBeCloseTo(1_400);
+    expect(monthTotals({ ...september, total: null }, DEFAULT_VIEW)).toBeNull();
+  });
+
+  it("lists the month's spending by article, the biggest first", () => {
+    expect(
+      monthArticles(september, DEFAULT_VIEW).map((article) => [
+        article.subcategory,
+        article.currency,
+        article.amount,
+      ]),
+    ).toEqual([
+      ["продукты", "UZS", 12_000_000],
+      ["аренда", "USD", 400],
+    ]);
+    // в виде одной валюты — только её статьи; доходы — не траты
+    expect(
+      monthArticles(september, UZS).map((article) => article.subcategory),
+    ).toEqual(["продукты"]);
+  });
+
+  it("leaves out an article whose refunds took all of it back", () => {
+    const refunded = {
+      ...september,
+      currencies: september.currencies.map((line) =>
+        line.code === "USD"
+          ? {
+              ...line,
+              past: line.past.map((point) =>
+                point.day === 19
+                  ? {
+                      ...point,
+                      articles: [
+                        {
+                          group: "🏠 ДОМ",
+                          subcategory: "аренда",
+                          icon: "🏠",
+                          amount: -400,
+                          uzs: -4_800_000,
+                          income: false,
+                        },
+                      ],
+                    }
+                  : point,
+              ),
+            }
+          : line,
+      ),
+    };
+    expect(
+      monthArticles(refunded, DEFAULT_VIEW).map(
+        (article) => article.subcategory,
+      ),
+    ).toEqual(["продукты"]);
   });
 });

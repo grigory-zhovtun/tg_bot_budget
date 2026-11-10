@@ -503,8 +503,10 @@ export interface AmountHint {
 export interface Forecast {
   status: "ok" | "no_month_tab";
   month: string;
-  today: string;
+  today: string; // у прошедшего месяца — его последний день
   end: string | null;
+  closed?: boolean; // прошедший месяц: только дни по факту, с 1-го по последний
+  earliest?: string | null; // «YYYY-MM» — первый месяц с операциями
   currencies: ForecastCurrency[];
   total: {
     uzs: ForecastDay[];
@@ -803,7 +805,13 @@ export const api = {
     }),
   undo: () => request<UndoResult>("/expenses/undo", { method: "POST" }),
   dashboard: (read = false) => request<Dashboard>(`/dashboard${fresh(read)}`),
-  forecast: (read = false) => request<Forecast>(`/forecast${fresh(read)}`),
+  // month — «YYYY-MM» прошедшего месяца: его дни по факту; нет — текущий
+  forecast: (read = false, month?: string) =>
+    request<Forecast>(
+      month
+        ? `/forecast?month=${encodeURIComponent(month)}${fresh(read, "&")}`
+        : `/forecast${fresh(read)}`,
+    ),
   addRecord: (input: RecordInput) =>
     request<Forecast>("/calendar", {
       method: "POST",

@@ -67,8 +67,15 @@ import { isTransfer } from "./transfer";
 import TransferScreen from "./TransferScreen";
 
 const CATALOG_FIELDS = ["source", "to_source", "category", "subcategory"];
-// трата и её отмена меняют сводку, прогноз, факт плана и траты из копилок
-const CHANGED_BY_WRITES = ["dashboard", "forecast", "plan:", "savings"];
+// трата и её отмена меняют сводку, прогноз, факт плана и траты из копилок;
+// «forecast:» — прошедшие месяцы календаря: трату можно записать задним числом
+const CHANGED_BY_WRITES = [
+  "dashboard",
+  "forecast",
+  "forecast:",
+  "plan:",
+  "savings",
+];
 const OUTBOX_EVERY_MS = 30_000; // очередь на телефоне — снова, пока не пуста
 
 type Step = "group" | "sub" | "amount" | "transfer";

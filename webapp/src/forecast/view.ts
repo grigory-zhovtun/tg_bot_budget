@@ -50,6 +50,14 @@ export function dayOf(iso: string): number {
   return Number(iso.slice(8, 10));
 }
 
+/**
+ * Номер сегодняшнего дня в месяце ответа. У прошедшего месяца «сегодня» — уже
+ * после его последнего дня: все его дни — по факту.
+ */
+export function todayOf(data: Forecast): number {
+  return data.closed ? dayOf(data.end ?? data.today) + 1 : dayOf(data.today);
+}
+
 /** День месяца сегодняшней даты: «2026-10-15» и 17 → «2026-10-17». */
 export function isoDay(today: string, day: number): string {
   return `${today.slice(0, 7)}-${String(day).padStart(2, "0")}`;
@@ -229,6 +237,57 @@ export function dayArticles(
     spent: all.filter((article) => !article.income).sort(biggest),
     earned: all.filter((article) => article.income).sort(biggest),
   };
+}
+
+export interface MonthTotals {
+  spent: number;
+  earned: number;
+  evening: number; // деньги на вечер последнего дня
+}
+
+/** Итог дней по факту в числах вида; дней нет — null. */
+export function monthTotals(data: Forecast, view: View): MonthTotals | null {
+  const past = viewPast(data, view);
+  const last = past[past.length - 1];
+  if (!last) return null;
+  return {
+    spent: past.reduce((sum, point) => sum + point.spent, 0),
+    earned: past.reduce((sum, point) => sum + point.earned, 0),
+    evening: last.evening,
+  };
+}
+
+/**
+ * Траты месяца по статьям, каждая в своей валюте, от больших (по сумам). Во
+ * «Всего» — только валюты итога, как у статей дня.
+ */
+export function monthArticles(data: Forecast, view: View): ShownArticle[] {
+  const lines = viewCurrencies(data, view).filter(
+    (line) => view.scope !== TOTAL || line.in_total,
+  );
+  const sums = new Map<string, ShownArticle>();
+  for (const line of lines) {
+    for (const point of line.past) {
+      for (const article of point.articles) {
+        if (article.income) continue;
+        const key = `${line.code}|${article.group}|${article.subcategory}`;
+        const found = sums.get(key);
+        sums.set(
+          key,
+          found
+            ? {
+                ...found,
+                amount: found.amount + article.amount,
+                uzs: found.uzs + article.uzs,
+              }
+            : { ...article, currency: line.code },
+        );
+      }
+    }
+  }
+  return [...sums.values()]
+    .filter((article) => Math.round(article.amount * 100) !== 0)
+    .sort((a, b) => b.uzs - a.uzs);
 }
 
 /** «120 000 сум», «$5»; возврат — «+50 000 сум возврат». */

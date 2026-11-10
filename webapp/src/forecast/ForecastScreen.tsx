@@ -1,11 +1,14 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { Api, Bootstrap, CalendarRecord, Forecast } from "../api";
-import { monthName } from "../plan/months";
-import { useResource, useStore } from "../store";
+import { deviceDay } from "../format";
+import { prevMonth } from "../plan/months";
+import { useCached, useResource, useStore, type Store } from "../store";
 import DayCard from "./DayCard";
 import ForecastChart from "./ForecastChart";
 import LaterRecords from "./LaterRecords";
 import MonthGrid from "./MonthGrid";
+import MonthNav from "./MonthNav";
+import MonthSummary from "./MonthSummary";
 import RecordSheet from "./RecordSheet";
 import {
   TOTAL,
@@ -25,6 +28,11 @@ import {
   warnings,
   type View,
 } from "./view";
+
+/** Ключ кэша: текущий месяц — «forecast», прошедший — «forecast:2026-09». */
+function cacheKey(month: string | null): string {
+  return month === null ? "forecast" : `forecast:${month}`;
+}
 
 function Skeleton() {
   return (
@@ -90,13 +98,40 @@ function Switches({ data, view, onView }: SwitchesProps) {
   );
 }
 
-/** Выбранный день, если он ещё в месяце ответа; иначе сегодня. */
+/** Выбранный день, если он ещё в месяце ответа; иначе сегодня (у прошедшего
+ * месяца «сегодня» ответа — его последний день). */
 function shownDay(data: Forecast, selected: number | null): number {
   const today = dayOf(data.today);
   const end = data.end ? dayOf(data.end) : today;
   return selected !== null && selected >= 1 && selected <= end
     ? selected
     : today;
+}
+
+interface ClosedProps {
+  data: Forecast;
+  view: View;
+  day: number;
+  onView: (view: View) => void;
+  onSelect: (day: number) => void;
+}
+
+/** Прошедший месяц: все дни по факту, карточка дня и итог месяца. */
+function ClosedMonth({ data, view, day, onView, onSelect }: ClosedProps) {
+  return (
+    <>
+      <Switches data={data} view={view} onView={onView} />
+      <MonthGrid
+        data={data}
+        view={view}
+        selected={day}
+        onSelect={onSelect}
+        untitled
+      />
+      <DayCard data={data} view={view} day={day} />
+      <MonthSummary data={data} view={view} />
+    </>
+  );
 }
 
 interface MonthProps {
@@ -133,7 +168,13 @@ function Month({
           {text}
         </p>
       ))}
-      <MonthGrid data={data} view={view} selected={day} onSelect={onSelect} />
+      <MonthGrid
+        data={data}
+        view={view}
+        selected={day}
+        onSelect={onSelect}
+        untitled
+      />
       <DayCard
         data={data}
         view={view}
@@ -208,33 +249,63 @@ interface Editing {
   day: number;
 }
 
-interface Props {
+interface ScreenProps {
+  store: Store; // кэш экрана — один на все его месяцы
   api: Api;
   boot: Bootstrap | null; // справочник для окна записи; нет — записи только смотреть
+  month: string | null; // «YYYY-MM» прошедшего месяца; null — текущий
+  nav: ReactNode; // стрелки листания с названием месяца
+  view: View;
+  onView: (view: View) => void;
+  onEarliest: (month: string) => void;
 }
 
-export default function ForecastScreen({ api, boot }: Props) {
-  const store = useStore();
-  const load = useCallback((fresh: boolean) => api.forecast(fresh), [api]);
+/** Один месяц календаря: текущий — прогноз и записи, прошедший — по факту. */
+function MonthScreen({
+  store,
+  api,
+  boot,
+  month,
+  nav,
+  view: chosen,
+  onView,
+  onEarliest,
+}: ScreenProps) {
+  const load = useCallback(
+    (fresh: boolean) =>
+      month === null ? api.forecast(fresh) : api.forecast(fresh, month),
+    [api, month],
+  );
+  const key = cacheKey(month);
   const { data, loading, error, reload } = useResource<Forecast>(
     store,
-    "forecast",
+    key,
     load,
     { failure: "Не получилось загрузить прогноз" },
   );
-  const [chosen, setChosen] = useState<View>(storedView);
   const [selected, setSelected] = useState<number | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
   const view = data ? fitView(chosen, data) : chosen;
+  const earliest = data?.earliest ?? null;
+
+  useEffect(() => {
+    if (earliest) onEarliest(earliest);
+  }, [earliest, onEarliest]);
+
+  // месяц перед открытым — заранее: листание назад без ожидания
+  const shown = data?.status === "ok" ? data.today.slice(0, 7) : null;
+  useEffect(() => {
+    if (!shown || !earliest || shown <= earliest) return;
+    const before = prevMonth(shown);
+    void store
+      .ensure(cacheKey(before), (fresh) => api.forecast(fresh, before))
+      .catch(() => undefined);
+  }, [api, store, shown, earliest]);
 
   // «Обновить» читает таблицу заново, а не копию листов на сервере
   const refresh = useCallback(() => {
     reload(true);
   }, [reload]);
-  const changeView = useCallback((next: View) => {
-    setChosen(next);
-    storeView(next);
-  }, []);
   const day = data ? shownDay(data, selected) : 0;
   const saved = useCallback(
     (fresh: Forecast) => {
@@ -255,15 +326,13 @@ export default function ForecastScreen({ api, boot }: Props) {
     },
     [data, day],
   );
+  const closed = data?.status === "ok" && data.closed === true;
+  const open = data?.status === "ok" && !closed;
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold">
-          {data
-            ? `Календарь · ${monthName(data.today.slice(0, 7))}`
-            : "Календарь"}
-        </h1>
+        <h1 className="text-lg font-semibold">Календарь</h1>
         <button
           type="button"
           className="text-link disabled:opacity-50"
@@ -273,6 +342,8 @@ export default function ForecastScreen({ api, boot }: Props) {
           {loading ? "Обновляю…" : "Обновить"}
         </button>
       </div>
+      {/* стрелки — всегда на одном месте, и пока месяц грузится: листать можно дальше */}
+      {nav}
       {loading && !data && <Skeleton />}
       {error && (
         <div className="flex flex-col items-start gap-2" role="alert">
@@ -285,18 +356,27 @@ export default function ForecastScreen({ api, boot }: Props) {
       {data?.status === "no_month_tab" && (
         <p>Нет вкладки месяца — прогноз появится, когда она будет</p>
       )}
-      {data?.status === "ok" && (
+      {data && closed && (
+        <ClosedMonth
+          data={data}
+          view={view}
+          day={day}
+          onView={onView}
+          onSelect={setSelected}
+        />
+      )}
+      {data && open && (
         <Month
           data={data}
           view={view}
           day={day}
-          onView={changeView}
+          onView={onView}
           onSelect={setSelected}
           onAdd={boot ? add : undefined}
           onEdit={boot ? edit : undefined}
         />
       )}
-      {editing && boot && data?.status === "ok" && (
+      {editing && boot && data && open && (
         <RecordSheet
           api={api}
           boot={boot}
@@ -308,5 +388,51 @@ export default function ForecastScreen({ api, boot }: Props) {
         />
       )}
     </div>
+  );
+}
+
+interface Props {
+  api: Api;
+  boot: Bootstrap | null; // справочник для окна записи; нет — записи только смотреть
+}
+
+/**
+ * «Календарь»: текущий месяц и листание назад по прошедшим. Вид («Всего», валюта)
+ * — общий для всех месяцев; выбранный день у каждого месяца свой.
+ */
+export default function ForecastScreen({ api, boot }: Props) {
+  const store = useStore();
+  const now = useCached(store, "forecast").data as Forecast | null;
+  // текущий месяц — по боту (он живёт по Ташкенту); до его ответа — по телефону
+  const current = (now?.today ?? boot?.today ?? deviceDay()).slice(0, 7);
+  const [asked, setAsked] = useState<string | null>(null);
+  const [earliest, setEarliest] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<View>(storedView);
+  const past = asked !== null && asked < current ? asked : null;
+  const changeView = useCallback((next: View) => {
+    setChosen(next);
+    storeView(next);
+  }, []);
+
+  return (
+    <MonthScreen
+      // у каждого месяца свои выбранный день и запрос
+      key={past ?? "current"}
+      store={store}
+      api={api}
+      boot={boot}
+      month={past}
+      nav={
+        <MonthNav
+          month={past ?? current}
+          current={current}
+          earliest={earliest}
+          onMonth={setAsked}
+        />
+      }
+      view={chosen}
+      onView={changeView}
+      onEarliest={setEarliest}
+    />
   );
 }
