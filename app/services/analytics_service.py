@@ -9,6 +9,7 @@ import io
 import logging
 import re
 from collections.abc import Callable, Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, NamedTuple
@@ -890,17 +891,31 @@ class AnalyticsService:
         return SavingsTab(screen, month_savings(frame, today), rates)
 
     def forecast(
-        self, today: date, currencies: Iterable[str], max_age: float = 0.0
+        self,
+        today: date,
+        currencies: Iterable[str],
+        max_age: float = 0.0,
+        month: date | None = None,
     ) -> "MonthForecast | None":
         """Экран «Календарь» Mini App; None — вкладки месяца нет.
 
-        max_age > 0 — годятся копии листов не старше стольких секунд.
+        max_age > 0 — годятся копии листов не старше стольких секунд. month —
+        первый день прошедшего месяца: его дни по факту, без вкладки месяца (ей
+        там делать нечего: ни плана, ни списка) — только fact и курсы.
         """
         from app.services.calendar import read_calendar
         from app.services.day_budget import read_forecast
-        from app.services.forecast import month_forecast
+        from app.services.forecast import closed_month, month_forecast
         from app.services.plan import read_plan
 
+        if month is not None and month < today.replace(day=1):
+            # оба чтения ждут Google, а не процессор — одновременно
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                asked = pool.submit(self.gs_service.get_rates, max_age)
+                rows = self.gs_service.get_values(config.FACT_SHEET_NAME, max_age)
+                rates = asked.result()
+            past = transactions_frame(rows, rates, keep_unknown=True)
+            return closed_month(past, month, rates, currencies)
         sheet = month_title(today)
         sheets = read_month_sheets(self.gs_service, sheet, max_age)
         if sheets.month is None:

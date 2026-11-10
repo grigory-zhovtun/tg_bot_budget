@@ -16,6 +16,7 @@ from app.services.forecast import (
     Dip,
     Evening,
     Event,
+    closed_month,
     currency_forecast,
     month_forecast,
 )
@@ -563,3 +564,69 @@ def test_past_days_in_total_are_every_currency_at_todays_rate() -> None:
     assert third.spent == pytest.approx(300_000 + 10 * 12_000)
     assert found.past_usd[2].spent == pytest.approx(third.spent / 12_000)
     assert third.earned == 0
+
+
+def test_a_closed_month_is_every_day_of_it_by_fact() -> None:
+    rows = [
+        fact_row(date(2026, 8, 20), "🍔 ЕДА", "кафе", 100_000),  # до месяца
+        fact_row(date(2026, 9, 2), "🍔 ЕДА", "кафе", 400_000),
+        fact_row(date(2026, 9, 30), "💰 ДОХОДЫ", "зарплата", 2_000_000),
+        fact_row(date(2026, 10, 3), "🍔 ЕДА", "кафе", 900_000),  # после месяца
+    ]
+    found = closed_month(facts(*rows), date(2026, 9, 1), RATES, ["UZS"])
+    assert found.closed
+    # «сегодня» ответа — последний день месяца: все его дни уже прошли
+    assert (found.today, found.end) == (date(2026, 9, 30), date(2026, 9, 30))
+    line = found.currencies[0]
+    assert [day.day for day in line.past] == list(range(1, 31))
+    evenings = {day.day: (day.evening, day.spent, day.earned) for day in line.past}
+    assert evenings[1] == (9_900_000, 0, 0)  # нач остаток минус августовское кафе
+    assert evenings[2] == (9_500_000, 400_000, 0)
+    assert evenings[30] == (11_500_000, 0, 2_000_000)
+    assert line.past[1].articles[0].subcategory == "кафе"
+    # ни плана, ни темпа, ни событий: месяц закрыт
+    assert (line.now, line.days, line.events, line.records) == (11_500_000, (), (), ())
+    assert (found.total_uzs, found.plan_dip, found.pace_dip) == ((), None, None)
+    assert (found.calendar, dict(found.hints)) == ((), {})
+
+
+def test_a_closed_month_in_total_is_every_currency_at_todays_rate() -> None:
+    rows = [
+        fact_row(date(2026, 9, 1), "💰 ДОХОДЫ", "нач остаток", 1_000, "USD"),
+        fact_row(date(2026, 9, 3), "🍔 ЕДА", "кафе", 10, "USD"),
+        fact_row(date(2026, 9, 3), "🍔 ЕДА", "кафе", 300_000),
+    ]
+    found = closed_month(facts(*rows), date(2026, 9, 1), RATES, ["USD", "UZS"])
+    assert [line.code for line in found.currencies] == ["UZS", "USD"]
+    assert found.counted == {"UZS", "USD"}
+    assert [day.day for day in found.past_uzs] == list(range(1, 31))
+    third = found.past_uzs[2]
+    assert third.evening == pytest.approx(9_700_000 + 990 * 12_000)
+    assert third.spent == pytest.approx(300_000 + 10 * 12_000)
+    assert found.past_usd[2].evening == pytest.approx(third.evening / 12_000)
+    assert dict(found.rates) == {"USD": 12_000.0, "RUB": 150.0}
+
+
+def test_a_closed_month_without_a_dollar_rate_has_no_total_in_dollars() -> None:
+    rates = Rates({"UZS": 1.0})
+    data = transactions_frame([FACT_HEADER, OPENING], rates)
+    found = closed_month(data, date(2026, 9, 1), rates, ["UZS"])
+    assert found.past_usd == ()
+    assert len(found.past_uzs) == 30
+
+
+def test_february_of_a_leap_year_has_29_days() -> None:
+    found = closed_month(facts(), date(2028, 2, 1), RATES, ["UZS"])
+    assert [day.day for day in found.currencies[0].past][-1] == 29
+
+
+def test_the_earliest_month_is_the_month_of_the_first_row() -> None:
+    late = fact_row(date(2026, 10, 3), "🍔 ЕДА", "кафе", 900_000)
+    assert closed_month(facts(late), date(2026, 9, 1), RATES, ["UZS"]).earliest == date(
+        2026, 9, 1
+    )
+    assert month_forecast(facts(late), (), (), TODAY, RATES, ["UZS"]).earliest == date(
+        2026, 9, 1
+    )
+    empty = transactions_frame([FACT_HEADER], RATES)
+    assert closed_month(empty, date(2026, 9, 1), RATES, ["UZS"]).earliest is None

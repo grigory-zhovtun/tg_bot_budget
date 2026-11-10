@@ -458,12 +458,15 @@ class HintOut(ApiModel):
 
 
 class ForecastOut(ApiModel):
-    """Прогноз до конца месяца по валютам карт и всего; без вкладки — только статус."""
+    """Прогноз до конца месяца по валютам карт и всего; без вкладки — только статус.
+    Прошедший месяц (?month=) — closed: дни по факту, без плана, темпа и событий."""
 
     status: Literal["ok", "no_month_tab"]
     month: str
-    today: date
+    today: date  # у прошедшего месяца — его последний день
     end: date | None = None
+    closed: bool = False  # прошедший месяц: только дни по факту
+    earliest: str | None = None  # «YYYY-MM» — первый месяц с операциями
     currencies: list[ForecastCurrencyOut] = []
     total: ForecastTotalOut | None = None
     rates: dict[str, float] = {}  # к суму, без UZS
