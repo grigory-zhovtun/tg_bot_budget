@@ -120,35 +120,3 @@ export function Table({ rows, align, head, label }: TableProps) {
     </table>
   );
 }
-
-export interface Item {
-  key: string;
-  title: ReactNode;
-  left: ReactNode;
-  right: ReactNode;
-}
-
-/** Пункты в две строки: название во всю ширину, под ним слева день, справа сумма. */
-export function Items({ items, label }: { items: Item[]; label: string }) {
-  return (
-    <ul
-      aria-label={label}
-      className="flex flex-col overflow-hidden rounded-xl border border-outline text-line"
-    >
-      {items.map((item) => (
-        <li
-          key={item.key}
-          className="flex flex-col gap-0.5 border-b border-outline px-3 py-2 last:border-b-0 even:bg-stripe"
-        >
-          <p className="font-extrabold">{item.title}</p>
-          <div className="flex items-baseline justify-between gap-3">
-            <span>{item.left}</span>
-            <span className="font-extrabold whitespace-nowrap tabular-nums">
-              {item.right}
-            </span>
-          </div>
-        </li>
-      ))}
-    </ul>
-  );
-}

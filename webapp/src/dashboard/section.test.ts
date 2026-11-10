@@ -11,8 +11,14 @@ describe("the chosen section of «Сводка»", () => {
   });
 
   it("reads the stored section", () => {
+    localStorage.setItem(SECTION_KEY, "spending");
+    expect(storedSection()).toBe("spending");
+  });
+
+  it("opens «Сегодня» when the phone remembers «Впереди»", () => {
+    // раздела «Впереди» больше нет
     localStorage.setItem(SECTION_KEY, "ahead");
-    expect(storedSection()).toBe("ahead");
+    expect(storedSection()).toBe("today");
   });
 
   it("opens «Сегодня» when the phone remembers «Накопления»", () => {
@@ -30,8 +36,8 @@ describe("the chosen section of «Сводка»", () => {
   );
 
   it("keeps the choice for the next launch", () => {
-    storeSection("ahead");
-    expect(localStorage.getItem(SECTION_KEY)).toBe("ahead");
+    storeSection("spending");
+    expect(localStorage.getItem(SECTION_KEY)).toBe("spending");
   });
 
   it("does without the phone memory when the browser closes it", () => {

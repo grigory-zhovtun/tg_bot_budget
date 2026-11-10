@@ -19,10 +19,9 @@ describe("SectionSwitch", () => {
     expect(radios.map((radio) => radio.textContent)).toEqual([
       "Сегодня",
       "Траты",
-      "Впереди",
     ]);
     // все разделы — в одну строку
-    expect(group.className).toContain("grid-cols-3");
+    expect(group.className).toContain("grid-cols-2");
     const today = screen.getByRole("radio", { name: "Сегодня" });
     expect(today.getAttribute("aria-checked")).toBe("true");
     // выбор виден не только цветом: фон и жирность
@@ -84,7 +83,7 @@ describe("SectionSwitch", () => {
         onSection={onSection}
       />,
     );
-    await user.click(screen.getByRole("radio", { name: "Впереди" }));
-    expect(onSection).toHaveBeenCalledWith("ahead");
+    await user.click(screen.getByRole("radio", { name: "Траты" }));
+    expect(onSection).toHaveBeenCalledWith("spending");
   });
 });

@@ -22,8 +22,8 @@ type Tab = "entry" | "dashboard" | "plan" | "forecast";
 const TABS: { name: Tab; title: string }[] = [
   { name: "entry", title: "Ввод" },
   { name: "dashboard", title: "Сводка" },
-  { name: "plan", title: "План" },
   { name: "forecast", title: "Календарь" },
+  { name: "plan", title: "План" },
 ];
 
 function errorText(reason: unknown): string {
