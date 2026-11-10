@@ -113,8 +113,18 @@ describe("theme colors", () => {
     const badges = [
       ...CSS.matchAll(/--color-chip-([a-z]+):\s*(#[0-9a-f]{6})/g),
     ].map((m) => [m[1] ?? "", m[2] ?? ""] as const);
-    expect(badges.map(([name]) => name)).toEqual(["bad", "mid", "good"]);
+    expect(badges.map(([name]) => name)).toEqual(["bad", "mid", "good", "off"]);
     for (const [name, color] of badges) {
+      expect(contrast("#ffffff", color), name).toBeGreaterThanOrEqual(6);
+    }
+  });
+
+  it("keeps the white sign on the round card icons above 6:1", () => {
+    const rounds = [
+      ...CSS.matchAll(/--color-round-([a-z]+):\s*(#[0-9a-f]{6})/g),
+    ].map((m) => [m[1] ?? "", m[2] ?? ""] as const);
+    expect(rounds.map(([name]) => name)).toEqual(["sums", "dollars", "rubles"]);
+    for (const [name, color] of rounds) {
       expect(contrast("#ffffff", color), name).toBeGreaterThanOrEqual(6);
     }
   });

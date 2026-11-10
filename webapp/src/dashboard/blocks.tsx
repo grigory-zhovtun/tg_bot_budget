@@ -18,17 +18,32 @@ export function Card({ label, children }: Children & { label?: string }) {
 }
 
 const BIG_FITS = 13; // «9 500 000 сум» — ещё 40 px; длиннее — 34 px
+const HERO_FITS = 11; // «412 000 сум» — 52 px по центру экрана
 
 /** Главная цифра — 40 px; длинная (восьмизначная сумма с «сум») — 34 px, чтобы
- * осталась в одной строке. */
-export function Big({ children }: Children) {
-  const long = typeof children === "string" && children.length > BIG_FITS;
+ * осталась в одной строке; hero — по центру экрана: короткая — 52 px. */
+export function Big({ children, hero = false }: Children & { hero?: boolean }) {
+  const length = typeof children === "string" ? children.length : 0;
+  let size = "text-big";
+  if (length > BIG_FITS) size = "text-big-long";
+  else if (hero && length <= HERO_FITS) size = "text-big-hero";
+  return <p className={`${size} font-black tabular-nums`}>{children}</p>;
+}
+
+/** Заголовок блока «Сводки» — цветом ссылки: блоки видны при прокрутке. */
+export function Title({ children }: Children) {
+  return <h2 className="text-fact font-extrabold text-link">{children}</h2>;
+}
+
+/** Круглый значок строки: белый знак на цветном круге. */
+export function Round({ tone, children }: Children & { tone: string }) {
   return (
-    <p
-      className={`${long ? "text-big-long" : "text-big"} font-black tabular-nums`}
+    <span
+      aria-hidden="true"
+      className={`grid size-11 shrink-0 place-items-center rounded-full text-sm font-black text-white ${tone}`}
     >
       {children}
-    </p>
+    </span>
   );
 }
 

@@ -63,7 +63,7 @@ import { planIndex } from "./plan";
 import { retryable, sendExpense, sleep, type Wait } from "./send";
 import SourceChips from "./SourceChips";
 import { GroupTiles, SubTiles } from "./Tiles";
-import { isTransfer } from "./transfer";
+import { TRANSFERS_GROUP, TRANSFER_SUB, isTransfer } from "./transfer";
 import TransferScreen from "./TransferScreen";
 
 const CATALOG_FIELDS = ["source", "to_source", "category", "subcategory"];
@@ -91,6 +91,32 @@ interface Props {
   boot: Bootstrap;
   onCatalogChanged: () => void;
   wait?: Wait; // пауза перед повтором; тесты не ждут
+  start?: EntryStart | null; // быстрое действие «Сводки»: сразу доход или перевод
+}
+
+/** С чего открыть «Ввод» по быстрому действию «Сводки». */
+export type EntryStart = "income" | "transfer";
+
+interface Opening {
+  step: Step;
+  group: Group | null;
+  sub: Subcategory | null;
+}
+
+/** Первый шаг: доход — подкатегории доходов, перевод — сразу «Откуда → Куда»;
+ * нет такой группы в справочнике — обычный выбор группы. */
+function opening(boot: Bootstrap, start: EntryStart | null): Opening {
+  const first: Opening = { step: "group", group: null, sub: null };
+  if (start === "income") {
+    const group = boot.groups.find((item) => item.name === INCOME_GROUP);
+    return group ? { step: "sub", group, sub: null } : first;
+  }
+  if (start === "transfer") {
+    const group = boot.groups.find((item) => item.name === TRANSFERS_GROUP);
+    const sub = group?.subcategories.find((item) => item.name === TRANSFER_SUB);
+    return group && sub ? { step: "transfer", group, sub } : first;
+  }
+  return first;
 }
 
 /** Очередь на телефоне: что не ушло, с отказами сервера и «Удалить» в два нажатия. */
@@ -198,19 +224,24 @@ export default function EntryScreen({
   boot,
   onCatalogChanged,
   wait = sleep,
+  start = null,
 }: Props) {
   const owner = boot.user.id;
   const fallbackSource = boot.default_source ?? boot.sources[0]?.name ?? "";
   // карта, выбранная на экране; null — по умолчанию из справочника: он мог прийти
   // из памяти телефона, а свежий — назвать другую карту
   const [picked, setPicked] = useState<string | null>(null);
-  const [step, setStep] = useState<Step>("group");
-  const [group, setGroup] = useState<Group | null>(null);
-  const [sub, setSub] = useState<Subcategory | null>(null);
+  // быстрое действие «Сводки» задаёт только первый шаг: дальше — как обычно
+  const [first] = useState(() => opening(boot, start));
+  const [step, setStep] = useState<Step>(first.step);
+  const [group, setGroup] = useState<Group | null>(first.group);
+  const [sub, setSub] = useState<Subcategory | null>(first.sub);
   const [amount, setAmount] = useState("");
   const [comment, setComment] = useState("");
   const [day, setDay] = useState<string | null>(null); // null — сегодня по боту
-  const [entryId, setEntryId] = useState("");
+  const [entryId, setEntryId] = useState(() =>
+    first.step === "transfer" ? crypto.randomUUID() : "",
+  );
   const [sending, setSending] = useState<Sign | null>(null); // чей знак ждёт ответа
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<Done | null>(null);

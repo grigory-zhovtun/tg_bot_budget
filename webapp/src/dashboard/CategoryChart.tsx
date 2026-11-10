@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Category, Untracked } from "../api";
 import { longDay, money } from "../format";
-import { Card, Chip, Fact, Line, Table, Warn } from "./blocks";
+import { Card, Chip, Fact, Line, Table, Title, Warn } from "./blocks";
 import { STATUS_COLOR, statusOf } from "./status";
 
 /** Место на шкале, до десятой процента: «58.3%». */
@@ -108,11 +108,22 @@ interface Props {
   categories: Category[]; // от больших трат к меньшим
   untracked: Untracked[];
   today: string;
+  // раскрытая группа — снаружи, когда её открывает ещё и карта трат; нет — своя
+  open?: string | null;
+  onOpen?: (group: string | null) => void;
 }
 
 /** План-факт месяца по категориям: траты и план групп на одной шкале, касание — подкатегории. */
-export default function CategoryChart({ categories, untracked, today }: Props) {
-  const [open, setOpen] = useState<string | null>(null);
+export default function CategoryChart({
+  categories,
+  untracked,
+  today,
+  open: outer,
+  onOpen,
+}: Props) {
+  const [own, setOwn] = useState<string | null>(null);
+  const open = outer === undefined ? own : outer;
+  const setOpen = onOpen ?? setOwn;
   const fact = categories.reduce((sum, group) => sum + group.fact, 0);
   const plan = categories.reduce((sum, group) => sum + group.plan, 0);
   const scale = longest(categories);
@@ -121,7 +132,7 @@ export default function CategoryChart({ categories, untracked, today }: Props) {
       className="flex flex-col gap-3"
       aria-label="План-факт по категориям"
     >
-      <h2 className="text-fact font-extrabold">План-факт по категориям</h2>
+      <Title>План-факт по категориям</Title>
       {/* единственное «потрачено» вкладки: все траты месяца против его плана */}
       <Card>
         <Fact>{`Потрачено ${money(fact)} из${NBSP}${money(plan)}`}</Fact>
@@ -131,7 +142,11 @@ export default function CategoryChart({ categories, untracked, today }: Props) {
         {categories.map((group) => {
           const line = amounts(group.plan, group.fact);
           return (
-            <li key={group.name} className="flex flex-col gap-1.5">
+            <li
+              key={group.name}
+              data-group={group.name}
+              className="flex scroll-mt-4 flex-col gap-1.5"
+            >
               <button
                 type="button"
                 aria-expanded={open === group.name}

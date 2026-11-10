@@ -1,9 +1,13 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type Api, type Dashboard } from "./api";
 import App from "./App";
-import { dashboardFixture, planFixture } from "./mocks/fixtures";
+import {
+  bootstrapFixture,
+  dashboardFixture,
+  planFixture,
+} from "./mocks/fixtures";
 import { CACHE_KEY } from "./store";
 import { editRow, emptyDraft } from "./plan/draft";
 import { fakeApi } from "./test/fakeApi";
@@ -273,5 +277,111 @@ describe("App", () => {
     // и на экране — не цифры с прошлого раза
     expect(screen.queryByText("300 000")).toBeNull();
     vi.useRealTimers();
+  });
+
+  describe("quick actions of the summary", () => {
+    const groups = [
+      ...bootstrapFixture.groups,
+      {
+        name: "💳 СЧЕТА",
+        emoji: "💳",
+        title: "СЧЕТА",
+        subcategories: [{ name: "переводы", icon: "🔄" }],
+      },
+      {
+        name: "💰 ДОХОДЫ",
+        emoji: "💰",
+        title: "ДОХОДЫ",
+        subcategories: [{ name: "зарплата", icon: "💵" }],
+      },
+    ];
+    const full = () =>
+      fakeApi({
+        bootstrap: vi
+          .fn<Api["bootstrap"]>()
+          .mockResolvedValue({ ...bootstrapFixture, groups }),
+      });
+
+    async function openSummary(user: ReturnType<typeof userEvent.setup>) {
+      await screen.findByRole("radio", { name: "VISA 9090 UZS" });
+      await user.click(screen.getByRole("tab", { name: "Сводка" }));
+      return screen.findByRole("group", { name: "Быстрые действия" });
+    }
+
+    it("offers only what the catalog can write", async () => {
+      const user = userEvent.setup();
+      render(<App api={fakeApi()} />);
+      const row = await openSummary(user);
+      // в справочнике нет ни доходов, ни счетов
+      expect(
+        Array.from(row.querySelectorAll("button")).map(
+          (button) => button.textContent,
+        ),
+      ).toEqual(["Трата", "Отложить"]);
+    });
+
+    it("«Трата» opens the entry on the choice of a group", async () => {
+      const user = userEvent.setup();
+      render(<App api={full()} />);
+      const row = await openSummary(user);
+      await user.click(within(row).getByRole("button", { name: "Трата" }));
+      expect(
+        screen.getByRole("tab", { name: "Ввод" }).getAttribute("aria-selected"),
+      ).toBe("true");
+      expect(
+        await screen.findByRole("button", { name: "ДОХОДЫ" }),
+      ).toBeTruthy();
+    });
+
+    it("«Доход» opens the entry on the incomes", async () => {
+      const user = userEvent.setup();
+      render(<App api={full()} />);
+      const row = await openSummary(user);
+      await user.click(within(row).getByRole("button", { name: "Доход" }));
+      expect(
+        await screen.findByRole("button", { name: "зарплата" }),
+      ).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "ЕДА" })).toBeNull();
+    });
+
+    it("«Перевод» opens «Откуда → Куда» at once", async () => {
+      const user = userEvent.setup();
+      render(<App api={full()} />);
+      const row = await openSummary(user);
+      await user.click(within(row).getByRole("button", { name: "Перевод" }));
+      expect(
+        await screen.findByRole("button", { name: /^Откуда/ }),
+      ).toBeTruthy();
+    });
+
+    it("the entry tab itself still opens on the choice of a group", async () => {
+      const user = userEvent.setup();
+      render(<App api={full()} />);
+      const row = await openSummary(user);
+      await user.click(within(row).getByRole("button", { name: "Доход" }));
+      await screen.findByRole("button", { name: "зарплата" });
+      await user.click(screen.getByRole("tab", { name: "Сводка" }));
+      await user.click(screen.getByRole("tab", { name: "Ввод" }));
+      expect(await screen.findByRole("button", { name: "ЕДА" })).toBeTruthy();
+    });
+
+    it("«Отложить» opens «Накопления» with the «Отложил» window", async () => {
+      const user = userEvent.setup();
+      render(<App api={full()} />);
+      const row = await openSummary(user);
+      await user.click(within(row).getByRole("button", { name: "Отложить" }));
+      expect(
+        await screen.findByRole("dialog", { name: "Отложил" }),
+      ).toBeTruthy();
+      expect(
+        screen.getByRole("tab", { name: /План/ }).getAttribute("aria-selected"),
+      ).toBe("true");
+    });
+  });
+
+  it("keeps the tabs in a bar at the bottom and leaves room for it", () => {
+    render(<App api={fakeApi()} />);
+    expect(screen.getByRole("navigation").className).toContain("bottom-0");
+    expect(screen.getByRole("main").className).toContain("pb-28");
   });
 });

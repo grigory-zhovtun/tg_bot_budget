@@ -1,14 +1,16 @@
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import type { Api, Dashboard, Tomorrow } from "../api";
 import { dayLabel, glued, inCurrency, longDay, money } from "../format";
 import { days, monthName } from "../plan/months";
 import { useResource, useStore } from "../store";
-import { Big, Card, Fact, Good, Line, Table, Warn } from "./blocks";
+import { Big, Card, Fact, Good, Line, Table, Title, Warn } from "./blocks";
 import CardBalances from "./CardBalances";
 import CategoryChart from "./CategoryChart";
 import FrozenCard from "./FrozenCard";
+import QuickActions, { type Action } from "./QuickActions";
 import SectionSwitch from "./SectionSwitch";
 import SpendingChart from "./SpendingChart";
+import SpendingMap from "./SpendingMap";
 import { paceVerdict } from "./spending";
 import { SECTIONS, storeSection, storedSection, type Section } from "./section";
 
@@ -131,13 +133,14 @@ function SalaryDay({
 
 /** Сколько можно сегодня — по деньгам до зарплаты, как утром в боте: главная цифра,
  * лимит и траты дня, из чего лимит и план месяца одной строкой, как у графика. */
-function Today({ data }: { data: Dashboard }) {
+function Today({ data, actions }: { data: Dashboard; actions: ReactNode }) {
   if (
     data.limit === null ||
     data.left_today === null ||
     data.spent_today === null
   ) {
-    return null;
+    // лимита нет — действия всё равно под рукой
+    return <>{actions}</>;
   }
   const until = glued(data.until ?? "до конца месяца");
   const pace = paceVerdict(data.spending, data.today, data.plan_per_day);
@@ -149,7 +152,12 @@ function Today({ data }: { data: Dashboard }) {
     </p>
   );
   if (data.tomorrow) {
-    return <SalaryDay data={data} tomorrow={data.tomorrow} plan={plan} />;
+    return (
+      <>
+        <SalaryDay data={data} tomorrow={data.tomorrow} plan={plan} />
+        {actions}
+      </>
+    );
   }
   const morning: LimitMoney = {
     sums: data.sums,
@@ -166,29 +174,51 @@ function Today({ data }: { data: Dashboard }) {
     // как /today: сумов до зарплаты не хватает даже на платежи — лимита на день нет
     const missing = -data.limit * (data.days_left ?? 1);
     return (
-      <Card label="Можно сегодня">
-        <p className="text-fact font-extrabold text-danger">⚠️ Лимита нет</p>
-        <Line>{`${until} не хватает ${money(missing)}`}</Line>
+      <>
+        <Card label="Можно сегодня">
+          <p className="text-fact font-extrabold text-danger">⚠️ Лимита нет</p>
+          <Line>{`${until} не хватает ${money(missing)}`}</Line>
+          {source}
+          <Line>{`потрачено сегодня ${money(data.spent_today)}`}</Line>
+          {plan}
+        </Card>
+        {actions}
+      </>
+    );
+  }
+  const over = data.left_today < 0;
+  const share = Math.min(Math.max(data.spent_today / data.limit, 0), 1);
+  return (
+    <section aria-label="Можно сегодня" className="flex flex-col gap-3">
+      {/* главная цифра — по центру, без карточки: с неё начинается экран */}
+      <div className="flex flex-col items-center gap-1 pt-1 text-center">
+        {/* перед «сум» — обычный пробел: при крупном шрифте единица уходит вниз, а не за экран */}
+        <Big hero>{`${money(data.left_today)} сум`}</Big>
+        {over ? (
+          <Warn>сверх лимита дня</Warn>
+        ) : (
+          <Line>можно потратить сегодня</Line>
+        )}
+        {/* сколько лимита дня уже ушло; сверх лимита — вся полоса красная */}
+        <div
+          aria-hidden="true"
+          data-day-bar={over ? "over" : "ok"}
+          className="my-1 h-3 w-full overflow-hidden rounded-full bg-stripe"
+        >
+          <div
+            className={`h-full rounded-full ${over ? "bg-chip-bad" : "bg-warn"}`}
+            style={{ width: `${Math.round((over ? 1 : share) * 100)}%` }}
+          />
+        </div>
+        <Line>{`лимит ${money(data.limit)} в день ${until}`}</Line>
+      </div>
+      {actions}
+      <div className="flex flex-col gap-1 rounded-2xl bg-section p-4">
         {source}
         <Line>{`потрачено сегодня ${money(data.spent_today)}`}</Line>
         {plan}
-      </Card>
-    );
-  }
-  return (
-    <Card label="Можно сегодня">
-      {/* перед «сум» — обычный пробел: при крупном шрифте единица уходит вниз, а не за экран */}
-      <Big>{`${money(data.left_today)} сум`}</Big>
-      {data.left_today < 0 ? (
-        <Warn>сверх лимита дня</Warn>
-      ) : (
-        <Line>можно потратить сегодня</Line>
-      )}
-      <Line>{`лимит ${money(data.limit)} в день ${until}`}</Line>
-      {source}
-      <Line>{`потрачено сегодня ${money(data.spent_today)}`}</Line>
-      {plan}
-    </Card>
+      </div>
+    </section>
   );
 }
 
@@ -252,20 +282,77 @@ function Sums({ data }: { data: Dashboard }) {
   );
 }
 
+/**
+ * «Траты»: карта трат, план-факт по категориям и траты по дням. Плитка карты
+ * раскрывает свою группу в план-факте и подводит к ней экран.
+ */
+function Spending({ data }: { data: Dashboard }) {
+  const [open, setOpen] = useState<string | null>(null);
+  const chart = useRef<HTMLDivElement>(null);
+  const pick = useCallback((group: string) => {
+    setOpen(group);
+    // после перерисовки: подкатегории уже раскрыты
+    requestAnimationFrame(() => {
+      const rows = chart.current?.querySelectorAll<HTMLElement>("[data-group]");
+      const row = [...(rows ?? [])].find(
+        (item) => item.dataset.group === group,
+      );
+      row?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    });
+  }, []);
+  return (
+    <>
+      {data.categories.length > 0 && (
+        <>
+          <SpendingMap categories={data.categories} onPick={pick} />
+          <div ref={chart}>
+            <CategoryChart
+              categories={data.categories}
+              untracked={data.untracked}
+              today={data.today}
+              open={open}
+              onOpen={setOpen}
+            />
+          </div>
+        </>
+      )}
+      {data.spending.length > 0 && (
+        <section className="flex flex-col gap-3">
+          <Title>Траты по дням</Title>
+          <SpendingChart
+            spending={data.spending}
+            today={data.today}
+            // в день зарплаты «можно X в день» — с завтра, как в «Сегодня»
+            limit={data.tomorrow?.limit ?? data.limit}
+            planPerDay={data.plan_per_day}
+          />
+        </section>
+      )}
+    </>
+  );
+}
+
 interface SectionProps {
   data: Dashboard;
   section: Section;
+  actions: Action[];
+  onAction?: (action: Action) => void;
 }
 
 /** Карточки выбранного раздела «Сводки». */
-function SectionCards({ data, section }: SectionProps) {
+function SectionCards({ data, section, actions, onAction }: SectionProps) {
   switch (section) {
     case "today":
       return (
         <>
           {/* лимита нет именно здесь — здесь и объясняем */}
           {data.status === "no_forecast" && <NoForecastNote />}
-          <Today data={data} />
+          <Today
+            data={data}
+            actions={
+              onAction && <QuickActions actions={actions} onAction={onAction} />
+            }
+          />
           {data.frozen && (
             <FrozenCard frozen={data.frozen} today={data.today} />
           )}
@@ -276,39 +363,21 @@ function SectionCards({ data, section }: SectionProps) {
         </>
       );
     case "spending":
-      return (
-        <>
-          {data.categories.length > 0 && (
-            <CategoryChart
-              categories={data.categories}
-              untracked={data.untracked}
-              today={data.today}
-            />
-          )}
-          {data.spending.length > 0 && (
-            <section className="flex flex-col gap-3">
-              <h2 className="text-fact font-extrabold">Траты по дням</h2>
-              <SpendingChart
-                spending={data.spending}
-                today={data.today}
-                // в день зарплаты «можно X в день» — с завтра, как в «Сегодня»
-                limit={data.tomorrow?.limit ?? data.limit}
-                planPerDay={data.plan_per_day}
-              />
-            </section>
-          )}
-        </>
-      );
+      return <Spending data={data} />;
   }
 }
 
-interface ContentProps {
-  data: Dashboard;
-  section: Section;
+interface ContentProps extends SectionProps {
   onSection: (section: Section) => void;
 }
 
-function Content({ data, section, onSection }: ContentProps) {
+function Content({
+  data,
+  section,
+  onSection,
+  actions,
+  onAction,
+}: ContentProps) {
   if (data.status === "no_month_tab") {
     // в таком ответе нет данных ни для одной вкладки
     return (
@@ -325,12 +394,29 @@ function Content({ data, section, onSection }: ContentProps) {
         section={section}
         onSection={onSection}
       />
-      <SectionCards data={data} section={section} />
+      <SectionCards
+        data={data}
+        section={section}
+        actions={actions}
+        onAction={onAction}
+      />
     </>
   );
 }
 
-export default function DashboardScreen({ api }: { api: Api }) {
+interface Props {
+  api: Api;
+  actions?: Action[]; // быстрые действия под главной цифрой — по справочнику
+  onAction?: (action: Action) => void; // нет — экран без них
+}
+
+const NO_ACTIONS: Action[] = [];
+
+export default function DashboardScreen({
+  api,
+  actions = NO_ACTIONS,
+  onAction,
+}: Props) {
   const store = useStore();
   const load = useCallback((fresh: boolean) => api.dashboard(fresh), [api]);
   const { data, loading, error, reload } = useResource<Dashboard>(
@@ -371,7 +457,15 @@ export default function DashboardScreen({ api }: { api: Api }) {
           </button>
         </div>
       )}
-      {data && <Content data={data} section={section} onSection={choose} />}
+      {data && (
+        <Content
+          data={data}
+          section={section}
+          onSection={choose}
+          actions={actions}
+          onAction={onAction}
+        />
+      )}
     </div>
   );
 }

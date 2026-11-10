@@ -382,9 +382,7 @@ describe("DashboardScreen", () => {
       name: "Остатки на картах",
     });
     expect(within(cards).getByText("5 250 000")).toBeTruthy();
-    expect(
-      within(cards).getByText("⚠️ VISA 6666 в банке 2 450 ₽"),
-    ).toBeTruthy();
+    expect(within(cards).getByText("⚠️ в банке 2 450 ₽")).toBeTruthy();
     expect(within(cards).getByText("сверено 01.10")).toBeTruthy();
     expect(within(cards).getByText("Всего ≈ 23 613 075 сум")).toBeTruthy();
     await show(user, "Траты");
@@ -439,7 +437,11 @@ describe("DashboardScreen", () => {
     expect(headings()).toEqual(["Остатки на картах"]);
     await show(user, "Траты");
     // две похожие полосатые диаграммы не стоят рядом: план-факт один, следом — дни
-    expect(headings()).toEqual(["План-факт по категориям", "Траты по дням"]);
+    expect(headings()).toEqual([
+      "Карта трат",
+      "План-факт по категориям",
+      "Траты по дням",
+    ]);
   });
 
   it("switches sections and keeps the choice for the next launch", async () => {
@@ -611,5 +613,116 @@ describe("DashboardScreen", () => {
     expect(dashboard).toHaveBeenCalledWith(true);
     expect(screen.getByRole("button", { name: "Обновляю…" })).toBeTruthy();
     expect(screen.getByRole("region", { name: "Можно сегодня" })).toBeTruthy();
+  });
+
+  it("opens with the main figure in the centre and a bar of the day's limit", async () => {
+    render(<DashboardScreen api={fakeApi()} />);
+    const today = await screen.findByRole("region", { name: "Можно сегодня" });
+    const figure = within(today).getByText("380 000 сум");
+    // короткая сумма — самым крупным размером
+    expect(figure.className).toContain("text-big-hero");
+    expect(figure.parentElement?.className).toContain("text-center");
+    // потрачено 120 000 из лимита 500 000
+    const bar = today.querySelector<HTMLElement>("[data-day-bar]");
+    expect(bar?.dataset.dayBar).toBe("ok");
+    expect(bar?.querySelector<HTMLElement>("div")?.style.width).toBe("24%");
+  });
+
+  it("keeps a long main figure in a size that fits the screen", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      limit: 12_500_000,
+      left_today: 12_380_000,
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    const figure = await screen.findByText("12 380 000 сум");
+    expect(figure.className).toContain("text-big-long");
+    expect(figure.className).not.toContain("text-big-hero");
+  });
+
+  it("fills the whole bar in red when today went over the limit", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      left_today: -20_000,
+      spent_today: 520_000,
+    });
+    render(<DashboardScreen api={fakeApi({ dashboard })} />);
+    const today = await screen.findByRole("region", { name: "Можно сегодня" });
+    const bar = today.querySelector<HTMLElement>("[data-day-bar]");
+    expect(bar?.dataset.dayBar).toBe("over");
+    const fill = bar?.querySelector<HTMLElement>("div");
+    expect(fill?.style.width).toBe("100%");
+    expect(fill?.className).toContain("bg-chip-bad");
+  });
+
+  it("puts the quick actions right under the main figure", async () => {
+    const onAction = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <DashboardScreen
+        api={fakeApi()}
+        actions={["spend", "income", "transfer", "save"]}
+        onAction={onAction}
+      />,
+    );
+    const today = await screen.findByRole("region", { name: "Можно сегодня" });
+    const row = within(today).getByRole("group", { name: "Быстрые действия" });
+    // выше расчёта лимита
+    const source = within(today).getByRole("table", { name: "Откуда лимит" });
+    expect(
+      row.compareDocumentPosition(source) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    await user.click(within(row).getByRole("button", { name: "Перевод" }));
+    expect(onAction).toHaveBeenCalledWith("transfer");
+  });
+
+  it("keeps the quick actions on a day without a limit", async () => {
+    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
+      ...dashboardFixture,
+      status: "no_forecast",
+      limit: null,
+      left_today: null,
+      spent_today: null,
+      balance: null,
+      runway: null,
+    });
+    render(
+      <DashboardScreen
+        api={fakeApi({ dashboard })}
+        actions={["spend", "save"]}
+        onAction={vi.fn()}
+      />,
+    );
+    expect(
+      await screen.findByRole("group", { name: "Быстрые действия" }),
+    ).toBeTruthy();
+  });
+
+  it("has no quick actions when nobody listens to them", async () => {
+    render(<DashboardScreen api={fakeApi()} />);
+    await screen.findByRole("region", { name: "Можно сегодня" });
+    expect(
+      screen.queryByRole("group", { name: "Быстрые действия" }),
+    ).toBeNull();
+  });
+
+  it("opens a group of the plan-fact from its tile on the map", async () => {
+    const user = userEvent.setup();
+    render(<DashboardScreen api={fakeApi()} />);
+    await show(user, "Траты");
+    const map = screen.getByRole("region", { name: "Карта трат" });
+    await user.click(within(map).getByRole("button", { name: /ДОМ/ }));
+    const chart = screen.getByRole("region", {
+      name: "План-факт по категориям",
+    });
+    expect(
+      within(chart)
+        .getByRole("button", { name: /ДОМ/ })
+        .getAttribute("aria-expanded"),
+    ).toBe("true");
+    expect(within(chart).getByText("🛒 продукты")).toBeTruthy();
+    // и закрывается нажатием на саму группу, как раньше
+    await user.click(within(chart).getByRole("button", { name: /ДОМ/ }));
+    expect(within(chart).queryByText("🛒 продукты")).toBeNull();
   });
 });

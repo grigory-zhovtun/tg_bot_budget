@@ -1,5 +1,6 @@
 import {
   act,
+  cleanup,
   fireEvent,
   render,
   screen,
@@ -1288,4 +1289,40 @@ describe("EntryScreen in Telegram", () => {
       );
     },
   );
+
+  describe("opened by a quick action of the summary", () => {
+    function open(start: "income" | "transfer", boot: Bootstrap): void {
+      render(
+        <EntryScreen
+          api={fakeApi()}
+          boot={boot}
+          onCatalogChanged={vi.fn()}
+          wait={noWait}
+          start={start}
+        />,
+      );
+    }
+
+    it("starts on the incomes", () => {
+      open("income", ALL_GROUPS);
+      expect(screen.getByRole("button", { name: "зарплата" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "ЕДА" })).toBeNull();
+    });
+
+    it("starts on «Откуда → Куда» of a transfer", () => {
+      open("transfer", ALL_GROUPS);
+      expect(
+        screen.getByRole("heading", { name: /^💳\sСЧЕТА · 🔄\sпереводы$/ }),
+      ).toBeTruthy();
+      expect(screen.getByRole("button", { name: /^Откуда/ })).toBeTruthy();
+    });
+
+    it("starts on the groups when the catalog has no such group", () => {
+      open("income", bootstrapFixture);
+      expect(screen.getByRole("button", { name: "ЕДА" })).toBeTruthy();
+      cleanup();
+      open("transfer", bootstrapFixture);
+      expect(screen.getByRole("button", { name: "ЕДА" })).toBeTruthy();
+    });
+  });
 });
