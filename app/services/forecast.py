@@ -17,6 +17,10 @@
 Прошедшие дни месяца — по факту: деньги на вечер дня (так же, как «сейчас»), на
 сколько они за день изменились и врозь — траты дня (статьи расходов, возвраты
 вычитаются) и доходы дня; переводы между своими картами — ни то, ни другое.
+
+Прошедший месяц (closed_month) — только такие дни, с 1-го по последний: ни плана,
+ни темпа, ни событий; «Всего» — по сегодняшним курсам таблицы, как и у дней
+текущего месяца.
 """
 
 import calendar
@@ -184,6 +188,8 @@ class MonthForecast:
     rates: Mapping[str, float] = field(default_factory=dict)  # к суму, без UZS
     past_uzs: tuple[PastDay, ...] = ()  # «Всего» по сегодняшним курсам
     past_usd: tuple[PastDay, ...] = ()  # пусто — нет курса доллара
+    closed: bool = False  # прошедший месяц: только факт, today — его последний день
+    earliest: date | None = None  # первый месяц с операциями в fact
 
 
 def below_zero(value: float) -> bool:
@@ -274,6 +280,44 @@ def _past(frame: pd.DataFrame, code: str, today: date) -> tuple[PastDay, ...]:
             )
         )
     return tuple(found)
+
+
+def earliest_month(frame: pd.DataFrame) -> date | None:
+    """Первый день месяца самой ранней операции; None — операций нет."""
+    if frame.empty:
+        return None
+    first: date = min(frame["day"])
+    return first.replace(day=1)
+
+
+def _past_total(
+    rated: Sequence[tuple[CurrencyForecast, float]], days: int, dollar: float | None
+) -> tuple[tuple[PastDay, ...], tuple[PastDay, ...]]:
+    """Дни по факту у «Всего»: валюты с курсом — в сумах и в долларах (нет курса
+    доллара — пусто); статьи остаются у валют."""
+    sums = [[0.0, 0.0, 0.0, 0.0] for _ in range(days)]
+    for line, rate in rated:
+        for index, past in enumerate(line.past):
+            for slot, value in enumerate(
+                (past.evening, past.change, past.spent, past.earned)
+            ):
+                sums[index][slot] += value * rate
+    uzs = tuple(PastDay(index + 1, *values) for index, values in enumerate(sums))
+    usd = (
+        tuple(
+            PastDay(
+                p.day,
+                p.evening / dollar,
+                p.change / dollar,
+                p.spent / dollar,
+                p.earned / dollar,
+            )
+            for p in uzs
+        )
+        if dollar
+        else ()
+    )
+    return uzs, usd
 
 
 def _spent(
@@ -600,28 +644,7 @@ def month_forecast(
         if dollar
         else ()
     )
-    sums = [[0.0, 0.0, 0.0, 0.0] for _ in range(today.day)]
-    for line, rate in rated:
-        for index, past in enumerate(line.past):
-            for slot, value in enumerate(
-                (past.evening, past.change, past.spent, past.earned)
-            ):
-                sums[index][slot] += value * rate
-    past_uzs = tuple(PastDay(index + 1, *values) for index, values in enumerate(sums))
-    past_usd = (
-        tuple(
-            PastDay(
-                p.day,
-                p.evening / dollar,
-                p.change / dollar,
-                p.spent / dollar,
-                p.earned / dollar,
-            )
-            for p in past_uzs
-        )
-        if dollar
-        else ()
-    )
+    past_uzs, past_usd = _past_total(rated, today.day, dollar)
     return MonthForecast(
         today,
         month_end(today),
@@ -636,4 +659,38 @@ def month_forecast(
         {code: rate for code, rate in rates.to_uzs.items() if code != "UZS"},
         past_uzs,
         past_usd,
+        earliest=earliest_month(frame),
+    )
+
+
+def closed_month(
+    frame: pd.DataFrame, month: date, rates: Rates, currencies: Iterable[str]
+) -> MonthForecast:
+    """Прошедший месяц по факту: его дни с 1-го по последний по валютам карт и
+    всего — по сегодняшним курсам таблицы. today и end — его последний день."""
+    last = month_end(month)
+    lines = []
+    for code in currency_order(currencies):
+        past = _past(frame, code, last)
+        lines.append(
+            CurrencyForecast(
+                code, past[-1].evening, 0.0, 0.0, 0.0, (), (), None, None, past=past
+            )
+        )
+    rated = [(line, rate) for line in lines if (rate := rates.to_uzs.get(line.code))]
+    past_uzs, past_usd = _past_total(rated, last.day, rates.to_uzs.get("USD"))
+    return MonthForecast(
+        last,
+        last,
+        tuple(lines),
+        frozenset(line.code for line, _ in rated),
+        (),
+        (),
+        None,
+        None,
+        rates={code: rate for code, rate in rates.to_uzs.items() if code != "UZS"},
+        past_uzs=past_uzs,
+        past_usd=past_usd,
+        closed=True,
+        earliest=earliest_month(frame),
     )

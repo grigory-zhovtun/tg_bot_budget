@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { Big, Chip, Good, Items, Table, Warn } from "./blocks";
+import { Big, Chip, Good, Table, Warn } from "./blocks";
 
 describe("blocks", () => {
   it("starts a warning with a sign and paints it orange", () => {
@@ -62,25 +62,5 @@ describe("blocks", () => {
         .getAllByRole("columnheader")
         .map((cell) => cell.textContent),
     ).toEqual(["копилка", "сумма"]);
-  });
-
-  it("lists items in two lines: the name over the day and the amount", () => {
-    render(
-      <Items
-        label="Впереди"
-        items={[
-          { key: "a", title: "Аванс", left: "15-го", right: "+2 000 000" },
-          { key: "b", title: "Аренда", left: "18-го", right: "−380 $" },
-        ]}
-      />,
-    );
-    const list = screen.getByRole("list", { name: "Впереди" });
-    const [first] = within(list).getAllByRole("listitem");
-    if (!first) throw new Error("no items");
-    expect(within(first).getByText("Аванс")).toBeTruthy();
-    expect(within(first).getByText("15-го")).toBeTruthy();
-    expect(within(first).getByText("+2 000 000").className).toContain(
-      "whitespace-nowrap",
-    );
   });
 });

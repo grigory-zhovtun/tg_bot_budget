@@ -11,6 +11,7 @@ import {
 } from "../api";
 import {
   bootstrapFixture,
+  closedForecast,
   dashboardFixture,
   forecastFixture,
 } from "../mocks/fixtures";
@@ -78,13 +79,13 @@ function show(api: Api = fakeApi()) {
 }
 
 describe("ForecastScreen", () => {
-  it("titles the screen as the month's calendar, in Russian", async () => {
+  it("titles the screen and names the month in Russian by the arrows", async () => {
     show();
     expect(
-      await screen.findByRole("heading", {
-        level: 1,
-        name: "Календарь · октябрь",
-      }),
+      await screen.findByRole("heading", { level: 2, name: "Октябрь" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Календарь" }),
     ).toBeTruthy();
   });
 
@@ -749,5 +750,193 @@ describe("ForecastScreen", () => {
     expect(within(pill(15)).getByText("−120к").className).not.toContain(
       "text-spent",
     );
+  });
+
+  describe("months", () => {
+    const back = () => screen.getByRole("button", { name: "Предыдущий месяц" });
+    const forward = () =>
+      screen.getByRole("button", { name: "Следующий месяц" });
+    const september = (day: number) =>
+      screen.getByRole("button", { name: new RegExp(`^${day} сентября`) });
+
+    it("has nowhere to go forward from the current month", async () => {
+      show();
+      await screen.findByText("Октябрь");
+      expect(forward()).toHaveProperty("disabled", true);
+      expect(back()).toHaveProperty("disabled", false);
+      expect(screen.queryByRole("button", { name: /Вернуться/ })).toBeNull();
+    });
+
+    it("turns back to a past month: every day by fact and the month's total", async () => {
+      const api = fakeApi();
+      const user = userEvent.setup();
+      show(api);
+      await screen.findByText("Октябрь");
+      await user.click(back());
+      expect(
+        await screen.findByRole("heading", { level: 2, name: "Сентябрь" }),
+      ).toBeTruthy();
+      expect(api.forecast).toHaveBeenCalledWith(false, "2026-09");
+      // все 30 дней — по факту, выбран последний
+      await screen.findByRole("region", { name: "Итог месяца" });
+      expect(september(30).getAttribute("aria-pressed")).toBe("true");
+      expect(september(1).getAttribute("aria-label")).toBe(
+        nb("1 сентября: вечером было 29,2 млн сум, потрачено 400 000 сум"),
+      );
+      expect(within(september(5)).getByText("+4,0м")).toBeTruthy();
+      expect(dayCard("Среда, 30 сентября").textContent).toContain("по факту");
+      // прошлое не планируют и не прогнозируют
+      expect(
+        screen.queryByRole("button", { name: /Запланировать/ }),
+      ).toBeNull();
+      expect(screen.queryByText("До конца месяца")).toBeNull();
+      expect(screen.queryByText(/По валютам/)).toBeNull();
+    });
+
+    it("sums the month up: spent, come, left and the articles", async () => {
+      const user = userEvent.setup();
+      show();
+      await screen.findByText("Октябрь");
+      await user.click(back());
+      const total = await screen.findByRole("region", { name: "Итог месяца" });
+      const lines = Array.from(total.querySelectorAll("p")).map((line) =>
+        line.textContent?.replace(/\s/g, " "),
+      );
+      // 30 дней по 400 000 и аренда 400 $ по 12 000
+      expect(lines).toEqual([
+        "потрачено−16 800 000 сум",
+        "пришло+16 000 000 сум",
+        "на конец месяца28 800 000 сум",
+      ]);
+      const articles = within(total).getByRole("list", {
+        name: "Траты месяца по статьям",
+      });
+      expect(
+        within(articles)
+          .getAllByRole("listitem")
+          .map((item) => item.textContent?.replace(/\s/g, " ")),
+      ).toEqual(["🛒продукты12 000 000 сум", "🏠аренда$400"]);
+    });
+
+    it("counts a past month in the chosen currency", async () => {
+      const user = userEvent.setup();
+      show();
+      await screen.findByText("Октябрь");
+      await user.click(screen.getByRole("radio", { name: "USD" }));
+      await user.click(back());
+      const total = await screen.findByRole("region", { name: "Итог месяца" });
+      expect(within(total).getByText("−$400")).toBeTruthy();
+      expect(within(september(18)).getByText("−400")).toBeTruthy();
+      // вид — общий для месяцев
+      expect(
+        screen.getByRole("radio", { name: "USD" }).getAttribute("aria-checked"),
+      ).toBe("true");
+    });
+
+    it("comes back to the current month without asking again", async () => {
+      const api = fakeApi();
+      const user = userEvent.setup();
+      show(api);
+      await screen.findByText("Октябрь");
+      await user.click(back());
+      await screen.findByText("Сентябрь");
+      await user.click(
+        screen.getByRole("button", { name: "Вернуться в октябрь" }),
+      );
+      expect(screen.getByText("Октябрь")).toBeTruthy();
+      expect(pill(15).getAttribute("aria-current")).toBe("date");
+      expect(
+        vi.mocked(api.forecast).mock.calls.filter(([, month]) => !month),
+      ).toHaveLength(1);
+    });
+
+    it("goes forward month by month up to the current one", async () => {
+      const user = userEvent.setup();
+      show();
+      await screen.findByText("Октябрь");
+      await user.click(back());
+      await screen.findByRole("region", { name: "Итог месяца" });
+      await user.click(back());
+      expect(await screen.findByText("Август")).toBeTruthy();
+      // август — первый месяц с операциями
+      await screen.findByRole("region", { name: "Итог месяца" });
+      expect(back()).toHaveProperty("disabled", true);
+      await user.click(forward());
+      expect(screen.getByText("Сентябрь")).toBeTruthy();
+      await user.click(forward());
+      expect(screen.getByText("Октябрь")).toBeTruthy();
+      expect(forward()).toHaveProperty("disabled", true);
+    });
+
+    it("asks the month before the shown one ahead of the arrow", async () => {
+      const api = fakeApi({
+        forecast: vi
+          .fn<Api["forecast"]>()
+          .mockImplementation((_fresh, month) =>
+            Promise.resolve(
+              month
+                ? closedForecast(month)
+                : { ...forecastFixture, earliest: "2026-08" },
+            ),
+          ),
+      });
+      show(api);
+      await screen.findByText("Октябрь");
+      await vi.waitFor(() => {
+        expect(api.forecast).toHaveBeenCalledWith(false, "2026-09");
+      });
+    });
+
+    it("reads a past month anew on «Обновить»", async () => {
+      const api = fakeApi();
+      const user = userEvent.setup();
+      show(api);
+      await screen.findByText("Октябрь");
+      await user.click(back());
+      await screen.findByRole("region", { name: "Итог месяца" });
+      await user.click(screen.getByRole("button", { name: "Обновить" }));
+      expect(api.forecast).toHaveBeenCalledWith(true, "2026-09");
+    });
+
+    it("does not show another month's days under a past month's name", async () => {
+      // сервер без листания отвечает на ?month= текущим месяцем
+      const forecast = vi
+        .fn<Api["forecast"]>()
+        .mockResolvedValue(forecastFixture);
+      const user = userEvent.setup();
+      show(fakeApi({ forecast }));
+      await screen.findByText("Октябрь");
+      await user.click(back());
+      expect((await screen.findByRole("alert")).textContent).toBe(
+        "Этот месяц не открылся — нажмите «Обновить»",
+      );
+      expect(screen.getByText("Сентябрь")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /^15 октября/ })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: /Запланировать/ }),
+      ).toBeNull();
+    });
+
+    it("lets the arrows work while a past month does not load", async () => {
+      const forecast = vi
+        .fn<Api["forecast"]>()
+        .mockImplementation((_fresh, month) =>
+          month
+            ? Promise.reject(
+                new ApiError(503, "sheets_unavailable", "Таблица недоступна"),
+              )
+            : Promise.resolve(forecastFixture),
+        );
+      const user = userEvent.setup();
+      show(fakeApi({ forecast }));
+      await screen.findByText("Октябрь");
+      await user.click(back());
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "Таблица недоступна",
+      );
+      expect(screen.getByText("Сентябрь")).toBeTruthy();
+      await user.click(forward());
+      expect(pill(15)).toBeTruthy();
+    });
   });
 });

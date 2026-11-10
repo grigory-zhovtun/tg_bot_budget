@@ -3,6 +3,7 @@ import type { Api } from "../api";
 import {
   adviceFixture,
   bootstrapFixture,
+  closedForecast,
   dashboardFixture,
   forecastFixture,
   nextPlanFixture,
@@ -21,7 +22,12 @@ export function fakeApi(overrides: Partial<Api> = {}): Api {
       .fn<Api["undo"]>()
       .mockResolvedValue({ message: "↩️ Удалил из таблицы: строка 4169." }),
     dashboard: vi.fn<Api["dashboard"]>().mockResolvedValue(dashboardFixture),
-    forecast: vi.fn<Api["forecast"]>().mockResolvedValue(forecastFixture),
+    // прошедший месяц — по его номеру, текущий — фикстура
+    forecast: vi
+      .fn<Api["forecast"]>()
+      .mockImplementation((_fresh, month) =>
+        Promise.resolve(month ? closedForecast(month) : forecastFixture),
+      ),
     addRecord: vi.fn<Api["addRecord"]>().mockResolvedValue(forecastFixture),
     updateRecord: vi
       .fn<Api["updateRecord"]>()

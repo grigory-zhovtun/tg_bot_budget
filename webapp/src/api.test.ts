@@ -229,12 +229,16 @@ describe("screens", () => {
     await api.dashboard();
     await api.dashboard(true);
     await api.forecast(true);
+    await api.forecast(false, "2026-09");
+    await api.forecast(true, "2026-09");
     await api.plan("2026-10");
     await api.plan("2026-10", true);
     expect(fetch.mock.calls.map(([url]) => url as string)).toEqual([
       "/api/dashboard",
       "/api/dashboard?fresh=1",
       "/api/forecast?fresh=1",
+      "/api/forecast?month=2026-09",
+      "/api/forecast?month=2026-09&fresh=1",
       "/api/plan?month=2026-10",
       "/api/plan?month=2026-10&fresh=1",
     ]);

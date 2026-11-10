@@ -938,6 +938,8 @@ def forecast_out(
         month=month_title(found.today),
         today=found.today,
         end=found.end,
+        closed=found.closed,
+        earliest=None if found.earliest is None else f"{found.earliest:%Y-%m}",
         currencies=currencies,
         total=ForecastTotalOut(
             uzs=_days_out(found.total_uzs, "UZS"),
@@ -1101,6 +1103,18 @@ def plan_month(text: str | None, today: date) -> date | None:
         return None
     current = today.replace(day=1)
     return first if first in (current, shift_month(current, 1)) else None
+
+
+def calendar_month(text: str | None, today: date) -> date | None:
+    """Месяц «Календаря» из ?month=: «2026-09» → 01.09.2026 — прошедший месяц;
+    нет параметра или текущий месяц — None. Не месяц или месяц впереди — ValueError."""
+    if text is None:
+        return None
+    first = datetime.strptime(text, "%Y-%m").date()
+    current = today.replace(day=1)
+    if first > current:
+        raise ValueError(text)
+    return None if first == current else first
 
 
 def event_out(
@@ -1439,15 +1453,29 @@ def routes(application: Application) -> list[Route]:
         icons: dict[str, str] = application.bot_data.get("icons", {})
         return JSONResponse(dashboard_out(found, today, icons).model_dump(mode="json"))
 
-    async def fresh_forecast(user_id: int, max_age: float = 0.0) -> JSONResponse:
-        """Прогноз ответом: после записи — по таблице заново, экрану — из копии."""
+    async def fresh_forecast(
+        user_id: int, max_age: float = 0.0, month: str | None = None
+    ) -> JSONResponse:
+        """Прогноз ответом: после записи — по таблице заново, экрану — из копии.
+        month — «YYYY-MM» прошедшего месяца: его дни по факту."""
         today = local_today(config.ANALYTICS_TIMEZONE)
+        try:
+            shown = calendar_month(month, today)
+        except ValueError:
+            return error_response(
+                422,
+                "validation",
+                "Проверьте введённые данные",
+                {"month": "Такого месяца в календаре нет"},
+            )
         analytics = application.bot_data["analytics_service"]
         sources: list[str] = application.bot_data.get("sources", [])
         # валюты карт бота; без справочника карт — хотя бы сумы
         codes = [currency_of(source) for source in sources] or ["UZS"]
         try:
-            found = await asyncio.to_thread(analytics.forecast, today, codes, max_age)
+            found = await asyncio.to_thread(
+                analytics.forecast, today, codes, max_age, shown
+            )
         except Exception:
             logger.exception("Forecast failed for user_id=%s", user_id)
             return error_response(503, "sheets_unavailable", SHEETS_DOWN)
@@ -1457,7 +1485,9 @@ def routes(application: Application) -> list[Route]:
 
     async def forecast(request: Request) -> JSONResponse:
         user = current_user(request)
-        return await fresh_forecast(user.id, screen_age(request))
+        return await fresh_forecast(
+            user.id, screen_age(request), request.query_params.get("month")
+        )
 
     async def calendar_body(request: Request) -> CalendarIn | JSONResponse:
         try:

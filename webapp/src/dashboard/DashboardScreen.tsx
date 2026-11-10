@@ -3,7 +3,6 @@ import type { Api, Dashboard, Tomorrow } from "../api";
 import { dayLabel, glued, inCurrency, longDay, money } from "../format";
 import { days, monthName } from "../plan/months";
 import { useResource, useStore } from "../store";
-import Ahead, { NoForecastNote } from "./Ahead";
 import { Big, Card, Fact, Good, Line, Table, Warn } from "./blocks";
 import CardBalances from "./CardBalances";
 import CategoryChart from "./CategoryChart";
@@ -19,6 +18,17 @@ function Skeleton() {
       {[0, 1, 2].map((key) => (
         <div key={key} className="h-20 animate-pulse rounded-2xl bg-section" />
       ))}
+    </div>
+  );
+}
+
+/** Без блока прогноза во вкладке месяца лимит на день не посчитать. */
+function NoForecastNote() {
+  return (
+    <div className="flex flex-col">
+      <Warn>Нет блока прогноза</Warn>
+      <Line>во вкладке месяца</Line>
+      <Line>лимит на день не посчитать</Line>
     </div>
   );
 }
@@ -289,8 +299,6 @@ function SectionCards({ data, section }: SectionProps) {
           )}
         </>
       );
-    case "ahead":
-      return <Ahead data={data} />;
   }
 }
 

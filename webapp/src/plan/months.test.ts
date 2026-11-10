@@ -9,6 +9,7 @@ import {
   monthShort,
   nextMonth,
   plural,
+  prevMonth,
 } from "./months";
 
 describe("month names", () => {
@@ -31,5 +32,10 @@ describe("month names", () => {
     expect(nextMonth("2026-10")).toBe("2026-11");
     expect(nextMonth("2026-12")).toBe("2027-01");
     expect(monthIn("2026-11")).toBe("в ноябре");
+  });
+
+  it("knows the month before, over the new year too", () => {
+    expect(prevMonth("2026-10")).toBe("2026-09");
+    expect(prevMonth("2027-01")).toBe("2026-12");
   });
 });

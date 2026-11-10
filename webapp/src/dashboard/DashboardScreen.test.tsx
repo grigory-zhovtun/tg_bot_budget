@@ -149,15 +149,6 @@ describe("DashboardScreen", () => {
     expect(screen.queryByRole("region", { name: "Можно сегодня" })).toBeNull();
   });
 
-  it("«Впереди» shows the list and the subscriptions", async () => {
-    const user = userEvent.setup();
-    render(<DashboardScreen api={fakeApi()} />);
-    await show(user, "Впереди");
-    // платёж списка — оранжевым, как точки платежей в календаре
-    expect(screen.getByText("−380 $").className).not.toContain("text-payment");
-    expect(screen.getByText("⏳ ждём")).toBeTruthy();
-  });
-
   it("shows when the sums run out and how many dollars to exchange", async () => {
     render(<DashboardScreen api={fakeApi()} />);
     const sums = await screen.findByRole("region", { name: "Сумы" });
@@ -433,12 +424,8 @@ describe("DashboardScreen", () => {
     expect(
       screen.getByRole("region", { name: "План-факт по категориям" }),
     ).toBeTruthy();
-    // список без блока прогноза не прочитать — не «платежей нет»
-    await show(user, "Впереди");
-    expect(screen.getByText("⚠️ Нет блока прогноза")).toBeTruthy();
-    expect(
-      screen.queryByText("До конца месяца платежей и подписок нет"),
-    ).toBeNull();
+    // в «Тратах» объяснять нечего: лимита там нет
+    expect(screen.queryByText("⚠️ Нет блока прогноза")).toBeNull();
   });
 
   it("each section has its own cards", async () => {
@@ -453,26 +440,24 @@ describe("DashboardScreen", () => {
     await show(user, "Траты");
     // две похожие полосатые диаграммы не стоят рядом: план-факт один, следом — дни
     expect(headings()).toEqual(["План-факт по категориям", "Траты по дням"]);
-    await show(user, "Впереди");
-    expect(headings()).toEqual(["Впереди", "Подписки"]);
   });
 
   it("switches sections and keeps the choice for the next launch", async () => {
     const user = userEvent.setup();
     const first = render(<DashboardScreen api={fakeApi()} />);
-    await show(user, "Впереди");
+    await show(user, "Траты");
     expect(
-      await screen.findByRole("heading", { name: "Подписки" }),
+      await screen.findByRole("heading", { name: "Траты по дням" }),
     ).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Можно сегодня" })).toBeNull();
-    expect(localStorage.getItem("dashboard-section")).toBe("ahead");
+    expect(localStorage.getItem("dashboard-section")).toBe("spending");
     first.unmount();
     render(<DashboardScreen api={fakeApi()} />);
-    const ahead = await screen.findByRole("radio", { name: "Впереди" });
-    expect(ahead.getAttribute("aria-checked")).toBe("true");
+    const spending = await screen.findByRole("radio", { name: "Траты" });
+    expect(spending.getAttribute("aria-checked")).toBe("true");
   });
 
-  it("has three sections: «Накопления» moved to «План»", async () => {
+  it("has two sections: «Накопления» moved to «План», «Впереди» is gone", async () => {
     render(<DashboardScreen api={fakeApi()} />);
     const group = await screen.findByRole("radiogroup", {
       name: "Раздел сводки",
@@ -481,7 +466,16 @@ describe("DashboardScreen", () => {
       within(group)
         .getAllByRole("radio")
         .map((radio) => radio.textContent),
-    ).toEqual(["Сегодня", "Траты", "Впереди"]);
+    ).toEqual(["Сегодня", "Траты"]);
+  });
+
+  it("opens «Сегодня» when the phone remembers «Впереди»", async () => {
+    localStorage.setItem("dashboard-section", "ahead");
+    render(<DashboardScreen api={fakeApi()} />);
+    expect(
+      await screen.findByRole("region", { name: "Можно сегодня" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: "Впереди" })).toBeNull();
   });
 
   it("opens «Сегодня» when the phone remembers «Накопления»", async () => {
@@ -523,20 +517,6 @@ describe("DashboardScreen", () => {
     expect(
       screen.getByRole("radio", { name: "Траты" }).getAttribute("aria-checked"),
     ).toBe("true");
-  });
-
-  it("«Впереди» says when nothing is ahead", async () => {
-    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
-      ...dashboardFixture,
-      upcoming: [],
-      subscriptions: [],
-    });
-    const user = userEvent.setup();
-    render(<DashboardScreen api={fakeApi({ dashboard })} />);
-    await show(user, "Впереди");
-    expect(
-      screen.getByText("До конца месяца платежей и подписок нет"),
-    ).toBeTruthy();
   });
 
   it("offers a retry when the sheet does not answer", async () => {
@@ -600,25 +580,6 @@ describe("DashboardScreen", () => {
     expect(screen.queryByText("до плана на конец месяца")).toBeNull();
     await show(user, "Траты");
     expect(screen.getByText("лимита нет")).toBeTruthy(); // в графике вместо «можно»
-  });
-
-  it("marks a row of the list that is late", async () => {
-    const dashboard = vi.fn<Api["dashboard"]>().mockResolvedValue({
-      ...dashboardFixture,
-      upcoming: [
-        {
-          name: "ЗП",
-          day: 5,
-          amount: 10_000_000,
-          currency: "UZS",
-          uzs: 10_000_000,
-        },
-      ],
-    });
-    const user = userEvent.setup();
-    render(<DashboardScreen api={fakeApi({ dashboard })} />);
-    await show(user, "Впереди");
-    expect(screen.getByText("⏳ ЗП")).toBeTruthy();
   });
 
   it("shows this launch's summary at once without asking again", () => {

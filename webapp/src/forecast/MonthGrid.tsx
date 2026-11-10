@@ -5,10 +5,10 @@ import { WEEKDAY_NAMES, cellAmount, dayRecordSum, gridWeeks } from "./records";
 import {
   amount,
   dayEvents,
-  dayOf,
   isoDay,
   pillUnit,
   pillValue,
+  todayOf,
   viewCode,
   viewDays,
   viewPast,
@@ -20,6 +20,7 @@ interface Props {
   view: View;
   selected: number;
   onSelect: (day: number) => void;
+  untitled?: boolean; // название месяца уже стоит у стрелок листания
 }
 
 /** Клетка дня: жирные цифры, рамка 2 px — крупно и контрастно. */
@@ -92,9 +93,16 @@ function PastCell({ iso, point, code, on, onSelect }: PastProps) {
 /**
  * Месяц с 1-го числа: прошедшие дни по факту; сегодня — остаток на вечер по
  * плану и что уже потрачено и пришло; дальше — по плану, записи дня и точки списка.
+ * У прошедшего месяца все дни — по факту.
  */
-export default function MonthGrid({ data, view, selected, onSelect }: Props) {
-  const today = dayOf(data.today);
+export default function MonthGrid({
+  data,
+  view,
+  selected,
+  onSelect,
+  untitled = false,
+}: Props) {
+  const today = todayOf(data);
   const code = viewCode(view);
   const evenings = new Map(
     viewDays(data, view).map((point) => [point.day, point.plan]),
@@ -102,9 +110,11 @@ export default function MonthGrid({ data, view, selected, onSelect }: Props) {
   const past = new Map(viewPast(data, view).map((point) => [point.day, point]));
   return (
     <section className="flex flex-col gap-1">
-      <h2 className="font-semibold">
-        {capital(monthName(data.today.slice(0, 7)))}
-      </h2>
+      {!untitled && (
+        <h2 className="font-semibold">
+          {capital(monthName(data.today.slice(0, 7)))}
+        </h2>
+      )}
       <div
         className="grid grid-cols-7 gap-1 text-center text-[13px] font-bold"
         aria-hidden="true"

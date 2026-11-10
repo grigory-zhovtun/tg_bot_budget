@@ -6,10 +6,10 @@ import {
   articleText,
   dayArticles,
   dayEvents,
-  dayOf,
   dayTitle,
   isoDay,
   signed,
+  todayOf,
   viewCode,
   viewDays,
   viewPast,
@@ -34,7 +34,7 @@ interface ArticlesProps {
  * Статьи дня столбиком: значок и подкатегория, справа сумма в своей валюте.
  * Подкатегория в двух группах за день — с группой, иначе строк не различить.
  */
-function Articles({ label, articles }: ArticlesProps) {
+export function Articles({ label, articles }: ArticlesProps) {
   if (articles.length === 0) return null;
   const seen = articles.map((article) => article.subcategory);
   const twice = new Set(
@@ -161,7 +161,7 @@ function PastCard({ data, view, day }: Pick<Props, "data" | "view" | "day">) {
  * потрачено и пришло по статьям; события и записи.
  */
 export default function DayCard({ data, view, day, onAdd, onEdit }: Props) {
-  const today = dayOf(data.today);
+  const today = todayOf(data);
   if (day < today) {
     return <PastCard data={data} view={view} day={day} />;
   }

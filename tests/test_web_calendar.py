@@ -104,7 +104,13 @@ class CalendarAnalytics:
         self.sheets = sheets
         self.ages: list[float] = []
 
-    def forecast(self, today: date, currencies: Any, max_age: float = 0.0) -> Any:
+    def forecast(
+        self,
+        today: date,
+        currencies: Any,
+        max_age: float = 0.0,
+        month: date | None = None,
+    ) -> Any:
         self.ages.append(max_age)
         records = read_calendar(self.sheets.get_calendar())
         return month_forecast(frame(), (), (), today, RATES, currencies, records)

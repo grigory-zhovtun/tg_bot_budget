@@ -8,7 +8,7 @@ import pytest
 from app import config
 from app.services.analytics_service import AnalyticsService, transactions_frame
 from app.services.day_budget import ForecastItem
-from app.services.forecast import month_forecast
+from app.services.forecast import closed_month, month_forecast
 from app.web import api as web_api
 from tests.test_day_budget import (
     FACT_HEADER,
@@ -34,10 +34,18 @@ class FakeAnalytics:
         self.result, self.error = result, error
         self.currencies: list[str] = []
         self.max_age: float | None = None
+        self.month: date | None = None
 
-    def forecast(self, today: date, currencies: Any, max_age: float = 0.0) -> Any:
+    def forecast(
+        self,
+        today: date,
+        currencies: Any,
+        max_age: float = 0.0,
+        month: date | None = None,
+    ) -> Any:
         self.currencies = list(currencies)
         self.max_age = max_age
+        self.month = month
         if self.error is not None:
             raise self.error
         return self.result
@@ -228,3 +236,72 @@ def test_the_screen_takes_copies_unless_asked_to_refresh() -> None:
     assert forecast_for()[1].max_age == web_api.SCREEN_COPY_AGE == 120
     # «Обновить» и первое открытие за сессию — таблица заново
     assert forecast_for(query="?fresh=1")[1].max_age == 0
+
+
+def test_service_reads_a_past_month_from_the_fact_alone() -> None:
+    spent = fact_row(date(2026, 9, 3), "🍔 ЕДА", "кафе", 400_000)
+    # вкладки месяца нет вовсе: прошедшему месяцу она не нужна
+    sheets = Sheets({"fact": [FACT_HEADER, *OPENING, spent]})
+    found = AnalyticsService(sheets).forecast(
+        date(2026, 10, 2), ["UZS"], 30.0, date(2026, 9, 1)
+    )
+    assert found is not None and found.closed
+    assert found.end == date(2026, 9, 30)
+    assert found.currencies[0].past[2].spent == 400_000
+    assert sheets.ages == [30.0, 30.0]  # курсы и fact — оба из копий
+
+
+def test_service_takes_the_current_month_as_no_month_at_all() -> None:
+    service = AnalyticsService(Sheets({"fact": [FACT_HEADER, *OPENING]}))
+    # текущий месяц — обычный прогноз: без вкладки его нет
+    assert service.forecast(date(2026, 10, 2), ["UZS"], 0.0, date(2026, 10, 1)) is None
+
+
+def test_a_past_month_is_asked_by_its_number() -> None:
+    spent = fact_row(date(2026, 9, 3), "🍔 ЕДА", "кафе", 400_000)
+    found = closed_month(frame(spent), date(2026, 9, 1), RATES, ["UZS", "USD"])
+    response, analytics = forecast_for(found, query="?month=2026-09")
+    body = response.json()
+    assert analytics.month == date(2026, 9, 1)
+    assert (body["status"], body["month"], body["closed"]) == ("ok", "Sep 26", True)
+    assert (body["today"], body["end"]) == ("2026-09-30", "2026-09-30")
+    assert body["earliest"] == "2026-09"
+    uzs = body["currencies"][0]
+    assert len(uzs["past"]) == 30
+    assert uzs["past"][2]["spent"] == 400_000
+    assert (uzs["days"], uzs["events"], uzs["records"]) == ([], [], [])
+    assert len(body["total"]["past_uzs"]) == 30
+    assert (body["total"]["uzs"], body["calendar"], body["articles"]) == ([], [], [])
+
+
+def test_the_current_month_by_its_number_is_the_usual_forecast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(web_api, "local_today", lambda _zone: DAY)
+    found = month_forecast(frame(), (), (), DAY, RATES, ["UZS"])
+    response, analytics = forecast_for(found, query="?month=2026-10")
+    assert analytics.month is None
+    body = response.json()
+    assert (body["closed"], body["earliest"]) == (False, "2026-09")
+
+
+@pytest.mark.parametrize("month", ["2026-11", "2027-01", "october", "", "2026-13"])
+def test_a_month_ahead_or_not_a_month_is_refused(
+    monkeypatch: pytest.MonkeyPatch, month: str
+) -> None:
+    monkeypatch.setattr(web_api, "local_today", lambda _zone: DAY)
+    response, analytics = forecast_for(None, query=f"?month={month}")
+    assert response.status_code == 422
+    assert response.json()["error"]["fields"] == {
+        "month": "Такого месяца в календаре нет"
+    }
+    assert analytics.currencies == []  # до таблицы дело не дошло
+
+
+def test_a_past_month_also_comes_from_the_copies_unless_fresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(web_api, "local_today", lambda _zone: DAY)
+    found = closed_month(frame(), date(2026, 9, 1), RATES, ["UZS"])
+    assert forecast_for(found, query="?month=2026-09")[1].max_age > 0
+    assert forecast_for(found, query="?month=2026-09&fresh=1")[1].max_age == 0
