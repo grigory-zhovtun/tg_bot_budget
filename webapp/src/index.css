@@ -34,6 +34,11 @@
   --color-chip-bad: #b42318;
   --color-chip-mid: #8a4f00;
   --color-chip-good: #146c2e;
+  /* плитка карты трат вне плана и круглые значки: белое на тёмном, от 6:1 */
+  --color-chip-off: #44546a;
+  --color-round-sums: #146c2e;
+  --color-round-dollars: #1d5a96;
+  --color-round-rubles: #5b3fa8;
   /* полосы и шапки таблиц: отличаются и от фона страницы, и от карточки */
   --color-stripe: var(--app-stripe, #e4e8ec);
 }
@@ -46,6 +51,10 @@
   /* не шире экрана и при крупном шрифте телефона: 11vw — 40 px на 360 px */
   --text-big: min(2.5rem, 11vw);
   --text-big--line-height: 1.05;
+  /* главная цифра «Сегодня» по центру экрана: 52 px, пока сумма с «сум» короткая
+     («412 000 сум»); на 320 px и при крупном шрифте телефона «сум» уходит вниз */
+  --text-big-hero: min(3.25rem, 13.5vw);
+  --text-big-hero--line-height: 1.05;
   /* длинная главная цифра (восьмизначная сумма с «сум») — 34 px, чтобы влезла */
   --text-big-long: min(2.125rem, 9.4vw);
   --text-big-long--line-height: 1.05;
@@ -57,6 +66,9 @@
      «Ввод / Сводка / Календарь / План» влезает в 320 px и при крупном шрифте телефона
      (×1,25 — как textZoom Android) */
   --text-tab: min(1rem, 4.4vw);
+  /* подписи быстрых действий: четыре в ряд и на 320 px */
+  --text-action: min(0.9375rem, 3.9vw);
+  --text-action--line-height: 1.2;
 }
 
 :root[data-scheme="dark"] {

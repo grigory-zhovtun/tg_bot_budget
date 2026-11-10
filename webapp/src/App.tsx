@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, launchUser, type Api, type Bootstrap } from "./api";
 import DashboardScreen from "./dashboard/DashboardScreen";
-import EntryScreen from "./entry/EntryScreen";
+import type { Action } from "./dashboard/QuickActions";
+import EntryScreen, { type EntryStart } from "./entry/EntryScreen";
+import { INCOME_GROUP } from "./entry/outgoing";
+import { TRANSFERS_GROUP, TRANSFER_SUB } from "./entry/transfer";
 import { deviceDay } from "./format";
 import ForecastScreen from "./forecast/ForecastScreen";
 import HomeScreenButton from "./HomeScreenButton";
@@ -15,16 +18,25 @@ import {
 import { nextMonth } from "./plan/months";
 import PlanTab from "./plan/PlanTab";
 import { phoneStorage, Store, StoreProvider } from "./store";
+import TabBar, { type Tab } from "./TabBar";
 import { telegram } from "./telegram";
 
-type Tab = "entry" | "dashboard" | "plan" | "forecast";
-
-const TABS: { name: Tab; title: string }[] = [
-  { name: "entry", title: "Ввод" },
-  { name: "dashboard", title: "Сводка" },
-  { name: "forecast", title: "Календарь" },
-  { name: "plan", title: "План" },
-];
+/** Быстрые действия «Сводки», для которых в справочнике есть группа. */
+function quickActions(boot: Bootstrap | null): Action[] {
+  if (!boot) return [];
+  const has = (group: string, sub?: string) =>
+    boot.groups.some(
+      (item) =>
+        item.name === group &&
+        (sub === undefined ||
+          item.subcategories.some((entry) => entry.name === sub)),
+    );
+  const actions: Action[] = ["spend"];
+  if (has(INCOME_GROUP)) actions.push("income");
+  if (has(TRANSFERS_GROUP, TRANSFER_SUB)) actions.push("transfer");
+  actions.push("save");
+  return actions;
+}
 
 function errorText(reason: unknown): string {
   return reason instanceof ApiError
@@ -77,6 +89,17 @@ export default function App({ api }: { api: Api }) {
   );
   const saveSeen = useCallback(() => setOpenSave(false), []);
   const [tab, setTab] = useState<Tab>(openSave ? "plan" : "entry");
+  // быстрое действие «Сводки»: с чего открыть «Ввод»; гаснет при смене вкладки
+  const [start, setStart] = useState<EntryStart | null>(null);
+  const act = useCallback((action: Action) => {
+    if (action === "save") {
+      setOpenSave(true);
+      setTab("plan");
+      return;
+    }
+    setStart(action === "spend" ? null : action);
+    setTab("entry");
+  }, []);
   const [drafts, setDrafts] = useState<Record<string, Draft> | null>(
     initial.drafts?.drafts ?? null,
   );
@@ -167,37 +190,8 @@ export default function App({ api }: { api: Api }) {
 
   return (
     <StoreProvider value={store}>
-      <main className="mx-auto flex max-w-md flex-col gap-4 p-4">
-        <nav
-          className="flex gap-0.5 rounded-xl bg-section p-1"
-          role="tablist"
-          aria-label="Разделы"
-        >
-          {TABS.map(({ name, title }) => (
-            <button
-              key={name}
-              type="button"
-              role="tab"
-              aria-selected={tab === name}
-              className={`flex-auto rounded-lg px-0.5 py-2 text-tab font-semibold ${
-                tab === name ? "bg-bg shadow-sm" : "text-hint"
-              }`}
-              onClick={() => {
-                setTab(name);
-                saveSeen();
-              }}
-            >
-              {title}
-              {name === "plan" && unsaved && (
-                <span
-                  role="img"
-                  aria-label="есть несохранённые правки"
-                  className="ml-1 inline-block size-1.5 rounded-full bg-link align-middle"
-                />
-              )}
-            </button>
-          ))}
-        </nav>
+      {/* снизу — место под плавающую панель вкладок */}
+      <main className="mx-auto flex max-w-md flex-col gap-4 p-4 pb-28">
         {needsBoot && !boot && !error && <p className="text-hint">Загрузка…</p>}
         {needsBoot && !boot && error && (
           <div className="flex flex-col items-start gap-2" role="alert">
@@ -208,9 +202,20 @@ export default function App({ api }: { api: Api }) {
           </div>
         )}
         {tab === "entry" && boot && (
-          <EntryScreen api={api} boot={boot} onCatalogChanged={reload} />
+          <EntryScreen
+            api={api}
+            boot={boot}
+            onCatalogChanged={reload}
+            start={start}
+          />
         )}
-        {tab === "dashboard" && <DashboardScreen api={api} />}
+        {tab === "dashboard" && (
+          <DashboardScreen
+            api={api}
+            actions={quickActions(boot)}
+            onAction={act}
+          />
+        )}
         {tab === "dashboard" && boot && (
           <HomeScreenButton botUsername={boot.bot_username} />
         )}
@@ -229,6 +234,15 @@ export default function App({ api }: { api: Api }) {
         )}
         {tab === "forecast" && <ForecastScreen api={api} boot={boot} />}
       </main>
+      <TabBar
+        tab={tab}
+        unsaved={unsaved}
+        onTab={(next) => {
+          setTab(next);
+          setStart(null);
+          saveSeen();
+        }}
+      />
     </StoreProvider>
   );
 }

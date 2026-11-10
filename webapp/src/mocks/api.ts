@@ -1,4 +1,4 @@
-import type { Api, Bootstrap, SavingsScreen } from "../api";
+import type { Api, Bootstrap, Dashboard, SavingsScreen } from "../api";
 import {
   EARLIEST_MONTH,
   adviceFixture,
@@ -50,6 +50,28 @@ const devBootstrap: Bootstrap = {
   ],
 };
 
+// npm run dev: восемь групп трат — карта трат как на живых данных
+const group = (name: string, plan: number, fact: number) => ({
+  name,
+  plan,
+  fact,
+  items: [{ name: "всё", icon: "", plan, fact }],
+});
+const devDashboard: Dashboard = {
+  ...dashboardFixture,
+  categories: [
+    group("🏠 ДОМ", 5_000_000, 5_300_000),
+    group("🍔 ЕДА", 6_000_000, 4_200_000),
+    group("👶 ДЕТИ", 2_500_000, 2_200_000),
+    group("🚗 ТРАНСПОРТ", 1_500_000, 900_000),
+    group("🌛 ЕЖЕМЕСЯЧНО", 900_000, 830_000),
+    group("💊 ЗДОРОВЬЕ", 1_200_000, 490_000),
+    group("🎉 РАЗВЛЕЧЕНИЯ", 0, 420_000),
+    group("👕 ОДЕЖДА", 800_000, 260_000),
+    group("🎁 ПРАЗДНИК", 600_000, 150_000),
+  ],
+};
+
 /** API без сервера для npm run dev: тестовые данные с задержкой. */
 let nextCreated = false; // мок-режим: созданный план следующего месяца живёт до перезагрузки
 
@@ -69,7 +91,7 @@ export const mockApi: Api = {
   bootstrap: () => later(devBootstrap),
   addExpense: () => later(writtenFixture),
   undo: () => later({ message: "↩️ Удалил из таблицы: строка 4169." }),
-  dashboard: () => later(dashboardFixture),
+  dashboard: () => later(devDashboard),
   // мок-режим: прошедшие месяцы — одинаковые, листать можно до августа
   forecast: (_read, month) =>
     later(
