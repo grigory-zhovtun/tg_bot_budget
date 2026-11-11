@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -24,6 +24,15 @@ import { VIEW_KEY } from "./view";
 function dayCard(title: string): HTMLElement {
   const card = screen.getByText(title).closest("section");
   if (!card) throw new Error("no day card");
+  return card;
+}
+
+/** Карточка «Деньги до конца месяца» под календарём. */
+async function outlookCard(): Promise<HTMLElement> {
+  const card = (await screen.findByText("Деньги до конца месяца")).closest(
+    "section",
+  );
+  if (!card) throw new Error("no outlook card");
   return card;
 }
 
@@ -326,14 +335,72 @@ describe("ForecastScreen", () => {
     expect(screen.getByText("Четверг, 29 октября")).toBeTruthy();
   });
 
-  it("selects the day under a tap on the chart", async () => {
+  it("shows the money to the month end by three points, not by a chart", async () => {
     const { container } = show();
-    await screen.findByText("Октябрь");
-    const zone = container.querySelector('[data-day="25"]');
-    if (!zone) throw new Error("no tap zone");
-    fireEvent.click(zone);
-    expect(screen.getByText("Воскресенье, 25 октября")).toBeTruthy();
-    expect(pill(25).getAttribute("aria-pressed")).toBe("true");
+    const card = within(await outlookCard());
+    // сейчас: 6 810 000 + $1 800 × 12 000 + 20 000 ₽ × 150
+    expect(card.getByText("Сейчас · 15 октября")).toBeTruthy();
+    expect(card.getByText("31,4 млн")).toBeTruthy();
+    // меньше всего — накануне зарплаты 30-го
+    expect(card.getByText("Меньше всего · 29 октября")).toBeTruthy();
+    expect(card.getByText("19,3 млн")).toBeTruthy();
+    expect(card.getByText("если тратить как сейчас: 13,9 млн")).toBeTruthy();
+    expect(card.getByText("Конец месяца · 31 октября")).toBeTruthy();
+    expect(card.getByText("48,2 млн")).toBeTruthy();
+    expect(card.getByText("если тратить как сейчас: 42,1 млн")).toBeTruthy();
+    expect(card.getByText("в сумах, по курсу таблицы")).toBeTruthy();
+    const enough = card.getByText("✓ Денег хватает на весь месяц");
+    expect(enough.className).toContain("bg-chip-good");
+    // графика с линиями и его подписей больше нет
+    expect(container.querySelector("rect[data-day]")).toBeNull();
+    expect(screen.queryByText("До конца месяца")).toBeNull();
+    expect(screen.queryByText(/по темпу ≈/)).toBeNull();
+  });
+
+  it("compares the day's spending with the plan", async () => {
+    show();
+    const card = within(await outlookCard());
+    expect(card.getByText("Темп трат")).toBeTruthy();
+    // 470 000 + $3 × 12 000 + 300 ₽ × 150 против 850 000 + $5 × 12 000
+    expect(card.getByText("551 тыс.")).toBeTruthy();
+    expect(card.getByText("910 тыс.")).toBeTruthy();
+    const verdict = card.getByText("Быстрее плана на 359 тыс. в день");
+    expect(verdict.className).toContain("bg-chip-mid");
+    // полоса плана короче полосы темпа во столько же раз
+    const bars = card.getAllByTestId("pace-bar");
+    expect(bars.map((bar) => bar.style.width)).toEqual(["60.55%", "100%"]);
+  });
+
+  it("says in the card from which day the money runs out", async () => {
+    const user = userEvent.setup();
+    show();
+    await user.click(await screen.findByRole("radio", { name: "UZS" }));
+    const card = within(await outlookCard());
+    const short = card.getByText(
+      "При таком темпе денег не хватит с 25 октября",
+    );
+    // минус — красной плашкой с белым текстом, не красными буквами
+    expect(short.className).toContain("bg-minus");
+    expect(short.className).toContain("text-white");
+    expect(card.queryByText(/Денег хватает/)).toBeNull();
+    expect(card.getByText("1,9 млн")).toBeTruthy();
+    expect(card.getByText("если тратить как сейчас: −3,8 млн")).toBeTruthy();
+    expect(card.getByText("Быстрее плана на 380 тыс. в день")).toBeTruthy();
+  });
+
+  it("shows two points when the money only falls, and a slower pace", async () => {
+    const user = userEvent.setup();
+    show();
+    await user.click(await screen.findByRole("radio", { name: "RUB" }));
+    const card = within(await outlookCard());
+    expect(card.queryByText(/Меньше всего/)).toBeNull();
+    // getByText сам заменяет неразрывные пробелы обычными
+    expect(card.getByText("20 000 ₽")).toBeTruthy();
+    expect(card.getByText("14 900 ₽")).toBeTruthy();
+    expect(card.getByText("если тратить как сейчас: 20 000 ₽")).toBeTruthy();
+    expect(card.getByText("в рублях")).toBeTruthy();
+    const verdict = card.getByText("Медленнее плана на 300 ₽ в день");
+    expect(verdict.className).toContain("bg-chip-good");
   });
 
   it("remembers the chosen view on the phone", async () => {
@@ -789,7 +856,8 @@ describe("ForecastScreen", () => {
       expect(
         screen.queryByRole("button", { name: /Запланировать/ }),
       ).toBeNull();
-      expect(screen.queryByText("До конца месяца")).toBeNull();
+      expect(screen.queryByText("Деньги до конца месяца")).toBeNull();
+      expect(screen.queryByText("Темп трат")).toBeNull();
       expect(screen.queryByText(/По валютам/)).toBeNull();
     });
 
