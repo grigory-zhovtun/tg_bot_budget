@@ -4,27 +4,22 @@ import { deviceDay } from "../format";
 import { prevMonth } from "../plan/months";
 import { useCached, useResource, useStore, type Store } from "../store";
 import DayCard from "./DayCard";
-import ForecastChart from "./ForecastChart";
 import LaterRecords from "./LaterRecords";
 import MonthGrid from "./MonthGrid";
 import MonthNav from "./MonthNav";
+import MonthOutlook from "./MonthOutlook";
 import MonthSummary from "./MonthSummary";
 import RecordSheet from "./RecordSheet";
 import {
   TOTAL,
-  amount,
-  chartNote,
   currencyRows,
   dayOf,
   hasDollars,
   fitView,
-  marks,
   scopes,
   shortDate,
   storeView,
   storedView,
-  viewCode,
-  viewDays,
   warnings,
   type View,
 } from "./view";
@@ -154,12 +149,6 @@ function Month({
   onEdit,
 }: MonthProps) {
   const end = data.end ? dayOf(data.end) : dayOf(data.today);
-  const code = viewCode(view);
-  const days = viewDays(data, view);
-  const last = days[days.length - 1];
-  const ends = last
-    ? `по плану ${amount(last.plan, code)}, по темпу ${amount(last.pace, code)}`
-    : "";
   return (
     <>
       <Switches data={data} view={view} onView={onView} />
@@ -183,31 +172,7 @@ function Month({
         onEdit={onEdit}
       />
       <LaterRecords data={data} onEdit={onEdit} />
-      <section className="flex flex-col gap-2 rounded-2xl bg-section p-4">
-        <div className="flex items-baseline justify-between gap-2">
-          <h2 className="font-semibold">До конца месяца</h2>
-          <span className="text-xs text-hint">{chartNote(view)}</span>
-        </div>
-        <ForecastChart
-          days={days}
-          marks={marks(data, view)}
-          selected={day}
-          label={`До конца месяца: ${ends}`}
-          onSelect={onSelect}
-        />
-        {last && (
-          <p className="flex flex-wrap gap-x-3 text-xs text-hint">
-            <span>
-              <span className="text-link">━</span>
-              {` по плану ≈ ${amount(last.plan, code)}`}
-            </span>
-            <span>
-              <span className="text-warn">╍</span>
-              {` по темпу ≈ ${amount(last.pace, code)}`}
-            </span>
-          </p>
-        )}
-      </section>
+      <MonthOutlook data={data} view={view} />
       <section className="flex flex-col gap-1">
         <h2 className="font-semibold">
           {`По валютам: сейчас → ${shortDate(end, data.today)}`}

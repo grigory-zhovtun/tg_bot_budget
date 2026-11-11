@@ -11,7 +11,6 @@ import {
   dayEvents,
   dayTitle,
   loadView,
-  marks,
   minusRange,
   articleText,
   dayArticles,
@@ -75,7 +74,7 @@ describe("forecast view", () => {
     expect(chartNote(UZS)).toBe("в сумах");
   });
 
-  it("collects the events of a day and the marks of the chart", () => {
+  it("collects the events of a day", () => {
     expect(dayEvents(forecastFixture, DEFAULT_VIEW, 18)).toEqual([
       {
         day: 18,
@@ -86,13 +85,6 @@ describe("forecast view", () => {
       },
     ]);
     expect(dayEvents(forecastFixture, UZS, 18)).toEqual([]);
-    // ▼ 24-го — разовая запись «Продукты на неделю»; кофе каждый день не отмечаем
-    expect(marks(forecastFixture, UZS)).toEqual([
-      { day: 15, up: true },
-      { day: 17, up: false },
-      { day: 24, up: false },
-      { day: 30, up: true },
-    ]);
   });
 
   it("warns when a line of the view goes below zero", () => {

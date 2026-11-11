@@ -134,26 +134,6 @@ export function dayEvents(data: Forecast, view: View, day: number): DayEvent[] {
   );
 }
 
-/** Отметки графика: ▲ в дни поступлений, ▼ в дни платежей и открытых разовых записей. */
-export function marks(
-  data: Forecast,
-  view: View,
-): { day: number; up: boolean }[] {
-  const found: { day: number; up: boolean }[] = [];
-  const add = (day: number, up: boolean) => {
-    if (!found.some((mark) => mark.day === day && mark.up === up)) {
-      found.push({ day, up });
-    }
-  };
-  for (const line of viewCurrencies(data, view)) {
-    for (const event of line.events) add(event.day, event.amount > 0);
-    for (const record of line.records) {
-      if (record.repeat === "once" && record.open > 0) add(record.day, false);
-    }
-  }
-  return found.sort((a, b) => a.day - b.day);
-}
-
 /** «9 060 000 сум», «−$500», «20 000 ₽», «300 EUR» — целыми. */
 export function amount(value: number, code: string): string {
   if (code === "USD") {
@@ -180,7 +160,7 @@ export function pillUnit(code: string): string {
   return code === "UZS" ? "млн сум" : (SIGNS[code] ?? code);
 }
 
-/** Подпись графика: «в сумах, по курсу таблицы» у «Всего», «в рублях» у валюты. */
+/** В чём суммы карточки: «в сумах, по курсу таблицы» у «Всего», «в рублях» у валюты. */
 export function chartNote(view: View): string {
   const code = viewCode(view);
   const unit = IN_CURRENCY[code] ?? `в ${code}`;
