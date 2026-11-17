@@ -284,12 +284,20 @@ class GoogleSheetsService:
         self._worksheets.clear()
         self._balance_cells = None
         self._written()
+        self._values.pop(config.SYSTEM_SHEET_NAME, None)  # метки «чужие» — заново
 
     def _written(self) -> None:
         """Таблицу изменили: копии листов — сбросить, идущие чтения — не копировать.
         Звать после ответа на запись: чтение, начатое позже, запись уже видит."""
         self._generation += 1
+        # Копию листа system запись бота не сбрасывает: бот пишет туда только
+        # состояние чатов (Q:U) и отметки (G, J), а метки «чужие» (A:D) правит
+        # владелец руками — после этого /reboot (reload). Иначе каждая запись
+        # заставляла бы read_held перечитывать весь лист.
+        system = self._values.get(config.SYSTEM_SHEET_NAME)
         self._values.clear()
+        if system is not None:
+            self._values[config.SYSTEM_SHEET_NAME] = system
         self._rates = None
         self._calendar = None
 
@@ -1431,6 +1439,7 @@ def read_month_sheets(
     calendar: bool = True,
     previous: bool = False,
     piggy: bool = False,
+    held: bool = True,
 ) -> MonthSheets:
     """Вкладка месяца, вкладка прошлого месяца, курсы, fact, «Календарь» и листы
     копилок — одновременно: каждое чтение ждёт Google, а не процессор, и экран ждёт
@@ -1439,7 +1448,8 @@ def read_month_sheets(
     max_age > 0 — годятся копии листов не старше стольких секунд. previous=True —
     ещё вкладка прошлого месяца: её недополученное «Сводка» показывает во «Впереди».
     piggy=True — ещё «Копилки» и «Журнал копилок»: «Сводка» вычитает копилки из
-    «Заморожено».
+    «Заморожено». held=False — без меток «чужие» (план их не использует): лист
+    system не читается.
     """
     first = parse_month_title(title)
     last = month_title(first - timedelta(days=1)) if first is not None else ""
@@ -1450,7 +1460,7 @@ def read_month_sheets(
         )
         rates = pool.submit(gs.get_rates, max_age)
         fact = pool.submit(gs.get_values, config.FACT_SHEET_NAME, max_age)
-        marks = pool.submit(read_held, gs, max_age)
+        marks = pool.submit(read_held, gs, max_age) if held else None
         records = pool.submit(gs.get_calendar, max_age) if calendar else None
         piggies = (
             [
@@ -1467,5 +1477,5 @@ def read_month_sheets(
             records.result() if records is not None else [],
             _optional_tab(before, last),
             _piggy_sheets(piggies),
-            marks.result(),
+            marks.result() if marks is not None else (),
         )
