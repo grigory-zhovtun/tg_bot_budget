@@ -192,14 +192,27 @@ describe("CardBalances", () => {
       expect(
         screen.getByText("1 200 000 сум").parentElement?.className,
       ).toContain("text-warn");
-      // каждый кусок строки — свой nowrap-элемент: перенос только между ними
-      for (const part of [
-        "чужие ·",
-        "пришло 1 250 000 ·",
-        "потрачено 50 000",
-      ]) {
-        expect(screen.getByText(part).className).toContain("whitespace-nowrap");
+      // кусок строки: подпись и число — отдельные nowrap-элементы в одном куске
+      expect(screen.getByText("чужие ·").className).toContain(
+        "whitespace-nowrap",
+      );
+      for (const [label, value] of [
+        ["пришло", "1 250 000 ·"],
+        ["потрачено", "50 000"],
+      ] as const) {
+        const l = screen.getByText(label);
+        const v = screen.getByText(value);
+        expect(l.className).toContain("whitespace-nowrap");
+        expect(v.className).toContain("whitespace-nowrap");
+        expect(l.parentElement).toBe(v.parentElement);
       }
+      // колонка текста может сжиматься, отступ строки сбора — ml-3
+      expect(screen.getByText("чужие ·").parentElement?.className).toContain(
+        "min-w-0",
+      );
+      expect(
+        screen.getByText("Сбор на праздник").closest("div")?.className,
+      ).toContain("ml-3");
       expect(screen.getByText("🎉").getAttribute("aria-hidden")).toBe("true");
     });
 
@@ -218,9 +231,14 @@ describe("CardBalances", () => {
         }),
       ]);
       expect(screen.getByText("0 сум")).toBeTruthy();
-      const number = screen.getByText("своих 300 000");
+      const label = screen.getByText("доложено из своих");
+      const number = screen.getByText("300 000");
+      expect(label.className).toContain("whitespace-nowrap");
       expect(number.className).toContain("whitespace-nowrap");
-      expect(number.parentElement?.className).toContain("text-danger");
+      expect(label.parentElement).toBe(number.parentElement);
+      expect(label.parentElement?.parentElement?.className).toContain(
+        "text-danger",
+      );
       expect(screen.queryByText(/не в счёт/)).toBeNull();
     });
 

@@ -61,9 +61,19 @@ function heldFigure(amount: number, currency: string): string {
  * статьи и сколько осталось; под ним — сколько пришло и потрачено, а при
  * перерасходе — сколько доложено из своих.
  */
+/** Кусок строки: подпись и число рядом, а если не влезает и одно — число под подписью. */
+function Seg({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex min-w-0 flex-wrap gap-x-1">
+      <span className="whitespace-nowrap">{label}</span>
+      <span className="whitespace-nowrap">{value}</span>
+    </span>
+  );
+}
+
 function Held({ item, currency }: { item: HeldMoney; currency: string }) {
   return (
-    <div className="ml-5 flex items-center gap-3 border-l-[3px] border-outline pl-3">
+    <div className="ml-3 flex items-center gap-3 border-l-[3px] border-outline pl-3">
       <Round tone="bg-chip-mid">
         <span aria-hidden="true" className="text-xl">
           {item.icon}
@@ -76,17 +86,16 @@ function Held({ item, currency }: { item: HeldMoney; currency: string }) {
             {heldFigure(Math.max(item.left, 0), currency)}
           </span>
         </span>
-        {/* переносится только между кусками: подпись не отрывается от числа */}
+        {/* переносится только между кусками, а внутри куска — число под подписью */}
         {item.left < 0 ? (
-          <span className="flex flex-wrap gap-x-2 font-extrabold text-danger">
-            <span className="whitespace-nowrap">доложено из</span>
-            <span className="whitespace-nowrap">{`своих ${money(-item.left)}`}</span>
+          <span className="flex min-w-0 flex-wrap gap-x-2 font-extrabold text-danger">
+            <Seg label="доложено из своих" value={money(-item.left)} />
           </span>
         ) : (
-          <span className="flex flex-wrap gap-x-2 font-bold text-hint">
+          <span className="flex min-w-0 flex-wrap gap-x-2 font-bold text-hint">
             <span className="whitespace-nowrap">чужие ·</span>
-            <span className="whitespace-nowrap">{`пришло ${money(item.came)} ·`}</span>
-            <span className="whitespace-nowrap">{`потрачено ${money(item.spent)}`}</span>
+            <Seg label="пришло" value={`${money(item.came)} ·`} />
+            <Seg label="потрачено" value={money(item.spent)} />
           </span>
         )}
       </span>
