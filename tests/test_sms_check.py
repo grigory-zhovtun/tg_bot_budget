@@ -3,8 +3,9 @@
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from telegram.error import BadRequest
 
 from app.domain import TRANSFERS_GROUP, SheetRow
@@ -363,3 +364,22 @@ async def test_held_button_ignored_for_a_spending_row() -> None:
     text, _ = await press(context, "fix:h:0")
     assert text == fix.STALE
     assert context.bot_data["gs_service"].calls == []
+
+
+async def test_income_month_is_asked_for_the_moved_row_not_the_next_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked = MagicMock()
+    monkeypatch.setattr(fix, "ask_month", asked)
+    monkeypatch.setattr(fix, "income_prompt", AsyncMock())
+    context = checking([transfer(), ROWS[0]], {0: "❓", 1: "🆕"})
+    await open_check(context)
+    await press(context, "fix:c:1")  # ДОХОДЫ
+    query = SimpleNamespace(
+        data="fix:s:0", answer=AsyncMock(), edit_message_text=AsyncMock()
+    )
+    update = SimpleNamespace(
+        callback_query=query, effective_chat=SimpleNamespace(id=42)
+    )
+    await fix.fix_button(update, context)
+    assert asked.call_args.args[3] == 4190  # первая строка, а не следующая (4191)

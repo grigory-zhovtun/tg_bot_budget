@@ -515,11 +515,11 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             await _edit(query, STALE)
             return
         name = names[index]
+    number = last["first"] + state["row"]  # до очереди: _checked сдвинет state["row"]
     fixed = await _recategorize(query, context, state, last, row, category, name)
     chat = getattr(update, "effective_chat", None)
     moved_in = row.category != INCOME_GROUP and category == INCOME_GROUP
     if fixed is not None and moved_in and chat is not None:
-        number = last["first"] + state["row"]
         # опоздавшая часть ЗП по SMS приходит переводом — месяц спрашиваем здесь
         ask_month(context, chat.id, [fixed], number)
         await income_prompt(context, chat.id, chat.id, [fixed])  # «🐷» под ответом
