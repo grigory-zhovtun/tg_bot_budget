@@ -921,11 +921,16 @@ class AnalyticsService:
 
         if month is not None and month < today.replace(day=1):
             # оба чтения ждут Google, а не процессор — одновременно
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            with ThreadPoolExecutor(max_workers=3) as pool:
                 asked = pool.submit(self.gs_service.get_rates, max_age)
+                marks = pool.submit(read_held, self.gs_service, max_age)
                 rows = self.gs_service.get_values(config.FACT_SHEET_NAME, max_age)
                 rates = asked.result()
-            past = transactions_frame(rows, rates, keep_unknown=True)
+            # чужие деньги и в прошлом месяце не свои: иначе вечер последнего дня
+            # не сойдётся с началом текущего месяца
+            past = own_money(
+                transactions_frame(rows, rates, keep_unknown=True), marks.result()
+            )
             return closed_month(past, month, rates, currencies)
         sheet = month_title(today)
         sheets = read_month_sheets(self.gs_service, sheet, max_age)
