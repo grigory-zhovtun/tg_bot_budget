@@ -33,6 +33,7 @@ from app.services.day_budget import (
     today_line,
 )
 from app.services.google_sheets import PIGGY_JOURNAL_HEADER, PIGGY_LIST_HEADER
+from app.services.held import HeldArticle, own_money
 from app.services.receipts import match_receipts
 from app.services.recurring import find_series, outside_list
 from tests.test_analytics_service import serial
@@ -1049,3 +1050,39 @@ def test_the_salary_reply_says_tomorrows_limit() -> None:
     # в другой день ответ на доход лимита не добавляет
     other = service.write_feedback([], today=date(2026, 10, 29), salary_day_only=True)
     assert other.lines == []
+
+
+CAFE_ROW = fact_row(date(2026, 10, 1), "🍔 ЕДА", "кафе", 400_000)
+PARTY = HeldArticle("сбор на праздник", "🎉")
+HELD_DAY = date(2026, 10, 2)
+
+
+def held_row(day: date, amount: float) -> list[Any]:
+    return fact_row(day, "💳 СЧЕТА", "сбор на праздник", amount)
+
+
+def test_day_budget_ignores_held() -> None:
+    plain = frame(CAFE_ROW)
+    with_held = frame(held_row(date(2026, 10, 1), -700_000), CAFE_ROW)
+    own = day_budget(own_money(with_held, (PARTY,)), tab(), HELD_DAY, RATES, "USD")
+    base = day_budget(plain, tab(), HELD_DAY, RATES, "USD")
+    assert own is not None and base is not None
+    assert own.balance == base.balance
+    assert own.runway is not None and base.runway is not None
+    assert own.runway.balance == base.runway.balance
+    # без поправки сбор попал бы в деньги
+    raw = day_budget(with_held, tab(), HELD_DAY, RATES, "USD")
+    assert raw is not None and raw.balance == base.balance + 700_000
+
+
+def test_day_budget_overspent_held_lowers_sums() -> None:
+    plain = frame(CAFE_ROW)
+    spent = frame(
+        held_row(date(2026, 10, 1), -200_000),
+        held_row(date(2026, 10, 1), 500_000),
+        CAFE_ROW,
+    )
+    own = day_budget(own_money(spent, (PARTY,)), tab(), HELD_DAY, RATES, "USD")
+    base = day_budget(plain, tab(), HELD_DAY, RATES, "USD")
+    assert own is not None and base is not None
+    assert own.balance == base.balance - 300_000

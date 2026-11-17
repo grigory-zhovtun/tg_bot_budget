@@ -289,6 +289,7 @@ def test_month_sheets_are_read_together_with_the_screen_max_age() -> None:
         ("calendar", 120),
         ("fact", 120),
         ("rates", 120),
+        ("system", 600.0),  # метки «чужие» — копия на десять минут
     ]
 
 
@@ -381,8 +382,8 @@ def test_the_plan_screen_does_not_read_the_calendar() -> None:
 
 
 def test_sheets_are_read_at_the_same_time() -> None:
-    # все пять чтений стоят у барьера одновременно — по очереди тест бы повис
-    barrier = threading.Barrier(5, timeout=5)
+    # все шесть чтений стоят у барьера одновременно — по очереди тест бы повис
+    barrier = threading.Barrier(6, timeout=5)
 
     class Waiting(MonthSheetsSource):
         def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
@@ -403,8 +404,8 @@ def test_sheets_are_read_at_the_same_time() -> None:
 
 
 def test_piggy_sheets_are_read_at_the_same_time_too() -> None:
-    # семь чтений «Сводки» с копилками — тоже все разом
-    barrier = threading.Barrier(7, timeout=5)
+    # восемь чтений «Сводки» с копилками — тоже все разом
+    barrier = threading.Barrier(8, timeout=5)
 
     class Waiting(MonthSheetsSource):
         def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:

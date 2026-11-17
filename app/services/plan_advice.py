@@ -23,6 +23,7 @@ from app.services.analytics_service import MONTHS_RU, expenses, transactions_fra
 from app.services.calendar import read_calendar
 from app.services.day_budget import DayBudget, day_budget, runway_until, until_text
 from app.services.google_sheets import GoogleSheetsService
+from app.services.held import own_money, read_held
 from app.services.plan import (
     TOLERANCE,
     Article,
@@ -373,7 +374,10 @@ def gather_advice(
     bad.discard("space")  # советнику место для вставки не важно
     if bad:
         return Gathered(plan, None, frozenset(bad))
-    frame = transactions_frame(gs.get_values(config.FACT_SHEET_NAME), rates)
+    frame = own_money(
+        transactions_frame(gs.get_values(config.FACT_SHEET_NAME), rates),
+        read_held(gs),
+    )
     current = today.replace(day=1)
     current_rows = rows if first == current else _rows(gs, month_title(current))
     months = full_months(today, HISTORY_MONTHS)

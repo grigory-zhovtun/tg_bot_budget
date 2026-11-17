@@ -265,8 +265,9 @@ def test_a_planned_group_without_spending_stays_at_the_end() -> None:
 def test_the_dashboard_may_take_copies_of_the_sheets() -> None:
     sheets = Sheets({"fact": [FACT_HEADER, *OPENING, CAFE], "Oct 26": tab()})
     assert AnalyticsService(sheets).dashboard(TODAY, max_age=120) is not None
-    # вкладка, прошлая вкладка, курсы, fact и «Календарь» — копии не старше 2 минут
-    assert sheets.ages == [120, 120, 120, 120, 120]
+    # вкладка, прошлая вкладка, курсы, fact и «Календарь» — копии не старше 2 минут,
+    # метки «чужие» из system — десятиминутная копия
+    assert sorted(sheets.ages) == [120] * 5 + [600.0]
 
 
 def test_the_dashboard_reads_the_piggies_with_the_catalog() -> None:
@@ -279,4 +280,26 @@ def test_the_dashboard_reads_the_piggies_with_the_catalog() -> None:
     assert found is not None and found.budget is not None
     assert found.budget.piggies == 500
     # и листы копилок — копии не старше 2 минут, вместе с остальными
-    assert sheets.ages == [120] * 7
+    assert sorted(sheets.ages) == [120] * 7 + [600.0]
+
+
+SYSTEM_WITH_HELD = [
+    ["", "", "", "иконка"],
+    ["💳 СЧЕТА", "сбор на праздник", "чужие", "🎉"],
+]
+
+
+def test_dashboard_limit_without_held() -> None:
+    held = fact_row(date(2026, 10, 1), "💳 СЧЕТА", "сбор на праздник", -700_000)
+    base = {"fact": [FACT_HEADER, *OPENING, CAFE], "Oct 26": tab()}
+    plain = AnalyticsService(Sheets(base)).dashboard(TODAY)
+    marked = AnalyticsService(
+        Sheets({**base, "fact": [*base["fact"], held], "system": SYSTEM_WITH_HELD})
+    ).dashboard(TODAY)
+    unmarked = AnalyticsService(
+        Sheets({**base, "fact": [*base["fact"], held]})  # листа system нет
+    ).dashboard(TODAY)
+    assert plain and plain.budget and marked and marked.budget
+    assert marked.budget.balance == plain.budget.balance
+    assert unmarked and unmarked.budget
+    assert unmarked.budget.balance == plain.budget.balance + 700_000

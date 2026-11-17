@@ -25,6 +25,7 @@ from app.chat_state import (
     parse_number,
 )
 from app.domain import Rates, SheetRow, month_bounds, month_title, parse_month_title
+from app.services.held import HeldArticle, read_held
 
 logger = logging.getLogger(__name__)
 
@@ -68,9 +69,9 @@ SERIAL_ZERO = date(1899, 12, 30)
 PROFILE_MARK = "О НАС"
 MAX_PROFILE = 2000
 CALENDAR_TTL = 60.0  # секунд: лист «Календарь» перечитываем не чаще раза в минуту
-# вкладка месяца, прошлого месяца, курсы, fact, «Календарь» и два листа копилок
+# вкладка месяца, прошлого месяца, курсы, fact, «Календарь», два листа копилок и system
 # читаются одновременно
-MONTH_SHEETS = 7
+MONTH_SHEETS = 8
 CALENDAR_HEADER = [
     "ID",
     "Дата",
@@ -1368,7 +1369,7 @@ class MonthSheets:
     """Листы экранов Mini App: вкладка месяца (None — её нет), курсы, fact, «Календарь»
     и вкладка прошлого месяца — для переноса недополученных поступлений (None — нет);
     листы «Копилки» и «Журнал копилок» — для «Заморожено» (None — не просили или не
-    прочитались; листа нет — пусто)."""
+    прочитались; листа нет — пусто); held — статьи «чужие» из листа system."""
 
     month: list[list[Any]] | None
     rates: Rates
@@ -1376,6 +1377,7 @@ class MonthSheets:
     calendar: list[list[Any]] = field(default_factory=list)
     previous: list[list[Any]] | None = None
     piggy: tuple[list[list[Any]], list[list[Any]]] | None = None
+    held: tuple[HeldArticle, ...] = ()
 
 
 def _tab(read: Future[list[list[Any]]] | None) -> list[list[Any]] | None:
@@ -1448,6 +1450,7 @@ def read_month_sheets(
         )
         rates = pool.submit(gs.get_rates, max_age)
         fact = pool.submit(gs.get_values, config.FACT_SHEET_NAME, max_age)
+        marks = pool.submit(read_held, gs, max_age)
         records = pool.submit(gs.get_calendar, max_age) if calendar else None
         piggies = (
             [
@@ -1464,4 +1467,5 @@ def read_month_sheets(
             records.result() if records is not None else [],
             _optional_tab(before, last),
             _piggy_sheets(piggies),
+            marks.result(),
         )

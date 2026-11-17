@@ -229,7 +229,7 @@ def test_the_forecast_may_take_copies_of_the_sheets() -> None:
     sheets = Sheets({"fact": [FACT_HEADER, *OPENING], "Oct 26": tab()})
     service = AnalyticsService(sheets)
     assert service.forecast(date(2026, 10, 2), ["UZS"], max_age=120) is not None
-    assert sheets.ages == [120, 120, 120, 120]
+    assert sorted(sheets.ages) == [120] * 4 + [600.0]  # + метки «чужие»
 
 
 def test_the_screen_takes_copies_unless_asked_to_refresh() -> None:
@@ -305,3 +305,14 @@ def test_a_past_month_also_comes_from_the_copies_unless_fresh(
     found = closed_month(frame(), date(2026, 9, 1), RATES, ["UZS"])
     assert forecast_for(found, query="?month=2026-09")[1].max_age > 0
     assert forecast_for(found, query="?month=2026-09&fresh=1")[1].max_age == 0
+
+
+def test_forecast_money_without_held() -> None:
+    held = fact_row(date(2026, 10, 1), "💳 СЧЕТА", "сбор на праздник", -700_000)
+    system = [["", "", "", "иконка"], ["💳 СЧЕТА", "сбор на праздник", "чужие", "🎉"]]
+    sheets = Sheets(
+        {"fact": [FACT_HEADER, *OPENING, held], "Oct 26": tab(), "system": system}
+    )
+    found = AnalyticsService(sheets).forecast(date(2026, 10, 2), ["UZS"])
+    assert found is not None
+    assert found.currencies[0].now == 5_000_000
