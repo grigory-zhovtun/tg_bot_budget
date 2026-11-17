@@ -416,7 +416,8 @@ async def _salary_day(context: ContextTypes.DEFAULT_TYPE) -> list[str]:
 
 async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Кнопки /fix и проверки: fix:r:<i> — операция, fix:c:<i> — группа,
-    fix:s:<i> — подгруппа, fix:ok — «✓ Верно», fix:b — назад, fix:x — отмена."""
+    fix:s:<i> — подгруппа, fix:h:<i> — «В сбор» (сбор №i из bot_data["held"]),
+    fix:ok — «✓ Верно», fix:b — назад, fix:x — отмена."""
     query = update.callback_query
     _, step, *rest = (query.data or "").split(":")
     await query.answer()
