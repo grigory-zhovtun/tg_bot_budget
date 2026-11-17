@@ -183,7 +183,6 @@
 
 **Files:**
 - Modify: `app/services/cards.py` — у `CardBalance` поля `held: tuple[HeldOnCard, ...] = ()`, `held_uzs: float = 0.0`, свойства `own`, `own_uzs`; функция `attach_held`
-- Modify: `app/services/dashboard.py` — ничего нового в `Dashboard`: сборы едут в `cards`
 - Modify: `app/services/analytics_service.py` — `dashboard`: `cards = attach_held(card_balances(fact, rates), held_on_cards(physical, sheets.held, today), rates)`
 - Modify: `app/web/schemas.py` — `HeldOut`, поля `CardOut`; `app/web/api.py:351` — `card_out`
 - Test: `tests/test_cards.py`, `tests/test_web_api.py`
@@ -220,9 +219,9 @@
 
 **Interfaces:**
 - Consumes: `HeldArticle`, `read_held` (Task 1).
-- Produces: callback `fix:h:<i>` — `i` — номер в `bot_data["held"]`. Кнопка «{icon} В {name}» строкой под «✓ Верно», по кнопке на сбор, — только у строки «💳 СЧЕТА» с `amount < 0`, статья которой не сбор. Нажатие = выбор группы «💳 СЧЕТА» и статьи сбора: тот же путь, что `fix:s` (вынести его в `_recategorize(query, context, state, last, row, category, subcategory)`).
+- Produces: callback `fix:h:<i>` — `i` — номер в `bot_data["held"]`. Кнопка «{icon} В {name}» — первой строкой, над «✓ Верно» (спека: «первой кнопкой»), по строке на сбор, — только у строки «💳 СЧЕТА» с `amount < 0`, статья которой не сбор. Нажатие = выбор группы «💳 СЧЕТА» и статьи сбора: тот же путь, что `fix:s` (вынести его в `_recategorize(query, context, state, last, row, category, subcategory)`).
 
-- [ ] **Step 1:** тесты: `test_check_keyboard_held_button` (входящий перевод → вторая строка кнопок `[("🎉 В сбор на праздник", "fix:h:0")]`), `test_check_keyboard_no_held_for_spending` (трата ❓ → кнопки как раньше), `test_check_keyboard_no_held_for_held_row` (строка уже в сборе → без кнопки), `test_held_button_recategorizes` (`fix:h:0` → `recategorize_row(..., "💳 СЧЕТА", "сбор на праздник", -400000)`, ответ «✅ Исправил…», очередь идёт дальше), `test_held_button_stale_after_reboot` (`bot_data["held"] = ()` до нажатия → «Кнопки устарели…», `recategorize_row` не вызван).
+- [ ] **Step 1:** тесты: `test_check_keyboard_held_button` (входящий перевод → первая строка кнопок `[("🎉 В сбор на праздник", "fix:h:0")]`, вторая — `[("✓ Верно", "fix:ok")]`), `test_check_keyboard_no_held_for_spending` (трата ❓ → кнопки как раньше), `test_check_keyboard_no_held_for_held_row` (строка уже в сборе → без кнопки), `test_held_button_recategorizes` (`fix:h:0` → `recategorize_row(..., "💳 СЧЕТА", "сбор на праздник", -400000)`, ответ «✅ Исправил…», очередь идёт дальше), `test_held_button_stale_after_reboot` (`bot_data["held"] = ()` до нажатия → «Кнопки устарели…», `recategorize_row` не вызван).
 - [ ] **Step 2:** FAIL. **Step 3:** реализация. **Step 4:** полный pytest — PASS.
 - [ ] **Step 5:** commit `feat: «🔎 Проверить» puts an incoming transfer into a held-money article in one tap`.
 
