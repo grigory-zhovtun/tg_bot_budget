@@ -192,3 +192,30 @@ def test_held_lines_name_the_card_only_when_the_article_is_on_several() -> None:
     assert held_text(other, with_card=True).startswith(
         "🎉 сбор на праздник (VISA 1111)"
     )
+
+
+def test_own_money_keeps_the_order_of_other_rows() -> None:
+    """Порядок строк важен recurring._clusters: свои строки не переставляются."""
+    frame = frame_of(
+        row("10.12.2026", "💳 СЧЕТА", "сбор на праздник", -1_000_000),
+        row("11.12.2026", "💳 СЧЕТА", "сбор на праздник", 1_300_000),
+        row("12.12.2026", "🏚️ ДОМ", "продукты", 20000),
+        row("10.12.2026", "🏚️ ДОМ", "продукты", 30000),
+    )
+    own = own_money(frame, [PARTY])
+    assert list(own.index)[:2] == [2, 3]  # как в исходной таблице, не по дням
+    assert set(own.index[2:]) == {4}  # поправка — после, со своим днём
+    assert own.loc[4, "day"] == D2
+
+
+def test_own_money_overspend_in_usd_uses_the_group_rate() -> None:
+    """Перерасход в валюте: сумма в сумах поправки — по курсу группы."""
+    card = "HUMO 3333 USD"
+    frame = frame_of(
+        row("10.12.2026", "💳 СЧЕТА", "сбор на праздник", -100, card, "USD"),
+        row("11.12.2026", "💳 СЧЕТА", "сбор на праздник", 150, card, "USD"),
+    )
+    own = own_money(frame, [PARTY])
+    assert own["amount"].tolist() == [50.0]
+    assert own["currency"].tolist() == ["USD"]
+    assert own["amount_uzs"].tolist() == [50.0 * 12000.0]

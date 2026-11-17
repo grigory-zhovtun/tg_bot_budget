@@ -164,7 +164,9 @@ def own_money(frame: pd.DataFrame, held: Sequence[HeldArticle]) -> pd.DataFrame:
     extra = pd.DataFrame(
         corrections, columns=frame.columns, index=range(start, start + len(corrections))
     )
-    return pd.concat([own, extra]).sort_values("day", kind="stable")
+    # без пересортировки: порядок строк важен recurring._clusters; поправки идут
+    # в конце и держат свой день
+    return pd.concat([own, extra])
 
 
 def _card_label(item: HeldOnCard) -> str:
