@@ -20,7 +20,7 @@ from matplotlib.figure import Figure
 
 from app import config
 from app.custom_icons import leading_emoji
-from app.domain import INCOME_GROUP, Rates, local_today, month_title
+from app.domain import INCOME_GROUP, TRANSFERS_GROUP, Rates, local_today, month_title
 from app.rich import NBSP, RULE, Report, heading, para, percent, table, whole
 from app.services.google_sheets import GoogleSheetsService, read_month_sheets
 
@@ -50,7 +50,6 @@ class SavingsTab(NamedTuple):
     rates: Rates
 
 
-TRANSFERS_GROUP = "💳 СЧЕТА"
 OPENING_BALANCE = "нач остаток"
 SERIAL_ZERO = date(1899, 12, 30)
 COLUMNS = ["day", "group", "subcategory", "amount", "comment", "currency", "source"]
