@@ -1,6 +1,7 @@
 """API Mini App: справочник, запись траты, повторы, отмена."""
 
 import asyncio
+import json
 import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -16,9 +17,10 @@ from starlette.testclient import TestClient
 
 from app import config
 from app.domain import entry_row, local_today
-from app.services.cards import CardBalance
+from app.services.cards import CardBalance, attach_held
 from app.services.dashboard import build_dashboard
 from app.services.google_sheets import row_values
+from app.services.held import HeldArticle, HeldOnCard
 from app.web import api as web_api
 from app.web.auth import launch_token
 from app.web.server import create_app
@@ -626,6 +628,9 @@ def test_dashboard_has_spending_by_group_and_card_balances() -> None:
             "checked": "2026-09-20",
             "matches": True,  # цент у долларов — совпадение
             "stale": True,  # сверяли больше недели назад
+            "own": 1500.25,
+            "own_uzs": 18_003_000,
+            "held": [],
         },
         {
             "name": "HUMO 4444",
@@ -636,8 +641,50 @@ def test_dashboard_has_spending_by_group_and_card_balances() -> None:
             "checked": None,
             "matches": None,
             "stale": False,
+            "own": None,
+            "own_uzs": None,
+            "held": [],
         },
     ]
+
+
+def held_dashboard(item: HeldOnCard) -> dict[str, Any]:
+    card = CardBalance("HUMO 2222 UZS", "UZS", 3_600_000, 3_600_000, None, None)
+    found = build_dashboard(
+        frame(),
+        tab(),
+        date(2026, 10, 2),
+        RATES,
+        "USD",
+        cards=attach_held([card], [item], RATES),
+    )
+    return dashboard_for(found).json()["cards"][0]
+
+
+def test_api_dashboard_held() -> None:
+    item = HeldOnCard(
+        HeldArticle("сбор на праздник", "🎉"), "HUMO 2222 UZS", "UZS", 1_250_000, 50_000
+    )
+    card = held_dashboard(item)
+    assert (card["own"], card["own_uzs"]) == (2_400_000, 2_400_000)
+    assert card["held"][0] == {
+        "name": "сбор на праздник",
+        "icon": "🎉",
+        "came": 1_250_000,
+        "spent": 50_000,
+        "left": 1_200_000,
+    }
+
+
+def test_api_dashboard_has_no_negative_zero() -> None:
+    # по сбору только расход: came — «минус ноль» из пустой суммы
+    item = HeldOnCard(
+        HeldArticle("сбор на праздник", "🎉"), "HUMO 2222 UZS", "UZS", -0.0, 50_000
+    )
+    card = held_dashboard(item)
+    assert card["held"][0]["came"] == 0
+    assert "-0.0" not in json.dumps(card)
+    assert str(card["held"][0]["came"]) == "0.0"
 
 
 def test_dashboard_joins_the_plan_with_the_fact_by_category() -> None:

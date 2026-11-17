@@ -816,7 +816,7 @@ class AnalyticsService:
         max_age > 0 — годятся копии листов не старше стольких секунд.
         """
         from app.services.calendar import read_calendar
-        from app.services.cards import card_balances
+        from app.services.cards import attach_held, card_balances
         from app.services.dashboard import build_dashboard
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
@@ -830,13 +830,17 @@ class AnalyticsService:
             logger.info("No plan sheet %s", sheet)
             return None
         rates, fact = sheets.rates, sheets.fact
+        physical = transactions_frame(fact, rates)
         try:
-            cards = card_balances(fact, rates)  # блок остатков — из того же чтения
+            cards = attach_held(  # блок остатков — из того же чтения
+                card_balances(fact, rates),
+                held_on_cards(physical, sheets.held, today),
+                rates,
+            )
         except Exception:
             # блок правят руками: его поломка не должна убрать всю «Сводку»
             logger.exception("Could not read the card balance block")
             cards = ()
-        physical = transactions_frame(fact, rates)
         frame = own_money(physical, sheets.held)  # лимит и «Заморожено» — без чужих
         return build_dashboard(
             frame,

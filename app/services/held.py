@@ -105,8 +105,9 @@ def held_on_cards(
                 article,
                 str(card),
                 str(code),
-                round(float(-amounts[amounts < 0].sum()), 2),
-                round(float(amounts[amounts > 0].sum()), 2),
+                # + 0.0: пустая сумма даёт «минус ноль», в JSON он станет «-0.0»
+                round(float(-amounts[amounts < 0].sum()), 2) + 0.0,
+                round(float(amounts[amounts > 0].sum()), 2) + 0.0,
             )
             if item.left != 0:
                 result.append(item)
