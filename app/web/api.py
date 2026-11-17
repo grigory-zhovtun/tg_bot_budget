@@ -131,6 +131,7 @@ from app.web.schemas import (
     FrozenPaymentOut,
     GroupOut,
     GroupPlanOut,
+    HeldOut,
     HintOut,
     LifeIn,
     MessageOut,
@@ -362,6 +363,18 @@ def card_out(card: CardBalance, today: date) -> CardOut:
         checked=card.checked.date() if card.checked else None,
         matches=card.matches,
         stale=card.stale(today),
+        own=card.own,
+        own_uzs=card.own_uzs,
+        held=[
+            HeldOut(
+                name=item.article.name,
+                icon=item.article.icon,
+                came=item.came + 0.0,  # без «-0.0» в JSON
+                spent=item.spent + 0.0,
+                left=item.left + 0.0,
+            )
+            for item in card.held
+        ],
     )
 
 

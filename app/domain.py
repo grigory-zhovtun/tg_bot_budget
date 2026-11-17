@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, field_validator
 
 INCOME_GROUP = "💰 ДОХОДЫ"
+TRANSFERS_GROUP = "💳 СЧЕТА"
 FALLBACK_CATEGORY = "🚧 РАЗНОЕ"
 FALLBACK_SUBCATEGORY = "неучтенка"
 MAX_AGE_DAYS = 400

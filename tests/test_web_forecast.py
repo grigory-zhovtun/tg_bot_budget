@@ -229,7 +229,7 @@ def test_the_forecast_may_take_copies_of_the_sheets() -> None:
     sheets = Sheets({"fact": [FACT_HEADER, *OPENING], "Oct 26": tab()})
     service = AnalyticsService(sheets)
     assert service.forecast(date(2026, 10, 2), ["UZS"], max_age=120) is not None
-    assert sheets.ages == [120, 120, 120, 120]
+    assert sorted(sheets.ages) == [120] * 4 + [600.0]  # + метки «чужие»
 
 
 def test_the_screen_takes_copies_unless_asked_to_refresh() -> None:
@@ -248,7 +248,7 @@ def test_service_reads_a_past_month_from_the_fact_alone() -> None:
     assert found is not None and found.closed
     assert found.end == date(2026, 9, 30)
     assert found.currencies[0].past[2].spent == 400_000
-    assert sheets.ages == [30.0, 30.0]  # курсы и fact — оба из копий
+    assert sorted(sheets.ages) == [30.0, 30.0, 600.0]  # курсы, fact, метки — копии
 
 
 def test_service_takes_the_current_month_as_no_month_at_all() -> None:
@@ -305,3 +305,30 @@ def test_a_past_month_also_comes_from_the_copies_unless_fresh(
     found = closed_month(frame(), date(2026, 9, 1), RATES, ["UZS"])
     assert forecast_for(found, query="?month=2026-09")[1].max_age > 0
     assert forecast_for(found, query="?month=2026-09&fresh=1")[1].max_age == 0
+
+
+def test_forecast_money_without_held() -> None:
+    held = fact_row(date(2026, 10, 1), "💳 СЧЕТА", "сбор на праздник", -700_000)
+    system = [["", "", "", "иконка"], ["💳 СЧЕТА", "сбор на праздник", "чужие", "🎉"]]
+    sheets = Sheets(
+        {"fact": [FACT_HEADER, *OPENING, held], "Oct 26": tab(), "system": system}
+    )
+    found = AnalyticsService(sheets).forecast(date(2026, 10, 2), ["UZS"])
+    assert found is not None
+    assert found.currencies[0].now == 5_000_000
+
+
+def test_a_past_month_leaves_held_money_out_of_its_last_evening() -> None:
+    # сбор пришёл в сентябре: на последний вечер сентября он не свои деньги
+    inflow = fact_row(date(2026, 9, 10), "💳 СЧЕТА", "сбор на праздник", -700_000)
+    system = [["", "", "", "иконка"], ["💳 СЧЕТА", "сбор на праздник", "чужие", "🎉"]]
+    sheets = Sheets(
+        {"fact": [FACT_HEADER, *OPENING, inflow], "Oct 26": tab(), "system": system}
+    )
+    service = AnalyticsService(sheets)
+    past = service.forecast(date(2026, 10, 2), ["UZS"], 0.0, date(2026, 9, 1))
+    current = service.forecast(date(2026, 10, 2), ["UZS"])
+    assert past is not None and current is not None
+    # на стыке месяцев скачка нет
+    assert past.currencies[0].past[-1].evening == 5_000_000
+    assert current.currencies[0].now == past.currencies[0].past[-1].evening

@@ -59,6 +59,25 @@ const group = (name: string, plan: number, fact: number) => ({
 });
 const devDashboard: Dashboard = {
   ...dashboardFixture,
+  // у первой карты — чужие деньги: сбор на праздник
+  cards: dashboardFixture.cards.map((card, index) =>
+    index === 0
+      ? {
+          ...card,
+          own: card.balance === null ? null : card.balance - 1_200_000,
+          own_uzs: card.uzs === null ? null : card.uzs - 1_200_000,
+          held: [
+            {
+              name: "сбор на праздник",
+              icon: "🎉",
+              came: 1_250_000,
+              spent: 50_000,
+              left: 1_200_000,
+            },
+          ],
+        }
+      : card,
+  ),
   categories: [
     group("🏠 ДОМ", 5_000_000, 5_300_000),
     group("🍔 ЕДА", 6_000_000, 4_200_000),

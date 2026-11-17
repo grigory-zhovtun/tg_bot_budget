@@ -177,7 +177,8 @@ def test_after_a_save_the_plan_is_read_afresh() -> None:
     sheets = sheets_with()
     assert post_plan(plan_app(sheets), change()).status_code == 200
     # проверка перед записью и ответ после неё — по таблице, не по копии
-    assert set(sheets.ages) == {0}
+    # (метки «чужие» из system — копия на десять минут, их это не касается)
+    assert set(sheets.ages) - {600.0} == {0}
 
 
 CAFE = {"group": "🍔 ЕДА", "subcategory": "кафе", "currency": "UZS", "plan": "700000"}
@@ -667,10 +668,10 @@ def test_the_plan_screen_takes_copies_unless_asked_to_refresh() -> None:
     sheets = sheets_with()
     client = client_for(make_application(sheets))
     client.get(f"/api/plan?month={MONTH}", headers=auth())
-    assert set(sheets.ages) == {web_api.SCREEN_COPY_AGE}
+    assert set(sheets.ages) - {600.0} == {web_api.SCREEN_COPY_AGE}
     sheets.ages.clear()
     client.get(f"/api/plan?month={MONTH}&fresh=1", headers=auth())
-    assert set(sheets.ages) == {0}
+    assert set(sheets.ages) - {600.0} == {0}
 
 
 def test_the_next_month_asks_the_piggies_for_the_goal() -> None:

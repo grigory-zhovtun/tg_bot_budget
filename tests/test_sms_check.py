@@ -3,13 +3,15 @@
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from telegram.error import BadRequest
 
-from app.domain import SheetRow
+from app.domain import TRANSFERS_GROUP, SheetRow
 from app.handlers import fix, last_write, messages
 from app.handlers.common import LAST_WRITE
+from app.services.held import HeldArticle
 from tests.test_fix import (
     CATEGORIES,
     SUBCATEGORIES,
@@ -254,3 +256,130 @@ async def test_undo_no_brings_the_check_button_back() -> None:
     await last_write.button(SimpleNamespace(callback_query=query), context)
     markup = query.edit_message_text.await_args.kwargs["reply_markup"]
     assert markup.inline_keyboard[0][0].text == "🔎 Проверить (1)"
+
+
+# --- «В сбор»: приход на «💳 СЧЕТА» одной кнопкой уходит в статью с пометкой «чужие» ---
+
+HELD = (HeldArticle("сбор на праздник", "🎉"),)
+
+
+def transfer(amount: float = -400000.0, subcategory: str = "переводы") -> SheetRow:
+    return row(
+        TRANSFERS_GROUP, subcategory, amount=amount, comment="перевод: HUMO 2222 UZS"
+    )
+
+
+def checking_held(rows: list[SheetRow], held: Any = HELD) -> SimpleNamespace:
+    context = checking(rows, {0: "❓"})
+    context.bot_data["held"] = held
+    return context
+
+
+def test_check_keyboard_held_button() -> None:
+    markup = fix.check_keyboard(CATEGORIES, None, fix.INLINE, HELD, transfer())
+    lines = [
+        [(b.text, b.callback_data) for b in line] for line in markup.inline_keyboard
+    ]
+    assert lines[0] == [("🎉 В сбор на праздник", "fix:h:0")]
+    assert lines[1] == [("✓ Верно", "fix:ok")]
+
+
+def test_check_keyboard_no_held_for_spending() -> None:
+    markup = fix.check_keyboard(CATEGORIES, None, fix.INLINE, HELD, transfer(48000.0))
+    assert callbacks(markup)[0] == ["fix:ok"]
+
+
+def test_check_keyboard_no_held_for_held_row() -> None:
+    markup = fix.check_keyboard(
+        CATEGORIES, None, fix.INLINE, HELD, transfer(subcategory="сбор на праздник")
+    )
+    assert callbacks(markup)[0] == ["fix:ok"]
+
+
+def test_check_keyboard_no_held_for_other_group() -> None:
+    markup = fix.check_keyboard(
+        CATEGORIES, None, fix.INLINE, HELD, row("🍔 ЕДА", "кафе", amount=-400000.0)
+    )
+    assert callbacks(markup)[0] == ["fix:ok"]
+
+
+def test_inline_check_shows_the_held_button() -> None:
+    context = checking_held([transfer()])
+    _, markup = fix.inline_check(context)
+    assert callbacks(markup)[:2] == [["fix:h:0"], ["fix:ok"]]
+
+
+async def test_queue_shows_the_held_button() -> None:
+    _, markup = await open_check(checking_held([transfer()]))
+    assert callbacks(markup)[:2] == [["fix:h:0"], ["fix:ok"]]
+
+
+async def test_back_keeps_the_held_button() -> None:
+    context = checking_held([transfer()])
+    fix.inline_check(context)
+    await press(context, "fix:c:0")
+    _, markup = await press(context, "fix:b")
+    assert callbacks(markup)[:2] == [["fix:h:0"], ["fix:ok"]]
+
+
+async def test_held_button_recategorizes() -> None:
+    context = checking_held([transfer()])
+    fix.inline_check(context)
+    text, markup = await press(context, "fix:h:0")
+    [(number, target, *changes)] = context.bot_data["gs_service"].calls
+    assert (number, target, changes) == (
+        4190,
+        transfer(),
+        [TRANSFERS_GROUP, "сбор на праздник", -400000.0],
+    )
+    assert text.startswith("✅ Исправил (строка 4190)")
+    assert context.user_data[LAST_WRITE]["checks"] == {}
+    assert context.bot_data["ai_service"].forgotten == 1
+
+
+async def test_held_button_goes_on_with_the_queue() -> None:
+    context = checking([transfer(), ROWS[0]], {0: "❓", 1: "🆕"})
+    context.bot_data["held"] = HELD
+    await open_check(context)
+    text, _ = await press(context, "fix:h:0")
+    assert "🔎 2 из 2. " in text
+    assert context.bot_data["gs_service"].calls[0][2:4] == (
+        TRANSFERS_GROUP,
+        "сбор на праздник",
+    )
+
+
+async def test_held_button_stale_after_reboot() -> None:
+    context = checking_held([transfer()])
+    fix.inline_check(context)
+    context.bot_data["held"] = ()
+    text, _ = await press(context, "fix:h:0")
+    assert text == fix.STALE
+    assert context.bot_data["gs_service"].calls == []
+
+
+async def test_held_button_ignored_for_a_spending_row() -> None:
+    context = checking_held([transfer(48000.0)])
+    fix.inline_check(context)
+    text, _ = await press(context, "fix:h:0")
+    assert text == fix.STALE
+    assert context.bot_data["gs_service"].calls == []
+
+
+async def test_income_month_is_asked_for_the_moved_row_not_the_next_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    asked = MagicMock()
+    monkeypatch.setattr(fix, "ask_month", asked)
+    monkeypatch.setattr(fix, "income_prompt", AsyncMock())
+    context = checking([transfer(), ROWS[0]], {0: "❓", 1: "🆕"})
+    await open_check(context)
+    await press(context, "fix:c:1")  # ДОХОДЫ
+    query = SimpleNamespace(
+        data="fix:s:0", answer=AsyncMock(), edit_message_text=AsyncMock()
+    )
+    update = SimpleNamespace(
+        callback_query=query, effective_chat=SimpleNamespace(id=42)
+    )
+    await fix.fix_button(update, context)
+    assert asked.call_args.args[3] == 4190  # первая строка, а не следующая (4191)

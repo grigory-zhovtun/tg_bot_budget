@@ -163,6 +163,16 @@ class UntrackedOut(ApiModel):
     amount: float  # в сумах
 
 
+class HeldOut(ApiModel):
+    """Чужие деньги на карте: сбор, сколько пришло, потрачено и осталось."""
+
+    name: str  # статья «💳 СЧЕТА»
+    icon: str
+    came: float  # в валюте карты
+    spent: float
+    left: float  # < 0 — доложено из своих
+
+
 class CardOut(ApiModel):
     """Остаток карты по таблице и сверка с банком."""
 
@@ -174,6 +184,9 @@ class CardOut(ApiModel):
     checked: date | None  # когда сверяли
     matches: bool | None  # None — сверять не с чем
     stale: bool  # сверке больше недели
+    own: float | None  # свои деньги: баланс без чужих; None — ошибка в ячейке
+    own_uzs: float | None
+    held: list[HeldOut] = []  # чужие деньги на карте
 
 
 class DayPointOut(ApiModel):

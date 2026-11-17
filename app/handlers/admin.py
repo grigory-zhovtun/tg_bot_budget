@@ -8,6 +8,7 @@ from app.errors import user_message
 from app.handlers.common import start
 from app.handlers.icons import load_custom_icons
 from app.services.google_sheets import GoogleSheetsService
+from app.services.held import read_held
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
             gs_service.get_categories_and_sources
         )
         icons = await asyncio.to_thread(gs_service.get_icons)
+        held = await asyncio.to_thread(read_held, gs_service)
         chats = await asyncio.to_thread(gs_service.get_chat_states)
     except Exception as e:
         logger.exception("Reboot failed")
@@ -41,6 +43,7 @@ async def reboot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.bot_data["subcategories"] = subcategories
     context.bot_data["sources"] = sources
     context.bot_data["icons"] = icons
+    context.bot_data["held"] = held  # метки «чужие» могли поставить в system!C
     context.bot_data["chats"] = chats  # клавиатуры могли включить прямо в таблице
     context.bot_data["chats_loaded"] = True
     if context.bot_data.get("emoji_packs"):

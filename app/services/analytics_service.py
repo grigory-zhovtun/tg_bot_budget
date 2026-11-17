@@ -20,9 +20,10 @@ from matplotlib.figure import Figure
 
 from app import config
 from app.custom_icons import leading_emoji
-from app.domain import INCOME_GROUP, Rates, local_today, month_title
+from app.domain import INCOME_GROUP, TRANSFERS_GROUP, Rates, local_today, month_title
 from app.rich import NBSP, RULE, Report, heading, para, percent, table, whole
 from app.services.google_sheets import GoogleSheetsService, read_month_sheets
+from app.services.held import held_on_cards, own_money, read_held
 
 if TYPE_CHECKING:
     from app.services.calendar import CalendarRecord
@@ -50,7 +51,6 @@ class SavingsTab(NamedTuple):
     rates: Rates
 
 
-TRANSFERS_GROUP = "💳 СЧЕТА"
 OPENING_BALANCE = "нач остаток"
 SERIAL_ZERO = date(1899, 12, 30)
 COLUMNS = ["day", "group", "subcategory", "amount", "comment", "currency", "source"]
@@ -687,9 +687,11 @@ class AnalyticsService:
             text = f"Вкладки «{sheet}» с планом нет — бот создаёт её 1-го числа."
             return Report(text), None
         rates = self.gs_service.get_rates()
-        frame = transactions_frame(
+        physical = transactions_frame(
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
+        held = read_held(self.gs_service)  # одно чтение: и в счёт, и в строки сбора
+        frame = own_money(physical, held)  # без чужих денег
         budget = day_budget(
             frame,
             rows,
@@ -698,6 +700,7 @@ class AnalyticsService:
             config.FROZEN_CURRENCY,
             self._records(),
             previous=self._previous_rows(today),
+            held=held_on_cards(physical, held, today),
         )
         if budget is None:
             return (
@@ -754,8 +757,11 @@ class AnalyticsService:
             for block in rich_plan_status(by_name.get(s), s, today)
         ]
         rates = self.gs_service.get_rates()
-        frame = transactions_frame(
-            self.gs_service.get_values(config.FACT_SHEET_NAME), rates
+        frame = own_money(
+            transactions_frame(
+                self.gs_service.get_values(config.FACT_SHEET_NAME), rates
+            ),
+            read_held(self.gs_service),
         )
         # без вкладки прошлого месяца: перенос не трогает лимит в сумах
         budget = day_budget(
@@ -810,7 +816,7 @@ class AnalyticsService:
         max_age > 0 — годятся копии листов не старше стольких секунд.
         """
         from app.services.calendar import read_calendar
-        from app.services.cards import card_balances
+        from app.services.cards import attach_held, card_balances
         from app.services.dashboard import build_dashboard
 
         today = today or local_today(config.ANALYTICS_TIMEZONE)
@@ -824,13 +830,18 @@ class AnalyticsService:
             logger.info("No plan sheet %s", sheet)
             return None
         rates, fact = sheets.rates, sheets.fact
+        physical = transactions_frame(fact, rates)
         try:
-            cards = card_balances(fact, rates)  # блок остатков — из того же чтения
+            cards = attach_held(  # блок остатков — из того же чтения
+                card_balances(fact, rates),
+                held_on_cards(physical, sheets.held, today),
+                rates,
+            )
         except Exception:
             # блок правят руками: его поломка не должна убрать всю «Сводку»
             logger.exception("Could not read the card balance block")
             cards = ()
-        frame = transactions_frame(fact, rates)
+        frame = own_money(physical, sheets.held)  # лимит и «Заморожено» — без чужих
         return build_dashboard(
             frame,
             sheets.month,
@@ -871,7 +882,7 @@ class AnalyticsService:
             return None
         piggies, journal = self.gs_service.get_piggy(max_age)
         rates = sheets.rates
-        frame = transactions_frame(sheets.fact, rates)
+        frame = own_money(transactions_frame(sheets.fact, rates), sheets.held)
         catalog = list(groups)
         book = read_book(piggies, journal, set(currencies), catalog, subcategories)
         budget = day_budget(frame, sheets.month, today, rates, config.FROZEN_CURRENCY)
@@ -910,18 +921,26 @@ class AnalyticsService:
 
         if month is not None and month < today.replace(day=1):
             # оба чтения ждут Google, а не процессор — одновременно
-            with ThreadPoolExecutor(max_workers=2) as pool:
+            with ThreadPoolExecutor(max_workers=3) as pool:
                 asked = pool.submit(self.gs_service.get_rates, max_age)
+                marks = pool.submit(read_held, self.gs_service, max_age)
                 rows = self.gs_service.get_values(config.FACT_SHEET_NAME, max_age)
                 rates = asked.result()
-            past = transactions_frame(rows, rates, keep_unknown=True)
+            # чужие деньги и в прошлом месяце не свои: иначе вечер последнего дня
+            # не сойдётся с началом текущего месяца
+            past = own_money(
+                transactions_frame(rows, rates, keep_unknown=True), marks.result()
+            )
             return closed_month(past, month, rates, currencies)
         sheet = month_title(today)
         sheets = read_month_sheets(self.gs_service, sheet, max_age)
         if sheets.month is None:
             logger.info("No plan sheet %s", sheet)
             return None
-        frame = transactions_frame(sheets.fact, sheets.rates, keep_unknown=True)
+        frame = own_money(
+            transactions_frame(sheets.fact, sheets.rates, keep_unknown=True),
+            sheets.held,
+        )
         listed = read_forecast(sheets.month)
         items = listed.items if listed is not None else ()
         return month_forecast(

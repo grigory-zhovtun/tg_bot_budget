@@ -1,6 +1,7 @@
 """Данные экрана «Сводка»: те же расчёты, что /today и /subs, и таблица дней."""
 
 from datetime import date
+from typing import Any
 
 import pytest
 
@@ -265,8 +266,9 @@ def test_a_planned_group_without_spending_stays_at_the_end() -> None:
 def test_the_dashboard_may_take_copies_of_the_sheets() -> None:
     sheets = Sheets({"fact": [FACT_HEADER, *OPENING, CAFE], "Oct 26": tab()})
     assert AnalyticsService(sheets).dashboard(TODAY, max_age=120) is not None
-    # вкладка, прошлая вкладка, курсы, fact и «Календарь» — копии не старше 2 минут
-    assert sheets.ages == [120, 120, 120, 120, 120]
+    # вкладка, прошлая вкладка, курсы, fact и «Календарь» — копии не старше 2 минут,
+    # метки «чужие» из system — десятиминутная копия
+    assert sorted(sheets.ages) == [120] * 5 + [600.0]
 
 
 def test_the_dashboard_reads_the_piggies_with_the_catalog() -> None:
@@ -279,4 +281,59 @@ def test_the_dashboard_reads_the_piggies_with_the_catalog() -> None:
     assert found is not None and found.budget is not None
     assert found.budget.piggies == 500
     # и листы копилок — копии не старше 2 минут, вместе с остальными
-    assert sheets.ages == [120] * 7
+    assert sorted(sheets.ages) == [120] * 7 + [600.0]
+
+
+SYSTEM_WITH_HELD = [
+    ["", "", "", "иконка"],
+    ["💳 СЧЕТА", "сбор на праздник", "чужие", "🎉"],
+]
+
+
+def test_dashboard_limit_without_held() -> None:
+    held = fact_row(date(2026, 10, 1), "💳 СЧЕТА", "сбор на праздник", -700_000)
+    base = {"fact": [FACT_HEADER, *OPENING, CAFE], "Oct 26": tab()}
+    plain = AnalyticsService(Sheets(base)).dashboard(TODAY)
+    marked = AnalyticsService(
+        Sheets({**base, "fact": [*base["fact"], held], "system": SYSTEM_WITH_HELD})
+    ).dashboard(TODAY)
+    unmarked = AnalyticsService(
+        Sheets({**base, "fact": [*base["fact"], held]})  # листа system нет
+    ).dashboard(TODAY)
+    assert plain and plain.budget and marked and marked.budget
+    assert marked.budget.balance == plain.budget.balance
+    assert unmarked and unmarked.budget
+    assert unmarked.budget.balance == plain.budget.balance + 700_000
+
+
+def with_card_block(fact: list[list[Any]]) -> list[list[Any]]:
+    """Лист fact с блоком остатков справа: карта HUMO 2222 UZS на 3 600 000."""
+    block = ["HUMO 2222 UZS", 3_600_000]
+    return [fact[0], [*fact[1], *[""] * (8 - len(fact[1])), *block], *fact[2:]]
+
+
+def test_dashboard_card_without_held_rows() -> None:
+    fact = with_card_block([FACT_HEADER, *OPENING, CAFE])
+    found = AnalyticsService(
+        Sheets({"fact": fact, "Oct 26": tab(), "system": SYSTEM_WITH_HELD})
+    ).dashboard(TODAY)
+    assert found is not None
+    (card,) = found.cards
+    assert (card.held, card.own) == ((), card.balance)
+
+
+def test_dashboard_card_gets_its_held_money() -> None:
+    came = fact_row(date(2026, 10, 1), "💳 СЧЕТА", "сбор на праздник", -1_250_000)
+    spent = fact_row(date(2026, 10, 1), "💳 СЧЕТА", "сбор на праздник", 50_000)
+    for entry in (came, spent):
+        entry[7] = "HUMO 2222 UZS"
+    fact = with_card_block([FACT_HEADER, *OPENING, CAFE, came, spent])
+    found = AnalyticsService(
+        Sheets({"fact": fact, "Oct 26": tab(), "system": SYSTEM_WITH_HELD})
+    ).dashboard(TODAY)
+    assert found is not None
+    (card,) = found.cards
+    assert [(h.article.name, h.left) for h in card.held] == [
+        ("сбор на праздник", 1_200_000)
+    ]
+    assert card.own == 2_400_000

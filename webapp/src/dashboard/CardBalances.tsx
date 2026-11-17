@@ -1,4 +1,4 @@
-import type { CardBalance } from "../api";
+import type { CardBalance, HeldMoney } from "../api";
 import { dayLabel, daysBetween, money, moneyText } from "../format";
 import { Fact, Line, Round, Title } from "./blocks";
 
@@ -45,6 +45,67 @@ function Check({ card, today }: { card: CardBalance; today: string }) {
   );
 }
 
+/** «сбор на праздник» → «Сбор на праздник». */
+function capital(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** Остаток сбора: у круга-значка нет знака валюты, поэтому сумы — со словом «сум». */
+function heldFigure(amount: number, currency: string): string {
+  const text = moneyText(amount, currency);
+  return currency === "UZS" ? `${text}\u00a0сум` : text;
+}
+
+/** Кусок строки: подпись и число рядом, а если не влезает и одно — число под подписью. */
+function Seg({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex min-w-0 flex-wrap gap-x-1">
+      <span className="whitespace-nowrap">{label}</span>
+      <span className="whitespace-nowrap">{value}</span>
+    </span>
+  );
+}
+
+/**
+ * Чужие деньги на карте — подстрока под строкой карты, с левой чертой: название
+ * статьи и сколько осталось; под ним — сколько пришло и потрачено, а при
+ * перерасходе — сколько доложено из своих. Суммы — в валюте карты.
+ */
+function Held({ item, currency }: { item: HeldMoney; currency: string }) {
+  return (
+    <div className="ml-3 flex items-center gap-3 border-l-[3px] border-outline pl-3">
+      <Round tone="bg-chip-mid">
+        <span aria-hidden="true" className="text-xl">
+          {item.icon}
+        </span>
+      </Round>
+      <span className="flex min-w-0 flex-1 flex-col text-base">
+        <span className="flex flex-wrap items-baseline justify-between gap-x-3 text-line font-extrabold text-warn">
+          <span>{capital(item.name)}</span>
+          <span className="ml-auto whitespace-nowrap tabular-nums">
+            {heldFigure(Math.max(item.left, 0), currency)}
+          </span>
+        </span>
+        {/* переносится только между кусками, а внутри куска — число под подписью */}
+        {item.left < 0 ? (
+          <span className="flex min-w-0 flex-wrap gap-x-2 font-extrabold text-danger">
+            <Seg
+              label="доложено из своих"
+              value={moneyText(-item.left, currency)}
+            />
+          </span>
+        ) : (
+          <span className="flex min-w-0 flex-wrap gap-x-2 font-bold text-hint">
+            <span className="whitespace-nowrap">чужие ·</span>
+            <Seg label="пришло" value={`${moneyText(item.came, currency)} ·`} />
+            <Seg label="потрачено" value={moneyText(item.spent, currency)} />
+          </span>
+        )}
+      </span>
+    </div>
+  );
+}
+
 interface Props {
   cards: CardBalance[];
   today: string;
@@ -56,7 +117,21 @@ interface Props {
  */
 export default function CardBalances({ cards, today }: Props) {
   const known = cards.filter((card) => card.uzs !== null);
-  const total = known.reduce((sum, card) => sum + (card.uzs ?? 0), 0);
+  // в итог идут свои деньги; у карты без сбора own_uzs может быть пуст — берём uzs
+  const total = known.reduce(
+    (sum, card) => sum + (card.own_uzs ?? card.uzs ?? 0),
+    0,
+  );
+  // чужие деньги в сумах — только там, где есть что держать
+  const heldUzs = cards.reduce(
+    (sum, card) =>
+      card.held.some((item) => item.left > 0) &&
+      card.uzs !== null &&
+      card.own_uzs !== null
+        ? sum + (card.uzs - card.own_uzs)
+        : sum,
+    0,
+  );
   // карты с остатком, но без курса в итог не входят — называем их валюты
   const unrated = [
     ...new Set(
@@ -77,24 +152,38 @@ export default function CardBalances({ cards, today }: Props) {
             sign: card.currency,
             tone: "bg-chip-off",
           };
+          const hasHeld = card.held.length > 0 && card.own !== null;
+          const shown = hasHeld ? card.own : card.balance;
           return (
             <li
               key={`${card.name}-${card.currency}`}
-              className="flex items-center gap-3"
+              className="flex flex-col gap-3"
             >
-              <Round tone={tone}>{sign}</Round>
-              <span className="flex min-w-0 flex-1 flex-col text-base">
-                {/* длинный остаток при крупном шрифте уходит строкой ниже, вправо */}
-                <span className="flex flex-wrap items-baseline justify-between gap-x-3 text-line font-extrabold">
-                  <span>{card.name}</span>
-                  <span className="ml-auto whitespace-nowrap tabular-nums">
-                    {card.balance === null
-                      ? "—"
-                      : moneyText(card.balance, card.currency)}
+              <div className="flex items-center gap-3">
+                <Round tone={tone}>{sign}</Round>
+                <span className="flex min-w-0 flex-1 flex-col text-base">
+                  {/* длинный остаток при крупном шрифте уходит строкой ниже, вправо */}
+                  <span className="flex flex-wrap items-baseline justify-between gap-x-3 text-line font-extrabold">
+                    <span>{card.name}</span>
+                    <span className="ml-auto whitespace-nowrap tabular-nums">
+                      {shown === null ? "—" : moneyText(shown, card.currency)}
+                    </span>
                   </span>
+                  {hasHeld && card.balance !== null ? (
+                    <span className="flex flex-wrap gap-x-2">
+                      <span className="font-bold text-hint">
+                        {`на карте всего ${moneyText(card.balance, card.currency)}`}
+                      </span>
+                      <Check card={card} today={today} />
+                    </span>
+                  ) : (
+                    <Check card={card} today={today} />
+                  )}
                 </span>
-                <Check card={card} today={today} />
-              </span>
+              </div>
+              {card.held.map((item) => (
+                <Held key={item.name} item={item} currency={card.currency} />
+              ))}
             </li>
           );
         })}
@@ -102,6 +191,7 @@ export default function CardBalances({ cards, today }: Props) {
       {known.length > 0 && (
         <div className="border-t-2 border-outline pt-3">
           <Fact>{`Всего ≈ ${money(total)}\u00a0сум`}</Fact>
+          {heldUzs > 0 && <Line>{`чужие ${money(heldUzs)} — не в счёт`}</Line>}
           {unrated.length > 0 && (
             <Line>{`без ${unrated.join(", ")} — нет курса`}</Line>
           )}

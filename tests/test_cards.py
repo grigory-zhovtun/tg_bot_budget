@@ -6,8 +6,17 @@ from typing import Any
 import pytest
 
 from app.domain import Rates
-from app.services import google_sheets
-from app.services.cards import BANK, CHECKED, NAME, TABLE, card_balances
+from app.services import cards, google_sheets
+from app.services.cards import (
+    BANK,
+    CHECKED,
+    NAME,
+    TABLE,
+    CardBalance,
+    attach_held,
+    card_balances,
+)
+from app.services.held import HeldArticle, HeldOnCard
 from tests.test_analytics_service import serial
 
 RATES = Rates({"UZS": 1.0, "USD": 12_000.0, "RUB": 150.0})
@@ -116,3 +125,62 @@ def test_block_columns_are_the_ones_the_sheet_service_writes() -> None:
     assert TABLE == index(google_sheets.TABLE_BALANCES.split(":")[1][0])
     assert BANK == index(google_sheets.BALANCE_COLUMN)
     assert CHECKED == index(google_sheets.CHECKED_COLUMN)
+
+
+PARTY = HeldArticle("сбор на праздник", "🎉")
+
+
+def humo(balance: float = 3_600_000) -> CardBalance:
+    return CardBalance("HUMO 2222 UZS", "UZS", balance, balance, balance, None)
+
+
+def test_attach_held_own() -> None:
+    item = HeldOnCard(PARTY, "HUMO 2222 UZS", "UZS", 1_250_000, 50_000)
+    plain = humo()
+    (found,) = attach_held([plain], [item], RATES)
+    assert found.held == (item,)
+    assert found.held_uzs == 1_200_000
+    assert (found.own, found.own_uzs) == (2_400_000, 2_400_000)
+    assert (found.balance, found.matches) == (plain.balance, plain.matches)
+
+
+def test_attach_held_in_foreign_currency_counts_in_sums() -> None:
+    card = CardBalance("VISA 3434 USD", "USD", 1000, 12_000_000, None, None)
+    item = HeldOnCard(PARTY, "VISA 3434 USD", "USD", 300, 0)
+    (found,) = attach_held([card], [item], RATES)
+    assert found.held_uzs == pytest.approx(3_600_000)
+    assert found.own == 700
+    assert found.own_uzs == pytest.approx(8_400_000)
+
+
+def test_attach_held_overspent() -> None:
+    item = HeldOnCard(PARTY, "HUMO 2222 UZS", "UZS", 100_000, 400_000)  # left −300 000
+    (found,) = attach_held([humo()], [item], RATES)
+    assert found.held == (item,)  # сбор показывается
+    assert found.held_uzs == 0
+    assert (found.own, found.own_uzs) == (3_600_000, 3_600_000)
+
+
+def test_attach_held_unknown_balance() -> None:
+    item = HeldOnCard(PARTY, "HUMO 2222 UZS", "UZS", 100_000, 0)
+    broken = CardBalance("HUMO 2222 UZS", "UZS", None, None, None, None)
+    (found,) = attach_held([broken], [item], RATES)
+    assert (found.own, found.own_uzs) == (None, None)
+
+
+def test_attach_held_card_not_in_block_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    cards._warned.clear()
+    item = HeldOnCard(PARTY, "HUMO 9999 UZS", "UZS", 100_000, 0)
+    with caplog.at_level("WARNING"):
+        (found,) = attach_held([humo()], [item], RATES)
+        attach_held([humo()], [item], RATES)  # каждая «Сводка» — второй раз
+    assert found.held == ()
+    assert "HUMO 9999 UZS" in caplog.text
+    assert caplog.text.count("HUMO 9999 UZS") == 1  # один раз за процесс
+
+
+def test_card_without_held_keeps_own_equal_to_balance() -> None:
+    (found,) = attach_held([humo()], [], RATES)
+    assert (found.held, found.held_uzs, found.own) == ((), 0.0, 3_600_000)

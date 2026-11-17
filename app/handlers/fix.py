@@ -12,7 +12,7 @@
 import asyncio
 import dataclasses
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from functools import partial
 
 from telegram import (
@@ -30,6 +30,7 @@ from app.custom_icons import CustomIcons
 from app.domain import (
     FALLBACK_CATEGORY,
     INCOME_GROUP,
+    TRANSFERS_GROUP,
     SheetRow,
     format_amount,
     row_name,
@@ -40,6 +41,7 @@ from app.handlers.income_month import ask_month
 from app.handlers.piggy import income_prompt
 from app.handlers.receipts import mark_dirty
 from app.services.google_sheets import GoogleSheetsService
+from app.services.held import HeldArticle
 from app.services.savings import save_hint
 from app.sms_rows import NEW
 from app.utils.keyboards import (
@@ -118,16 +120,41 @@ def subcategories_keyboard(
     return InlineKeyboardMarkup([*_grid(buttons, 2), [back, CANCEL]])
 
 
+def _held_buttons(
+    held: Sequence[HeldArticle], row: SheetRow | None
+) -> list[list[InlineKeyboardButton]]:
+    """«🎉 В сбор на праздник» по строке на сбор — только для прихода на «💳 СЧЕТА»,
+    который ещё не лежит в сборе. Номер в callback — место сбора в bot_data["held"]."""
+    if row is None or row.category != TRANSFERS_GROUP or row.amount >= 0:
+        return []
+    return [
+        [
+            InlineKeyboardButton(
+                f"{article.icon} В {article.name}", callback_data=f"fix:h:{i}"
+            )
+        ]
+        for i, article in enumerate(held)
+        if article.name != row.subcategory
+    ]
+
+
 def check_keyboard(
-    categories: list[str], custom: CustomIcons | None, mode: str
+    categories: list[str],
+    custom: CustomIcons | None,
+    mode: str,
+    held: Sequence[HeldArticle] = (),
+    row: SheetRow | None = None,
 ) -> InlineKeyboardMarkup:
-    """[✓ Верно], группы по две, внизу «↩️ Отменить запись» или «⏹ Хватит»."""
+    """«В сбор» (приход на «💳 СЧЕТА»), [✓ Верно], группы по две, внизу
+    «↩️ Отменить запись» или «⏹ Хватит»."""
     if mode == INLINE:
         bottom = action("↩️ Отменить запись", LAST_UNDO, KeyboardButtonStyle.DANGER)
     else:
         bottom = InlineKeyboardButton("⏹ Хватит", callback_data="fix:x")
     ok = action("✓ Верно", "fix:ok", KeyboardButtonStyle.SUCCESS)
-    return InlineKeyboardMarkup([[ok], *_groups(categories, custom), [bottom]])
+    return InlineKeyboardMarkup(
+        [*_held_buttons(held, row), [ok], *_groups(categories, custom), [bottom]]
+    )
 
 
 def check_text(last: dict, index: int, prefix: str = "") -> str:
@@ -204,7 +231,11 @@ def inline_check(
     context.user_data[STATE] = {"write": _snapshot(last), "row": index, "mode": INLINE}
     categories = context.bot_data.get("categories", [])
     return check_text(last, index), check_keyboard(
-        categories, premium_icons(context), INLINE
+        categories,
+        premium_icons(context),
+        INLINE,
+        context.bot_data.get("held", ()),
+        last["rows"][index],
     )
 
 
@@ -214,7 +245,11 @@ def _queue_prompt(
     prefix = f"🔎 {state['done'] + 1} из {state['total']}. "
     categories = context.bot_data.get("categories", [])
     return check_text(last, state["row"], prefix), check_keyboard(
-        categories, premium_icons(context), QUEUE
+        categories,
+        premium_icons(context),
+        QUEUE,
+        context.bot_data.get("held", ()),
+        last["rows"][state["row"]],
     )
 
 
@@ -381,7 +416,8 @@ async def _salary_day(context: ContextTypes.DEFAULT_TYPE) -> list[str]:
 
 async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Кнопки /fix и проверки: fix:r:<i> — операция, fix:c:<i> — группа,
-    fix:s:<i> — подгруппа, fix:ok — «✓ Верно», fix:b — назад, fix:x — отмена."""
+    fix:s:<i> — подгруппа, fix:h:<i> — «В сбор» (сбор №i из bot_data["held"]),
+    fix:ok — «✓ Верно», fix:b — назад, fix:x — отмена."""
     query = update.callback_query
     _, step, *rest = (query.data or "").split(":")
     await query.answer()
@@ -428,7 +464,13 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             await _edit(
                 query,
                 check_text(last, state["row"]),
-                check_keyboard(categories, premium_icons(context), INLINE),
+                check_keyboard(
+                    categories,
+                    premium_icons(context),
+                    INLINE,
+                    context.bot_data.get("held", ()),
+                    row,
+                ),
             )
         elif state.get("mode") == QUEUE:
             await _edit(query, *_queue_prompt(context, state, last))
@@ -455,16 +497,46 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             ),
         )
         return
-    if step != "s" or "category" not in state:
-        await _edit(query, STALE)
-        return
+    held: Sequence[HeldArticle] = context.bot_data.get("held", ())
+    if step == "h":
+        # «В сбор»: группа «💳 СЧЕТА» и статья сбора одним нажатием
+        index = _index(rest, held)
+        if index is None or "mode" not in state or not _held_buttons(held, row):
+            await _edit(query, STALE)
+            return
+        category, name = TRANSFERS_GROUP, held[index].name
+    else:
+        if step != "s" or "category" not in state:
+            await _edit(query, STALE)
+            return
+        category = state["category"]
+        names = subcategories.get(category, [])
+        index = _index(rest, names)
+        if index is None:
+            await _edit(query, STALE)
+            return
+        name = names[index]
+    number = last["first"] + state["row"]  # до очереди: _checked сдвинет state["row"]
+    fixed = await _recategorize(query, context, state, last, row, category, name)
+    chat = getattr(update, "effective_chat", None)
+    moved_in = row.category != INCOME_GROUP and category == INCOME_GROUP
+    if fixed is not None and moved_in and chat is not None:
+        # опоздавшая часть ЗП по SMS приходит переводом — месяц спрашиваем здесь
+        ask_month(context, chat.id, [fixed], number)
+        await income_prompt(context, chat.id, chat.id, [fixed])  # «🐷» под ответом
 
-    category = state["category"]
-    names = subcategories.get(category, [])
-    index = _index(rest, names)
-    if index is None:
-        await _edit(query, STALE)
-        return
+
+async def _recategorize(
+    query: CallbackQuery,
+    context: ContextTypes.DEFAULT_TYPE,
+    state: dict,
+    last: dict,
+    row: SheetRow,
+    category: str,
+    subcategory: str,
+) -> SheetRow | None:
+    """Перенести строку в категорию и подгруппу: запись в таблицу, ответ, очередь.
+    Исправленная строка — при успехе, иначе None (причина уже показана)."""
     number = last["first"] + state["row"]
     amount = amount_for(row, category)
     if amount is None:
@@ -476,11 +548,11 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             f"поступление, поправьте строку {number} в таблице или удалите "
             "запись: /undo",
         )
-        return
+        return None
     gs_service: GoogleSheetsService = context.bot_data["gs_service"]
     try:
         changed = await asyncio.to_thread(
-            gs_service.recategorize_row, number, row, category, names[index], amount
+            gs_service.recategorize_row, number, row, category, subcategory, amount
         )
     except Exception as error:
         logger.exception("Recategorization failed")
@@ -490,7 +562,7 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             state,
             f"❌ Не исправил: {user_message(error)}. /fix — ещё раз",
         )
-        return
+        return None
     if not changed:
         await _stop(
             query,
@@ -498,18 +570,17 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             state,
             f"Строка {number} уже изменена в таблице — поправьте её там.",
         )
-        return
+        return None
     fixed = dataclasses.replace(
-        row, category=category, subcategory=names[index], amount=amount
+        row, category=category, subcategory=subcategory, amount=amount
     )
-    rows[state["row"]] = fixed  # /undo и следующий /fix сверяют уже новую категорию
+    last["rows"][state["row"]] = fixed  # /undo и следующий /fix сверяют новую категорию
     if ai_service := context.bot_data.get("ai_service"):
         ai_service.forget_history()  # магазин сразу пойдёт в исправленную категорию
     mark_dirty(context.bot_data)  # доход стал тратой или наоборот — сверка списка
     logger.info("Row %s recategorized", number)
     verdict = f"✅ Исправил (строка {number}): {describe(fixed)}"
-    moved_in = row.category != INCOME_GROUP and category == INCOME_GROUP
-    if moved_in:
+    if row.category != INCOME_GROUP and category == INCOME_GROUP:
         # зарплата по SMS приходит переводом с ❓ — «отложите» и «с завтра» звучат здесь
         hint = await asyncio.to_thread(save_hint, gs_service, [fixed])
         verdict = "\n".join([verdict, *hint, *await _salary_day(context)])
@@ -519,8 +590,4 @@ async def fix_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         last.get("checks", {}).pop(state["row"], None)  # исправленная строка проверена
         context.user_data.pop(STATE, None)
         await _edit(query, verdict)
-    chat = getattr(update, "effective_chat", None)
-    if moved_in and chat is not None:
-        # опоздавшая часть ЗП по SMS приходит переводом — месяц спрашиваем здесь
-        ask_month(context, chat.id, [fixed], number)
-        await income_prompt(context, chat.id, chat.id, [fixed])  # «🐷» под ответом
+    return fixed

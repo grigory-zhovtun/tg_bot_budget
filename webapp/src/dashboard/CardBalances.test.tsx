@@ -16,6 +16,9 @@ function card(changes: Partial<CardBalance> = {}): CardBalance {
     checked: TODAY,
     matches: true,
     stale: false,
+    own: null,
+    own_uzs: null,
+    held: [],
     ...changes,
   };
 }
@@ -157,5 +160,135 @@ describe("CardBalances", () => {
     expect(
       screen.getByRole("heading", { name: "Остатки на картах" }).className,
     ).toContain("text-link");
+  });
+
+  describe("held money", () => {
+    const party = {
+      name: "сбор на праздник",
+      icon: "🎉",
+      came: 1_250_000,
+      spent: 50_000,
+      left: 1_200_000,
+    };
+    const humo = (changes: Partial<CardBalance> = {}) =>
+      card({
+        name: "HUMO 2222",
+        balance: 3_600_000,
+        uzs: 3_600_000,
+        bank: 3_600_000,
+        own: 2_400_000,
+        own_uzs: 2_400_000,
+        held: [party],
+        ...changes,
+      });
+
+    it("shows own money first and the held row", () => {
+      show([humo()]);
+      const item = row("HUMO 2222");
+      expect(within(item).getByText("2 400 000")).toBeTruthy();
+      expect(within(item).getByText("на карте всего 3 600 000")).toBeTruthy();
+      expect(within(item).getByText("✓ сверено сегодня")).toBeTruthy();
+      expect(screen.getByText("Сбор на праздник")).toBeTruthy();
+      expect(
+        screen.getByText("1 200 000 сум").parentElement?.className,
+      ).toContain("text-warn");
+      // кусок строки: подпись и число — отдельные nowrap-элементы в одном куске
+      expect(screen.getByText("чужие ·").className).toContain(
+        "whitespace-nowrap",
+      );
+      for (const [label, value] of [
+        ["пришло", "1 250 000 ·"],
+        ["потрачено", "50 000"],
+      ] as const) {
+        const l = screen.getByText(label);
+        const v = screen.getByText(value);
+        expect(l.className).toContain("whitespace-nowrap");
+        expect(v.className).toContain("whitespace-nowrap");
+        expect(l.parentElement).toBe(v.parentElement);
+      }
+      // колонка текста может сжиматься, отступ строки сбора — ml-3
+      expect(screen.getByText("чужие ·").parentElement?.className).toContain(
+        "min-w-0",
+      );
+      expect(
+        screen.getByText("Сбор на праздник").closest("div")?.className,
+      ).toContain("ml-3");
+      expect(screen.getByText("🎉").getAttribute("aria-hidden")).toBe("true");
+    });
+
+    it("total sums own money", () => {
+      show([humo(), card()]);
+      expect(screen.getByText("Всего ≈ 7 650 000 сум")).toBeTruthy();
+      expect(screen.getByText("чужие 1 200 000 — не в счёт")).toBeTruthy();
+    });
+
+    it("overspent held says it was added from own", () => {
+      show([
+        humo({
+          balance: 2_400_000,
+          uzs: 2_400_000,
+          held: [{ ...party, spent: 1_550_000, left: -300_000 }],
+        }),
+      ]);
+      expect(screen.getByText("0 сум")).toBeTruthy();
+      const label = screen.getByText("доложено из своих");
+      const number = screen.getByText("300 000");
+      expect(label.className).toContain("whitespace-nowrap");
+      expect(number.className).toContain("whitespace-nowrap");
+      expect(label.parentElement).toBe(number.parentElement);
+      expect(label.parentElement?.parentElement?.className).toContain(
+        "text-danger",
+      );
+      expect(screen.queryByText(/не в счёт/)).toBeNull();
+    });
+
+    it("shows the held amounts of a dollar card in dollars", () => {
+      const usdParty = {
+        ...party,
+        came: 500,
+        spent: 200.5,
+        left: 299.5,
+      };
+      show([
+        card({
+          name: "VISA 4444",
+          currency: "USD",
+          balance: 1000,
+          uzs: 12_000_000,
+          own: 700.5,
+          own_uzs: 8_406_000,
+          held: [usdParty],
+        }),
+      ]);
+      const item = row("VISA 4444");
+      expect(within(item).getByText("на карте всего 1 000 $")).toBeTruthy();
+      expect(screen.getByText("299,50 $")).toBeTruthy();
+      expect(screen.getByText("500 $ ·")).toBeTruthy();
+      expect(screen.getByText("200,50 $")).toBeTruthy();
+    });
+
+    it("overspent held of a dollar card is added from own in dollars", () => {
+      show([
+        card({
+          name: "VISA 4444",
+          currency: "USD",
+          balance: 100,
+          uzs: 1_200_000,
+          own: 100,
+          own_uzs: 1_200_000,
+          held: [{ ...party, came: 500, spent: 550, left: -50 }],
+        }),
+      ]);
+      expect(screen.getByText("50 $")).toBeTruthy();
+    });
+
+    it("card without held looks as before", () => {
+      show([card()]);
+      expect(row("VISA 1111").textContent).toBe(
+        `сумVISA 1111${nb("5 250 000")}✓ сверено сегодня`,
+      );
+      expect(screen.queryByText(/на карте всего/)).toBeNull();
+      expect(screen.queryByText(/не в счёт/)).toBeNull();
+    });
   });
 });

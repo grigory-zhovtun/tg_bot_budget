@@ -20,6 +20,7 @@ from app.services.google_sheets import (
     GoogleSheetsService,
     read_month_sheets,
 )
+from app.services.held import own_money
 from app.services.piggy import (
     AFTER_DAYS,
     WINDOW,
@@ -150,7 +151,7 @@ def sync_piggy(
         return 0
     sheets = read_month_sheets(gs, month_title(today), SHEET_AGE, calendar=False)
     rates = sheets.rates
-    frame = transactions_frame(sheets.fact, rates)
+    frame = own_money(transactions_frame(sheets.fact, rates), sheets.held)
     book = read_book(rows, journal, currencies, groups, subcategories)
     written = _close_windows(gs, book, frame, rates, today)
     if written:  # итоги и новые сроки — в расчёт колонок бота
@@ -220,7 +221,7 @@ def goal_cells(
             return None
         sheets = read_month_sheets(gs, month_title(today), SHEET_AGE, calendar=False)
         rates = sheets.rates
-        frame = transactions_frame(sheets.fact, rates)
+        frame = own_money(transactions_frame(sheets.fact, rates), sheets.held)
         same = (first.year, first.month) == (today.year, today.month)
         current = rows if same else sheets.month
         budget = (

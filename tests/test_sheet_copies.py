@@ -120,6 +120,25 @@ def test_a_write_forgets_every_copy(clock: list[float]) -> None:
     assert ws.reads == 4
 
 
+def test_a_write_keeps_the_system_copy_but_reload_drops_it(
+    clock: list[float],
+) -> None:
+    # бот пишет в system только Q:U, G и J: метки «чужие» (A:D) его записью
+    # не меняются, и read_held не должен перечитывать лист после каждой записи
+    ws = CountingWorksheet(FACT)
+    service = service_with(ws)
+    service.get_values("system", max_age=600)
+    service.get_values("fact", max_age=120)
+    service._written()
+    service.get_values("system", max_age=600)
+    assert ws.reads == 2  # system — из копии
+    service.get_values("fact", max_age=120)
+    assert ws.reads == 3  # fact — заново
+    service.reload()  # /reboot: метки могли поправить руками
+    service.get_values("system", max_age=600)
+    assert ws.reads == 4
+
+
 def test_a_read_during_a_write_is_not_kept(clock: list[float]) -> None:
     ws = CountingWorksheet(FACT)
     service = service_with(ws)
@@ -289,6 +308,7 @@ def test_month_sheets_are_read_together_with_the_screen_max_age() -> None:
         ("calendar", 120),
         ("fact", 120),
         ("rates", 120),
+        ("system", 600.0),  # метки «чужие» — копия на десять минут
     ]
 
 
@@ -373,6 +393,13 @@ def test_a_failed_piggy_read_leaves_the_screen_without_piggies(
     assert "Piggy" in caplog.text
 
 
+def test_without_held_the_system_sheet_is_not_read() -> None:
+    source = MonthSheetsSource({"Oct 26": [["План"]], "fact": FACT})
+    sheets = read_month_sheets(source, "Oct 26", calendar=False, held=False)
+    assert sheets.held == ()
+    assert "system" not in [name for name, _ in source.calls]
+
+
 def test_the_plan_screen_does_not_read_the_calendar() -> None:
     source = MonthSheetsSource({"Oct 26": [["План"]], "fact": FACT})
     sheets = read_month_sheets(source, "Oct 26", calendar=False)
@@ -381,8 +408,8 @@ def test_the_plan_screen_does_not_read_the_calendar() -> None:
 
 
 def test_sheets_are_read_at_the_same_time() -> None:
-    # все пять чтений стоят у барьера одновременно — по очереди тест бы повис
-    barrier = threading.Barrier(5, timeout=5)
+    # все шесть чтений стоят у барьера одновременно — по очереди тест бы повис
+    barrier = threading.Barrier(6, timeout=5)
 
     class Waiting(MonthSheetsSource):
         def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
@@ -402,9 +429,31 @@ def test_sheets_are_read_at_the_same_time() -> None:
     assert sheets.fact == FACT
 
 
+def test_sheets_without_held_are_one_read_fewer_at_the_same_time() -> None:
+    # пять чтений (вкладка, прошлая, курсы, fact, «Календарь») — все разом
+    barrier = threading.Barrier(5, timeout=5)
+
+    class Waiting(MonthSheetsSource):
+        def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:
+            barrier.wait()
+            return super().get_values(name, max_age)
+
+        def get_rates(self, max_age: float = 0.0) -> Rates:
+            barrier.wait()
+            return super().get_rates(max_age)
+
+        def get_calendar(self, max_age: float = 0.0) -> list[list[Any]]:
+            barrier.wait()
+            return super().get_calendar(max_age)
+
+    source = Waiting({"Oct 26": [], "fact": FACT})
+    sheets = read_month_sheets(source, "Oct 26", previous=True, held=False)
+    assert sheets.fact == FACT
+
+
 def test_piggy_sheets_are_read_at_the_same_time_too() -> None:
-    # семь чтений «Сводки» с копилками — тоже все разом
-    barrier = threading.Barrier(7, timeout=5)
+    # восемь чтений «Сводки» с копилками — тоже все разом
+    barrier = threading.Barrier(8, timeout=5)
 
     class Waiting(MonthSheetsSource):
         def get_values(self, name: str, max_age: float = 0.0) -> list[list[Any]]:

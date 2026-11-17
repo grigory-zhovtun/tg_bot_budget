@@ -714,7 +714,7 @@ def load_plan(
 
     max_age > 0 — годятся копии листов не старше стольких секунд.
     """
-    sheets = read_month_sheets(gs, title, max_age, calendar=False)
+    sheets = read_month_sheets(gs, title, max_age, calendar=False, held=False)
     if sheets.month is None:
         return None
     rates = sheets.rates
