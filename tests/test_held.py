@@ -5,10 +5,12 @@ from datetime import date
 from typing import Any
 
 import pandas as pd
+import pytest
 from gspread.exceptions import WorksheetNotFound
 
 from app import config
 from app.domain import Rates
+from app.services import held
 from app.services.analytics_service import transactions_frame
 from app.services.held import (
     HELD_TTL,
@@ -49,7 +51,7 @@ def frame_of(*rows: list[Any], keep_unknown: bool = False) -> pd.DataFrame:
     return transactions_frame([HEADER, *rows], RATES, keep_unknown=keep_unknown)
 
 
-def test_held_articles_marker() -> None:
+def test_held_articles_marker(caplog: pytest.LogCaptureFixture) -> None:
     rows = [
         ["💳 СЧЕТА", "сбор на праздник", " Чужие ", "🎉"],
         ["💳 СЧЕТА", "переводы", "", "🔄"],
@@ -57,7 +59,13 @@ def test_held_articles_marker() -> None:
         ["💳 СЧЕТА", "сбор на праздник", "чужие", "🎉"],  # повтор — один раз
         ["💳 СЧЕТА", "сбор на поход", "чужие"],  # без иконки
     ]
-    assert held_articles(rows) == (PARTY, HeldArticle("сбор на поход", "🤝"))
+    held._warned.clear()
+    with caplog.at_level(logging.WARNING):
+        assert held_articles(rows) == (PARTY, HeldArticle("сбор на поход", "🤝"))
+        assert held_articles(rows) == (PARTY, HeldArticle("сбор на поход", "🤝"))
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1  # метка у чужой группы — один раз за жизнь процесса
+    assert "🏚️ ДОМ" in warnings[0] and "продукты" in warnings[0]
 
 
 class _Broken:

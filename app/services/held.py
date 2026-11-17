@@ -25,6 +25,7 @@ HELD_MARK = "чужие"
 HELD_TTL = 600.0  # с, копия листа system для меток
 DEFAULT_ICON = "🤝"
 OVERSPEND_COMMENT = "перерасход сбора"
+_warned: set[tuple[str, str]] = set()  # метки не у «СЧЕТА» уже в логе
 
 
 @dataclass(frozen=True)
@@ -60,7 +61,15 @@ def held_articles(rows: Sequence[Sequence[Any]]) -> tuple[HeldArticle, ...]:
         group, name, mark, icon = (
             str(cell).strip() for cell in [*row[:4], *[""] * (4 - len(row[:4]))]
         )
-        if group != TRANSFERS_GROUP or not name or mark.lower() != HELD_MARK:
+        if not name or mark.lower() != HELD_MARK:
+            continue
+        if group != TRANSFERS_GROUP:
+            if (group, name) not in _warned:
+                _warned.add((group, name))
+                logger.warning(
+                    "Mark «%s» on %s / %s means nothing: only %s articles can be held",
+                    HELD_MARK, group, name, TRANSFERS_GROUP,
+                )  # fmt: skip
             continue
         found.setdefault(name, HeldArticle(name, icon or DEFAULT_ICON))
     return tuple(found.values())
