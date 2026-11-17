@@ -64,7 +64,11 @@ function heldFigure(amount: number, currency: string): string {
 function Held({ item, currency }: { item: HeldMoney; currency: string }) {
   return (
     <div className="ml-5 flex items-center gap-3 border-l-[3px] border-outline pl-3">
-      <Round tone="bg-chip-mid">{item.icon}</Round>
+      <Round tone="bg-chip-mid">
+        <span aria-hidden="true" className="text-xl">
+          {item.icon}
+        </span>
+      </Round>
       <span className="flex min-w-0 flex-1 flex-col text-base">
         <span className="flex flex-wrap items-baseline justify-between gap-x-3 text-line font-extrabold text-warn">
           <span>{capital(item.name)}</span>
@@ -72,13 +76,17 @@ function Held({ item, currency }: { item: HeldMoney; currency: string }) {
             {heldFigure(Math.max(item.left, 0), currency)}
           </span>
         </span>
+        {/* переносится только между кусками: подпись не отрывается от числа */}
         {item.left < 0 ? (
-          <span className="font-extrabold text-danger">
-            {`доложено из своих ${money(-item.left)}`}
+          <span className="flex flex-wrap gap-x-2 font-extrabold text-danger">
+            <span className="whitespace-nowrap">доложено из</span>
+            <span className="whitespace-nowrap">{`своих ${money(-item.left)}`}</span>
           </span>
         ) : (
-          <span className="font-bold text-hint">
-            {`чужие · пришло ${money(item.came)} · потрачено ${money(item.spent)}`}
+          <span className="flex flex-wrap gap-x-2 font-bold text-hint">
+            <span className="whitespace-nowrap">чужие ·</span>
+            <span className="whitespace-nowrap">{`пришло ${money(item.came)} ·`}</span>
+            <span className="whitespace-nowrap">{`потрачено ${money(item.spent)}`}</span>
           </span>
         )}
       </span>

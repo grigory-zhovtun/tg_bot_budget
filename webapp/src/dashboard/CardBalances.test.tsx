@@ -192,9 +192,15 @@ describe("CardBalances", () => {
       expect(
         screen.getByText("1 200 000 сум").parentElement?.className,
       ).toContain("text-warn");
-      expect(
-        screen.getByText("чужие · пришло 1 250 000 · потрачено 50 000"),
-      ).toBeTruthy();
+      // каждый кусок строки — свой nowrap-элемент: перенос только между ними
+      for (const part of [
+        "чужие ·",
+        "пришло 1 250 000 ·",
+        "потрачено 50 000",
+      ]) {
+        expect(screen.getByText(part).className).toContain("whitespace-nowrap");
+      }
+      expect(screen.getByText("🎉").getAttribute("aria-hidden")).toBe("true");
     });
 
     it("total sums own money", () => {
@@ -212,9 +218,9 @@ describe("CardBalances", () => {
         }),
       ]);
       expect(screen.getByText("0 сум")).toBeTruthy();
-      expect(screen.getByText("доложено из своих 300 000").className).toContain(
-        "text-danger",
-      );
+      const number = screen.getByText("своих 300 000");
+      expect(number.className).toContain("whitespace-nowrap");
+      expect(number.parentElement?.className).toContain("text-danger");
       expect(screen.queryByText(/не в счёт/)).toBeNull();
     });
 
