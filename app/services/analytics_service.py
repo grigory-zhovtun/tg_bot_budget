@@ -23,7 +23,7 @@ from app.custom_icons import leading_emoji
 from app.domain import INCOME_GROUP, TRANSFERS_GROUP, Rates, local_today, month_title
 from app.rich import NBSP, RULE, Report, heading, para, percent, table, whole
 from app.services.google_sheets import GoogleSheetsService, read_month_sheets
-from app.services.held import own_money, read_held
+from app.services.held import held_on_cards, own_money, read_held
 
 if TYPE_CHECKING:
     from app.services.calendar import CalendarRecord
@@ -690,7 +690,8 @@ class AnalyticsService:
         physical = transactions_frame(
             self.gs_service.get_values(config.FACT_SHEET_NAME), rates
         )
-        frame = own_money(physical, read_held(self.gs_service))  # без чужих денег
+        held = read_held(self.gs_service)  # одно чтение: и в счёт, и в строки сбора
+        frame = own_money(physical, held)  # без чужих денег
         budget = day_budget(
             frame,
             rows,
@@ -699,6 +700,7 @@ class AnalyticsService:
             config.FROZEN_CURRENCY,
             self._records(),
             previous=self._previous_rows(today),
+            held=held_on_cards(physical, held, today),
         )
         if budget is None:
             return (

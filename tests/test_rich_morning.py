@@ -23,6 +23,7 @@ from app.rich import (
 )
 from app.services.analytics_service import AnalyticsService
 from app.services.day_budget import format_day_budget, rich_day_budget
+from app.services.held import HeldArticle, HeldOnCard, held_text
 from app.services.recurring import find_series, rich_morning_lines
 from app.services.runway import Runway
 from tests.test_day_budget import (
@@ -341,3 +342,21 @@ async def test_today_command_sends_the_report_to_the_chat() -> None:
     await analytics.today_command(update, context)
     assert bot.do_api_request.await_args.kwargs["api_kwargs"]["chat_id"] == 5
     assert calls == [{"now": True}]
+
+
+def test_morning_held_line() -> None:
+    """Расширенное сообщение: строка сбора идёт блоком сразу под «💳 Сумы»."""
+    b = budget(date(2026, 10, 2), items=LIST)
+    item = HeldOnCard(
+        HeldArticle("сбор на праздник", "🎉"), "HUMO 2222 UZS", "UZS", 1_200_000, 0
+    )
+    payday = date(2026, 10, 30)
+    runway = Runway(5_000_000, 0, None, 0, None, None, 400_000, payday, "ЗП")
+    blocks = rich_day_budget(replace(b, runway=runway, held=(item,)))
+    at = blocks.index(heading(f"💳 Сумы сейчас {whole(5_000_000)}"))
+    assert blocks[at + 2] == para(held_text(item))
+    assert "чужие, не в счёт" in blocks[at + 2]
+    assert rich_day_budget(replace(b, runway=runway)) == rich_day_budget(
+        replace(b, runway=runway, held=())
+    )
+    assert not any("чужие" in block for block in rich_day_budget(b))

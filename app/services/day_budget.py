@@ -68,6 +68,7 @@ from app.services.analytics_service import (
 )
 from app.services.calendar import CalendarRecord, calendar_state
 from app.services.forecast import PACE_DAYS, currency_forecast
+from app.services.held import HeldOnCard, held_text
 from app.services.receipts import NOTHING, Receipt, closed, match_receipts, remaining
 from app.services.runway import Runway, horizon_runway
 
@@ -195,6 +196,8 @@ class DayBudget:
     # копилки на сейчас в валюте заморозки; None — их не читали (day_budget не
     # заполняет: читает тот, у кого листы копилок)
     piggies: float | None = None
+    # чужие деньги на картах (сбор): по строке под «Сумами»; пусто — строк нет
+    held: tuple[HeldOnCard, ...] = ()
 
 
 def _number(value: Any) -> float | None:
@@ -570,6 +573,7 @@ def day_budget(
     frozen_currency: str | None,
     records: Sequence[CalendarRecord] = (),
     previous: list[list[Any]] | None = None,
+    held: Sequence[HeldOnCard] = (),
 ) -> DayBudget | None:
     """Лимит на сегодня по листу fact и вкладке месяца; None — во вкладке нет списка.
 
@@ -585,6 +589,7 @@ def day_budget(
     вычитаются).
     previous — вкладка прошлого месяца (None — её нет): её недополученные
     поступления «Впереди» показывает первыми.
+    held — чужие деньги на картах (services.held): их строки идут под «Сумами».
     """
     # recurring сам берёт отсюда MONTHS_PREPOSITIONAL и short
     from app.services.recurring import find_series, outside_list
@@ -804,6 +809,7 @@ def day_budget(
         frozen_total=frozen_total,
         frozen_payments=frozen_payments,
         frozen_start=frozen_start,
+        held=tuple(held),
     )
 
 
@@ -1063,6 +1069,7 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
         lines += [f"   {line}" for line in below]
     if b.runway is not None:
         lines.append(runway_line(b.runway, b.today))
+    lines += [held_text(item) for item in b.held]  # чужие — сразу под «Сумами»
     if b.goal > 0:
         if b.goal > b.growth:
             lines.append(
@@ -1180,6 +1187,8 @@ def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
 
     if b.runway is not None:
         blocks += _rich_runway(b.runway, b.today)
+    if b.held:
+        blocks.append(para(*(held_text(item) for item in b.held)))
     frozen = _frozen_lines(b)
     if frozen is not None:
         head, keeps, below = frozen

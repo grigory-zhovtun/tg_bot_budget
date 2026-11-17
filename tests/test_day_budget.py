@@ -1,5 +1,6 @@
 """Лимит на день: остаток на картах, жёлтый список вкладки месяца, заморозка, текст."""
 
+from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
 from typing import Any
@@ -33,7 +34,7 @@ from app.services.day_budget import (
     today_line,
 )
 from app.services.google_sheets import PIGGY_JOURNAL_HEADER, PIGGY_LIST_HEADER
-from app.services.held import HeldArticle, own_money
+from app.services.held import HeldArticle, HeldOnCard, held_text, own_money
 from app.services.receipts import match_receipts
 from app.services.recurring import find_series, outside_list
 from tests.test_analytics_service import serial
@@ -1086,3 +1087,38 @@ def test_day_budget_overspent_held_lowers_sums() -> None:
     base = day_budget(plain, tab(), HELD_DAY, RATES, "USD")
     assert own is not None and base is not None
     assert own.balance == base.balance - 300_000
+
+
+HELD_ITEM = HeldOnCard(PARTY, "HUMO 2222 UZS", "UZS", 1_200_000, 0)
+
+
+def test_morning_held_line() -> None:
+    """Строка сбора — сразу под «💳 Сумы»; без сборов сообщение прежнее."""
+    plain = budget(HELD_DAY, CAFE_ROW)
+    assert plain.runway is not None
+    with_held = replace(plain, held=(HELD_ITEM,))
+    lines = format_day_budget(with_held).splitlines()
+    at = next(i for i, line in enumerate(lines) if line.startswith("💳 Сумы"))
+    assert lines[at + 1] == held_text(HELD_ITEM)
+    assert "🎉 сбор на праздник 1\u00a0200\u00a0000" in lines[at + 1]
+    assert lines[at + 1].endswith("— чужие, не в счёт")
+    assert len(lines) == len(format_day_budget(plain).splitlines()) + 1
+
+
+def test_morning_no_held_line() -> None:
+    plain = budget(HELD_DAY, CAFE_ROW)
+    assert plain.held == ()
+    assert format_day_budget(plain) == format_day_budget(replace(plain, held=()))
+    assert "чужие" not in format_day_budget(plain)
+
+
+def test_service_passes_held_money_to_the_morning() -> None:
+    fact = [FACT_HEADER, *OPENING, held_row(date(2026, 10, 1), -700_000)]
+    system = [["Группа", "Статья", "Метка", "Иконка"]]
+    system.append(["💳 СЧЕТА", "сбор на праздник", "чужие", "🎉"])
+    tabs = {"fact": fact, "Oct 26": tab(), "system": system}
+    text = AnalyticsService(Sheets(tabs)).morning_brief(HELD_DAY).text
+    assert "🎉 сбор на праздник" in text
+    assert "чужие, не в счёт" in text
+    tabs["system"] = system[:1]
+    assert "чужие" not in AnalyticsService(Sheets(tabs)).morning_brief(HELD_DAY).text
