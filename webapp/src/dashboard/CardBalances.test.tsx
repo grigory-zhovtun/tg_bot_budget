@@ -242,6 +242,46 @@ describe("CardBalances", () => {
       expect(screen.queryByText(/не в счёт/)).toBeNull();
     });
 
+    it("shows the held amounts of a dollar card in dollars", () => {
+      const usdParty = {
+        ...party,
+        came: 500,
+        spent: 200.5,
+        left: 299.5,
+      };
+      show([
+        card({
+          name: "VISA 4444",
+          currency: "USD",
+          balance: 1000,
+          uzs: 12_000_000,
+          own: 700.5,
+          own_uzs: 8_406_000,
+          held: [usdParty],
+        }),
+      ]);
+      const item = row("VISA 4444");
+      expect(within(item).getByText("на карте всего 1 000 $")).toBeTruthy();
+      expect(screen.getByText("299,50 $")).toBeTruthy();
+      expect(screen.getByText("500 $ ·")).toBeTruthy();
+      expect(screen.getByText("200,50 $")).toBeTruthy();
+    });
+
+    it("overspent held of a dollar card is added from own in dollars", () => {
+      show([
+        card({
+          name: "VISA 4444",
+          currency: "USD",
+          balance: 100,
+          uzs: 1_200_000,
+          own: 100,
+          own_uzs: 1_200_000,
+          held: [{ ...party, came: 500, spent: 550, left: -50 }],
+        }),
+      ]);
+      expect(screen.getByText("50 $")).toBeTruthy();
+    });
+
     it("card without held looks as before", () => {
       show([card()]);
       expect(row("VISA 1111").textContent).toBe(

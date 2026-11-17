@@ -56,11 +56,6 @@ function heldFigure(amount: number, currency: string): string {
   return currency === "UZS" ? `${text}\u00a0сум` : text;
 }
 
-/**
- * Чужие деньги на карте — подстрока под строкой карты, с левой чертой: название
- * статьи и сколько осталось; под ним — сколько пришло и потрачено, а при
- * перерасходе — сколько доложено из своих.
- */
 /** Кусок строки: подпись и число рядом, а если не влезает и одно — число под подписью. */
 function Seg({ label, value }: { label: string; value: string }) {
   return (
@@ -71,6 +66,11 @@ function Seg({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * Чужие деньги на карте — подстрока под строкой карты, с левой чертой: название
+ * статьи и сколько осталось; под ним — сколько пришло и потрачено, а при
+ * перерасходе — сколько доложено из своих. Суммы — в валюте карты.
+ */
 function Held({ item, currency }: { item: HeldMoney; currency: string }) {
   return (
     <div className="ml-3 flex items-center gap-3 border-l-[3px] border-outline pl-3">
@@ -89,13 +89,16 @@ function Held({ item, currency }: { item: HeldMoney; currency: string }) {
         {/* переносится только между кусками, а внутри куска — число под подписью */}
         {item.left < 0 ? (
           <span className="flex min-w-0 flex-wrap gap-x-2 font-extrabold text-danger">
-            <Seg label="доложено из своих" value={money(-item.left)} />
+            <Seg
+              label="доложено из своих"
+              value={moneyText(-item.left, currency)}
+            />
           </span>
         ) : (
           <span className="flex min-w-0 flex-wrap gap-x-2 font-bold text-hint">
             <span className="whitespace-nowrap">чужие ·</span>
-            <Seg label="пришло" value={`${money(item.came)} ·`} />
-            <Seg label="потрачено" value={money(item.spent)} />
+            <Seg label="пришло" value={`${moneyText(item.came, currency)} ·`} />
+            <Seg label="потрачено" value={moneyText(item.spent, currency)} />
           </span>
         )}
       </span>
@@ -169,7 +172,7 @@ export default function CardBalances({ cards, today }: Props) {
                   {hasHeld && card.balance !== null ? (
                     <span className="flex flex-wrap gap-x-2">
                       <span className="font-bold text-hint">
-                        {`на карте всего ${money(card.balance)}`}
+                        {`на карте всего ${moneyText(card.balance, card.currency)}`}
                       </span>
                       <Check card={card} today={today} />
                     </span>
