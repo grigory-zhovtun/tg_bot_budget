@@ -64,6 +64,9 @@ export const transferCards: CardBalance[] = [
     checked: null,
     matches: null,
     stale: false,
+    own: null,
+    own_uzs: null,
+    held: [],
   },
   {
     name: "VISA 3333",
@@ -74,6 +77,9 @@ export const transferCards: CardBalance[] = [
     checked: null,
     matches: null,
     stale: false,
+    own: null,
+    own_uzs: null,
+    held: [],
   },
 ];
 
@@ -226,6 +232,9 @@ export const dashboardFixture: Dashboard = {
       checked: "2026-10-10",
       matches: true,
       stale: false,
+      own: null,
+      own_uzs: null,
+      held: [],
     },
     {
       name: "VISA 2222",
@@ -236,6 +245,9 @@ export const dashboardFixture: Dashboard = {
       checked: "2026-10-04",
       matches: true,
       stale: false,
+      own: null,
+      own_uzs: null,
+      held: [],
     },
     {
       name: "VISA 6666",
@@ -246,6 +258,9 @@ export const dashboardFixture: Dashboard = {
       checked: "2026-10-01",
       matches: false,
       stale: true,
+      own: null,
+      own_uzs: null,
+      held: [],
     },
   ],
 };

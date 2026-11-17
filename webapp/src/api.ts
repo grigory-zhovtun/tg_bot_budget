@@ -80,6 +80,15 @@ export interface Untracked {
   amount: number; // в сумах
 }
 
+/** Чужие деньги на карте — статья «чужие»: сколько пришло, потрачено и осталось. */
+export interface HeldMoney {
+  name: string; // название статьи: «сбор на праздник»
+  icon: string;
+  came: number; // пришло на карту, в валюте карты
+  spent: number; // потрачено из этих денег
+  left: number; // осталось; меньше нуля — доложено из своих
+}
+
 /** Остаток карты по таблице и сверка с банком. */
 export interface CardBalance {
   name: string; // без валюты — она у суммы: «VISA 1111»
@@ -90,6 +99,9 @@ export interface CardBalance {
   checked: string | null; // когда сверяли, ISO-дата
   matches: boolean | null; // null — сверять не с чем
   stale: boolean; // сверке больше недели
+  own: number | null; // свои деньги на карте; null — остатка нет
+  own_uzs: number | null; // свои деньги в сумах; null — нет курса или остатка
+  held: HeldMoney[]; // чужие деньги на карте; [] — их нет
 }
 
 /** Ступень подушки: 1, 3 месяца или цель — сколько ещё до неё. */
