@@ -167,9 +167,29 @@ def own_money(frame: pd.DataFrame, held: Sequence[HeldArticle]) -> pd.DataFrame:
     return pd.concat([own, extra]).sort_values("day", kind="stable")
 
 
-def held_text(item: HeldOnCard) -> str:
-    """Строка сводки: чужие деньги не в счёт или сколько доложено из своих."""
+def _card_label(item: HeldOnCard) -> str:
+    """Карта без кода валюты на конце: «HUMO 2222 UZS» → «HUMO 2222»."""
+    name, _, tail = item.card.rpartition(" ")
+    return name if name and tail == item.currency else item.card
+
+
+def held_text(item: HeldOnCard, with_card: bool = False) -> str:
+    """Строка сводки: чужие деньги не в счёт или сколько доложено из своих.
+
+    with_card — с названием карты: статья лежит на нескольких картах, и строки
+    без него не отличить друг от друга."""
     label = f"{item.article.icon} {item.article.name}"
+    if with_card:
+        label += f" ({_card_label(item)})"
     if item.left > 0:
         return f"{label} {money_text(item.left, item.currency)} — чужие, не в счёт"
     return f"{label} — доложено из своих {money_text(-item.left, item.currency)}"
+
+
+def held_lines(items: Sequence[HeldOnCard]) -> list[str]:
+    """Строки сводки по всем чужим деньгам; карта названа там, где статья на двух
+    картах и больше."""
+    count: dict[str, int] = {}
+    for item in items:
+        count[item.article.name] = count.get(item.article.name, 0) + 1
+    return [held_text(item, count[item.article.name] > 1) for item in items]

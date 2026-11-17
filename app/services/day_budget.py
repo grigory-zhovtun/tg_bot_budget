@@ -68,7 +68,7 @@ from app.services.analytics_service import (
 )
 from app.services.calendar import CalendarRecord, calendar_state
 from app.services.forecast import PACE_DAYS, currency_forecast
-from app.services.held import HeldOnCard, held_text
+from app.services.held import HeldOnCard, held_lines
 from app.services.receipts import NOTHING, Receipt, closed, match_receipts, remaining
 from app.services.runway import Runway, horizon_runway
 
@@ -1069,7 +1069,7 @@ def format_day_budget(budget: DayBudget, now: bool = False) -> str:
         lines += [f"   {line}" for line in below]
     if b.runway is not None:
         lines.append(runway_line(b.runway, b.today))
-    lines += [held_text(item) for item in b.held]  # чужие — сразу под «Сумами»
+    lines += held_lines(b.held)  # чужие — сразу под «Сумами»
     if b.goal > 0:
         if b.goal > b.growth:
             lines.append(
@@ -1188,7 +1188,7 @@ def rich_day_budget(budget: DayBudget, now: bool = False) -> list[str]:
     if b.runway is not None:
         blocks += _rich_runway(b.runway, b.today)
     if b.held:
-        blocks.append(para(*(held_text(item) for item in b.held)))
+        blocks.append(para(*held_lines(b.held)))
     frozen = _frozen_lines(b)
     if frozen is not None:
         head, keeps, below = frozen

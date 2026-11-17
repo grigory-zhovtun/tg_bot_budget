@@ -17,6 +17,7 @@ from app.services.held import (
     HeldArticle,
     HeldOnCard,
     held_articles,
+    held_lines,
     held_on_cards,
     held_text,
     own_money,
@@ -175,4 +176,19 @@ def test_held_text() -> None:
     assert (
         held_text(HeldOnCard(PARTY, HUMO, "UZS", 100_000, 400_000))
         == "🎉 сбор на праздник — доложено из своих 300 000"
+    )
+
+
+def test_held_lines_name_the_card_only_when_the_article_is_on_several() -> None:
+    one = HeldOnCard(PARTY, HUMO, "UZS", 700_000, 0)
+    other = HeldOnCard(PARTY, VISA, "UZS", 300_000, 0)
+    trip = HeldOnCard(HeldArticle("сбор на поход", "🥾"), HUMO, "UZS", 50_000, 0)
+    assert held_lines([one]) == [held_text(one)]  # одна карта — текст прежний
+    assert held_lines([one, other, trip]) == [
+        "🎉 сбор на праздник (HUMO 2222) 700\u00a0000 — чужие, не в счёт",
+        "🎉 сбор на праздник (VISA 1111) 300\u00a0000 — чужие, не в счёт",
+        held_text(trip),  # другая статья на одной карте — без карты
+    ]
+    assert held_text(other, with_card=True).startswith(
+        "🎉 сбор на праздник (VISA 1111)"
     )
