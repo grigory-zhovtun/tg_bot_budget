@@ -48,6 +48,7 @@ from app.message_log import LoggingRequest, MessageLog
 from app.services.ai_service import GeminiService
 from app.services.analytics_service import AnalyticsService
 from app.services.google_sheets import GoogleSheetsService
+from app.services.held import read_held
 from app.services.piggy_sync import bot_catalog
 from app.web import server
 from app.web.auth import webhook_secret
@@ -421,6 +422,7 @@ def main() -> None:
         webhook=web,
         chat_states=chat_states,
     )
+    app.bot_data["held"] = read_held(gs_service)  # статьи «чужие»; сбой — ()
     logger.info(
         "Loaded %d sources, %d categories and %d icons.",
         len(sources),
