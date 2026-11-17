@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from app.domain import Rates
-from app.services import google_sheets
+from app.services import cards, google_sheets
 from app.services.cards import (
     BANK,
     CHECKED,
@@ -171,11 +171,14 @@ def test_attach_held_unknown_balance() -> None:
 def test_attach_held_card_not_in_block_is_logged(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
+    cards._warned.clear()
     item = HeldOnCard(PARTY, "HUMO 9999 UZS", "UZS", 100_000, 0)
     with caplog.at_level("WARNING"):
         (found,) = attach_held([humo()], [item], RATES)
+        attach_held([humo()], [item], RATES)  # каждая «Сводка» — второй раз
     assert found.held == ()
     assert "HUMO 9999 UZS" in caplog.text
+    assert caplog.text.count("HUMO 9999 UZS") == 1  # один раз за процесс
 
 
 def test_card_without_held_keeps_own_equal_to_balance() -> None:

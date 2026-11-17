@@ -17,6 +17,7 @@ from app.services.analytics_service import SERIAL_ZERO, STALE_CHECK_DAYS
 from app.services.held import HeldOnCard
 
 logger = logging.getLogger(__name__)
+_warned: set[tuple[str, str]] = set()  # (статья, карта) уже в логе
 
 # колонки блока (с 0) — те же, что пишет и читает GoogleSheetsService
 NAME, TABLE, BANK, CHECKED = 8, 9, 13, 16  # I, J, N, Q
@@ -127,7 +128,8 @@ def attach_held(
     """
     known = {card.name for card in cards}
     for item in held:
-        if item.card not in known:
+        if item.card not in known and (item.article.name, item.card) not in _warned:
+            _warned.add((item.article.name, item.card))
             logger.warning(
                 "Held money of %s is on a card missing from the balance block: %s",
                 item.article.name,
