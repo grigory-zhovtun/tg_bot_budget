@@ -729,11 +729,13 @@ async def test_today_command_shows_the_day_so_far() -> None:
     )
     bot = SimpleNamespace(send_message=AsyncMock())
     context = SimpleNamespace(
-        bot=bot, bot_data={"analytics_service": SimpleNamespace(morning_brief=brief)}
+        args=[],
+        bot=bot,
+        bot_data={"analytics_service": SimpleNamespace(morning_brief=brief)},
     )
     await analytics.today_command(update, context)
     bot.send_message.assert_awaited_once_with(42, "💸")
-    assert calls == [{"now": True}]
+    assert calls == [{"now": True, "compact": True}]
 
 
 ADVANCE_PAID = fact_row(date(2026, 10, 15), "💰 ДОХОДЫ", "зарплата", 2_000_000)

@@ -651,9 +651,11 @@ class AnalyticsService:
             )
             return None
 
-    def morning_brief(self, today: date | None = None, now: bool = False) -> Report:
+    def morning_brief(
+        self, today: date | None = None, now: bool = False, *, compact: bool = False
+    ) -> Report:
         """Лимит на сегодня по вкладке месяца: утреннее сообщение и /today."""
-        return self._brief(today, now)[0]
+        return self._brief(today, now, compact=compact)[0]
 
     def morning_message(self, today: date | None = None) -> tuple[Report, bool]:
         """Утреннее сообщение и нужен ли 🎉 (вчера уложились в лимит)."""
@@ -667,7 +669,7 @@ class AnalyticsService:
     ) -> tuple[Report, Any]:
         # day_budget и recurring сами берут отсюда plan_lines и expenses
         from app.services.day_budget import (
-            compact_morning_report,
+            compact_day_report,
             day_budget,
             format_day_budget,
             read_forecast,
@@ -714,7 +716,7 @@ class AnalyticsService:
                 message += "\n\n" + format_plan_report(rows, today)
             return Report(message), None
         if compact:
-            return compact_morning_report(budget), budget
+            return compact_day_report(budget, now), budget
         if budget.frozen is not None and self.catalog is not None:
             sheets = self._piggy_sheets()
             budget = replace(

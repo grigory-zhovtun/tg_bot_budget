@@ -13,6 +13,7 @@ from telegram.ext import ContextTypes
 from app import config
 from app.errors import user_message
 from app.rich import Report
+from app.utils.keyboards import dashboard_markup
 
 logger = logging.getLogger(__name__)
 
@@ -304,14 +305,22 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     """/today: лимит на сегодня, сколько уже потрачено и сколько осталось."""
     analytics_service = context.bot_data.get("analytics_service")
     try:
-        report = await asyncio.to_thread(analytics_service.morning_brief, now=True)
+        report = await asyncio.to_thread(
+            analytics_service.morning_brief, now=True, compact=context.args != ["full"]
+        )
     except Exception as e:
         logger.exception("Today brief failed")
         await update.message.reply_text(
             f"Не удалось посчитать лимит: {user_message(e)}"
         )
         return
-    await send_report(context.bot, update.effective_chat.id, report)
+    chat_id = update.effective_chat.id
+    await send_report(
+        context.bot,
+        chat_id,
+        report,
+        reply_markup=dashboard_markup(config.WEBAPP_URL) if chat_id > 0 else None,
+    )
 
 
 async def subs_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

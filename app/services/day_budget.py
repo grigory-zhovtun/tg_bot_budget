@@ -1012,7 +1012,7 @@ def runway_line(runway: Runway, today: date) -> str:
     return f"{head} — {_runway_when(runway, today)} · {target} {need}"
 
 
-def _morning_warning(budget: DayBudget) -> str:
+def _brief_warning(budget: DayBudget, limit_horizon: str) -> str:
     if round(budget.due_short_today) > 0:
         return f"⚠️ На платежи сегодня не хватает {whole(budget.due_short_today)} сум."
     runway = budget.runway
@@ -1028,7 +1028,7 @@ def _morning_warning(budget: DayBudget) -> str:
             else f"не хватит {whole(runway.short)} сум"
         )
         horizon = runway_until(runway, budget.today)
-        if horizon != until_text(budget):
+        if horizon != limit_horizon:
             need = f"{horizon} {need}"
         return f"⚠️ При прежнем темпе {when}. {need.capitalize()}."
     if budget.goal > 0 and budget.goal > budget.growth:
@@ -1036,18 +1036,37 @@ def _morning_warning(budget: DayBudget) -> str:
     return ""
 
 
-def compact_morning_report(budget: DayBudget) -> Report:
+def compact_day_report(budget: DayBudget, now: bool = False) -> Report:
     weekday = WEEKDAYS[budget.today.weekday()].capitalize()
     date_line = (
         f"☀️ {weekday}, {budget.today.day} {MONTHS_GENITIVE[budget.today.month - 1]}"
     )
-    limit = f"{whole(max(budget.limit, 0))} сум в день"
-    horizon = until_text(budget)
-    if budget.limit < 0:
-        horizon += f" — не хватает {whole(-budget.limit * budget.days_left)} сум"
-    text = f"{date_line}\n{limit} {horizon}"
-    html = para(date_line) + heading(limit, 1) + para(horizon)
-    warning = _morning_warning(budget)
+    tomorrow = budget.tomorrow if now else None
+    if tomorrow is None:
+        limit, days = budget.limit, budget.days_left
+        horizon = until_text(budget)
+    else:
+        limit, days = tomorrow.limit, tomorrow.days
+        horizon = allowance_until(tomorrow, budget.today)
+    headline = f"{whole(max(limit, 0))} сум в день"
+    detail = horizon
+    separator = " "
+    if tomorrow is not None:
+        headline = f"С завтра — {headline}"
+    elif now and budget.spent_today and (limit > 0 or budget.spent_today > 0):
+        left = max(limit, 0) - budget.spent_today
+        headline = (
+            f"На сегодня осталось {whole(left)} сум"
+            if left >= 0
+            else f"Сверх лимита на {whole(-left)} сум"
+        )
+        detail = f"Лимит {whole(max(limit, 0))} сум в день {horizon}"
+        separator = "\n"
+    if limit < 0:
+        detail += f" — не хватает {whole(-limit * days)} сум"
+    text = f"{date_line}\n{headline}{separator}{detail}"
+    html = para(date_line) + heading(headline, 1) + para(detail)
+    warning = _brief_warning(budget, horizon)
     if warning:
         text += f"\n\n{warning}"
         html += para(warning)

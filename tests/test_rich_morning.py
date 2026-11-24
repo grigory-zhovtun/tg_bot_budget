@@ -3,7 +3,6 @@
 from dataclasses import replace
 from datetime import date
 from types import SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -23,7 +22,7 @@ from app.rich import (
 )
 from app.services.analytics_service import AnalyticsService
 from app.services.day_budget import (
-    compact_morning_report,
+    compact_day_report,
     format_day_budget,
     rich_day_budget,
 )
@@ -327,13 +326,13 @@ def test_short_brief_uses_one_conditional_exchange_warning() -> None:
     day = date(2026, 10, 2)
     b = budget(day, goal=50_000_000)
     r = replace(b.runway, last_day=day, short=960_000, dollars=80)
-    report = compact_morning_report(replace(b, runway=r))
+    report = compact_day_report(replace(b, runway=r))
     warning = f"⚠️ При прежнем темпе сумов хватит по 02.10. Обменять ≈{NBSP}{usd(80)}."
     assert report.text.split("\n\n")[1:] == [warning]
     assert report.html.endswith(para(warning))
-    no_rate = compact_morning_report(replace(b, runway=replace(r, dollars=None)))
+    no_rate = compact_day_report(replace(b, runway=replace(r, dollars=None)))
     assert f"Не хватит {whole(960_000)} сум." in no_rate.text
-    assert "до цели накоплений" in compact_morning_report(b).text
+    assert "до цели накоплений" in compact_day_report(b).text
 
 
 def test_uncovered_payments_today_take_priority_over_the_pace() -> None:
@@ -372,23 +371,46 @@ async def test_morning_brief_goes_rich_with_the_party(
     bot.send_message.assert_not_awaited()
 
 
-async def test_today_command_sends_the_report_to_the_chat() -> None:
-    calls: list[dict[str, Any]] = []
-
-    def brief(**options: Any) -> Report:
-        calls.append(options)
-        return Report("💸", "<p>💸</p>")
-
-    bot = SimpleNamespace(do_api_request=AsyncMock(), send_message=AsyncMock())
-    update = SimpleNamespace(
-        effective_chat=SimpleNamespace(id=5),
-        message=SimpleNamespace(reply_text=AsyncMock()),
+@pytest.mark.parametrize("args", [[], ["full"]])
+async def test_today_command_sends_the_current_report_and_dashboard_button(
+    monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    day = date(2026, 10, 2)
+    monkeypatch.setattr("app.services.analytics_service.local_today", lambda _: day)
+    monkeypatch.setattr(config, "WEBAPP_URL", "https://example.test/app/")
+    expense = fact_row(day, "🍔 ЕДА", "кафе", 30_000)
+    service = AnalyticsService(
+        Sheets(
+            {"fact": [FACT_HEADER, *OPENING, expense], "Oct 26": tab(), "system": []}
+        )
     )
-    service = SimpleNamespace(morning_brief=brief)
-    context = SimpleNamespace(bot=bot, bot_data={"analytics_service": service})
+    bot = SimpleNamespace(do_api_request=AsyncMock(), send_message=AsyncMock())
+    update = SimpleNamespace(effective_chat=SimpleNamespace(id=5))
+    context = SimpleNamespace(
+        bot=bot, args=args, bot_data={"analytics_service": service}
+    )
     await analytics.today_command(update, context)
-    assert bot.do_api_request.await_args.kwargs["api_kwargs"]["chat_id"] == 5
-    assert calls == [{"now": True}]
+    sent = bot.do_api_request.await_args.kwargs["api_kwargs"]
+    html = sent["rich_message"]["html"]
+    if args:
+        assert "Заморожено" in html
+    else:
+        b = budget(day, expense)
+        assert heading(f"На сегодня осталось {whole(b.limit - 30_000)} сум", 1) in html
+        assert "Вчера" not in html and "<table" not in html and "Заморожено" not in html
+    [[button]] = sent["reply_markup"].inline_keyboard
+    assert button.web_app.url == "https://example.test/app/?open=today"
+    assert button.text == "Открыть сводку"
+
+
+def test_compact_today_uses_overspend_and_payday_limits() -> None:
+    day = date(2026, 10, 2)
+    b = budget(day)
+    over = compact_day_report(replace(b, spent_today=b.limit + 50_000), now=True)
+    assert f"Сверх лимита на {whole(50_000)} сум" in over.text
+    payday = budget(date(2026, 10, 30), ADVANCE_PAID, RENT_PAID, SALARY_TODAY)
+    report = compact_day_report(payday, now=True)
+    assert f"С завтра — {whole(payday.tomorrow.limit)} сум в день" in report.text
 
 
 def test_morning_held_line() -> None:

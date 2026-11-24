@@ -189,6 +189,10 @@ def app_markup(url: str, label: str = "📱 Открыть приложение"
     return InlineKeyboardMarkup([[button]])
 
 
+def dashboard_markup(url: str | None) -> InlineKeyboardMarkup | None:
+    return app_markup(f"{url}?open=today", "Открыть сводку") if url else None
+
+
 def generate_sources_keyboard(
     sources: list[str],
     current_source: str | None = None,

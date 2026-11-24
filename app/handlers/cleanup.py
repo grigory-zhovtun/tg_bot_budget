@@ -28,7 +28,7 @@ from app.handlers.analytics import Sent, send_report
 from app.handlers.common import ANCHOR, CHOOSE_SOURCE, app_url
 from app.message_log import MessageLog
 from app.rich import Report, heading, para
-from app.utils.keyboards import app_markup, generate_sources_keyboard
+from app.utils.keyboards import dashboard_markup, generate_sources_keyboard
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ def _cards(application: Any, chat_id: int) -> Any:
 def brief_markup(application: Any, chat_id: int) -> Any:
     """Кнопка ведёт сразу на «Сегодня». Без Mini App доступны карты чата."""
     if config.WEBAPP_URL:
-        return app_markup(f"{config.WEBAPP_URL}?open=today", "Открыть сводку")
+        return dashboard_markup(config.WEBAPP_URL)
     if state_of(application.bot_data, chat_id).cards:
         return _cards(application, chat_id)[1]
     return None
