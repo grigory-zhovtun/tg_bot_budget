@@ -179,10 +179,10 @@ def keyboards_markup(groups: bool, cards: bool) -> InlineKeyboardMarkup:
     )
 
 
-def app_markup(url: str) -> InlineKeyboardMarkup:
+def app_markup(url: str, label: str = "📱 Открыть приложение") -> InlineKeyboardMarkup:
     """Кнопка Mini App под сообщением: вход по подписи Telegram (initData)."""
     button = InlineKeyboardButton(
-        "📱 Открыть приложение",
+        label,
         web_app=WebAppInfo(url),
         style=KeyboardButtonStyle.PRIMARY,
     )

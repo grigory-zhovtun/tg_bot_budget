@@ -22,7 +22,11 @@ from app.rich import (
     whole,
 )
 from app.services.analytics_service import AnalyticsService
-from app.services.day_budget import format_day_budget, rich_day_budget
+from app.services.day_budget import (
+    compact_morning_report,
+    format_day_budget,
+    rich_day_budget,
+)
 from app.services.held import HeldArticle, HeldOnCard, held_text
 from app.services.recurring import find_series, rich_morning_lines
 from app.services.runway import Runway
@@ -298,6 +302,49 @@ def test_due_subscriptions_are_short_lines() -> None:
     twice = find_series(history(*MUSIC), date(2026, 10, 5))
     assert rich_morning_lines(twice, date(2026, 10, 5)) == [
         para("⚠️ Music Box списан второй раз за октябрь: 03.10, 04.10")
+    ]
+
+
+def test_scheduled_brief_only_sends_the_date_and_limit_on_a_quiet_day() -> None:
+    day = date(2026, 10, 2)
+    sheets = Sheets(
+        {"fact": [FACT_HEADER, *OPENING, OVERSPENT], "Oct 26": tab(items=LIST)}
+    )
+    service = AnalyticsService(sheets)
+    report, _ = service.morning_message(day)
+    limit = f"{whole(budget(day, OVERSPENT, items=LIST).limit)} сум в день"
+    assert report.text.splitlines() == [
+        "☀️ Пятница, 2 октября",
+        f"{limit} до зарплаты 30-го",
+    ]
+    assert report.html == para("☀️ Пятница, 2 октября") + heading(limit, 1) + para(
+        "до зарплаты 30-го"
+    )
+    assert "Вчера" in service.morning_brief(day, now=True).text
+
+
+def test_short_brief_uses_one_conditional_exchange_warning() -> None:
+    day = date(2026, 10, 2)
+    b = budget(day, goal=50_000_000)
+    r = replace(b.runway, last_day=day, short=960_000, dollars=80)
+    report = compact_morning_report(replace(b, runway=r))
+    warning = f"⚠️ При прежнем темпе сумов хватит по 02.10. Обменять ≈{NBSP}{usd(80)}."
+    assert report.text.split("\n\n")[1:] == [warning]
+    assert report.html.endswith(para(warning))
+    no_rate = compact_morning_report(replace(b, runway=replace(r, dollars=None)))
+    assert f"Не хватит {whole(960_000)} сум." in no_rate.text
+    assert "до цели накоплений" in compact_morning_report(b).text
+
+
+def test_uncovered_payments_today_take_priority_over_the_pace() -> None:
+    day = date(2026, 10, 2)
+    items = [*ITEMS, ("Ремонт", 2, -6_500_000, "UZS")]
+    service = AnalyticsService(
+        Sheets({"fact": [FACT_HEADER, *OPENING], "Oct 26": tab(items=items)})
+    )
+    report, _ = service.morning_message(day)
+    assert report.text.split("\n\n")[1:] == [
+        f"⚠️ На платежи сегодня не хватает {whole(1_500_000)} сум."
     ]
 
 

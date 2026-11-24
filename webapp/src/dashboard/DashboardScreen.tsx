@@ -406,6 +406,7 @@ function Content({
 
 interface Props {
   api: Api;
+  initialSection?: Section;
   actions?: Action[]; // быстрые действия под главной цифрой — по справочнику
   onAction?: (action: Action) => void; // нет — экран без них
 }
@@ -414,6 +415,7 @@ const NO_ACTIONS: Action[] = [];
 
 export default function DashboardScreen({
   api,
+  initialSection,
   actions = NO_ACTIONS,
   onAction,
 }: Props) {
@@ -427,7 +429,9 @@ export default function DashboardScreen({
   );
   // «Обновить» читает таблицу заново, а не копию листов на сервере
   const refresh = useCallback(() => reload(true), [reload]);
-  const [section, setSection] = useState<Section>(storedSection);
+  const [section, setSection] = useState<Section>(
+    () => initialSection ?? storedSection(),
+  );
   const choose = useCallback((next: Section) => {
     setSection(next);
     storeSection(next);

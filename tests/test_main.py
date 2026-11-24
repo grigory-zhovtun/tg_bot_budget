@@ -232,15 +232,29 @@ async def test_morning_brief_goes_to_the_owner_then_the_chats_are_swept(
     [(chat_id, markup)] = sent
     assert chat_id == 7
     [[button]] = markup.inline_keyboard  # карты скрыты — кнопка приложения
-    assert button.web_app.url == "https://example.test/app/"
+    assert button.web_app.url == "https://example.test/app/?open=today"
+    assert button.text == "Открыть сводку"
     assert swept == [context.application]
     assert ANCHOR not in context.application.user_data.get(7, {})
 
 
-async def test_with_cards_the_brief_holds_the_cards_keyboard(
+async def test_dashboard_button_keeps_the_existing_cards_anchor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     context, sent, _ = morning_context(monkeypatch, ChatState(cards=True))
+    context.application.user_data[7][ANCHOR] = 42
+    await main._morning_brief(context)
+    [(_, markup)] = sent
+    [[button]] = markup.inline_keyboard
+    assert button.web_app.url.endswith("?open=today")
+    assert context.application.user_data[7][ANCHOR] == 42
+
+
+async def test_without_mini_app_the_brief_holds_the_cards_keyboard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context, sent, _ = morning_context(monkeypatch, ChatState(cards=True))
+    monkeypatch.setattr(config, "WEBAPP_URL", None)
     await main._morning_brief(context)
     [(_, markup)] = sent
     assert isinstance(markup, ReplyKeyboardMarkup)

@@ -49,6 +49,7 @@ import pandas as pd
 from app.domain import INCOME_GROUP, Rates
 from app.rich import (
     NBSP,
+    Report,
     heading,
     in_currency,
     money_text,
@@ -198,6 +199,7 @@ class DayBudget:
     piggies: float | None = None
     # чужие деньги на картах (сбор): по строке под «Сумами»; пусто — строк нет
     held: tuple[HeldOnCard, ...] = ()
+    due_short_today: float = 0.0  # нехватка на сегодняшние платежи с учётом авансов
 
 
 def _number(value: Any) -> float | None:
@@ -710,6 +712,11 @@ def day_budget(
     ]
     paced = currency_forecast(frame, (), items, today, "UZS", records=records)
 
+    today_moves = [amount for day, amount in events if day == today]
+    due_short = 0.0
+    if any(amount < 0 for amount in today_moves):
+        due_short = max(0.0, -paced.now - sum(today_moves))
+
     # «Заморожено»: доллары на сейчас без платежей в этой валюте по срок «Сумы» —
     # день зарплаты, которая ещё не пришла; до цента, чтобы строки сходились
     frozen: float | None = None
@@ -791,6 +798,7 @@ def day_budget(
             sums_payday,
             sums_name,
         ),
+        due_short_today=due_short,
         history=history,
         ahead=left_now,
         sums=now_allowance.sums,
@@ -1002,6 +1010,48 @@ def runway_line(runway: Runway, today: date) -> str:
         else f"не хватит {short(runway.short)}"
     )
     return f"{head} — {_runway_when(runway, today)} · {target} {need}"
+
+
+def _morning_warning(budget: DayBudget) -> str:
+    if round(budget.due_short_today) > 0:
+        return f"⚠️ На платежи сегодня не хватает {whole(budget.due_short_today)} сум."
+    runway = budget.runway
+    if runway is not None and runway.short > 0:
+        when = (
+            f"сумов хватит по {runway.last_day:%d.%m}"
+            if runway.last_day is not None and runway.last_day >= budget.today
+            else "сумов не хватит сегодня"
+        )
+        need = (
+            f"обменять ≈{NBSP}{in_currency(runway.dollars, 'USD')}"
+            if runway.dollars is not None
+            else f"не хватит {whole(runway.short)} сум"
+        )
+        horizon = runway_until(runway, budget.today)
+        if horizon != until_text(budget):
+            need = f"{horizon} {need}"
+        return f"⚠️ При прежнем темпе {when}. {need.capitalize()}."
+    if budget.goal > 0 and budget.goal > budget.growth:
+        return f"🎯 По плану до цели накоплений не хватает {whole(budget.goal - budget.growth)} сум."
+    return ""
+
+
+def compact_morning_report(budget: DayBudget) -> Report:
+    weekday = WEEKDAYS[budget.today.weekday()].capitalize()
+    date_line = (
+        f"☀️ {weekday}, {budget.today.day} {MONTHS_GENITIVE[budget.today.month - 1]}"
+    )
+    limit = f"{whole(max(budget.limit, 0))} сум в день"
+    horizon = until_text(budget)
+    if budget.limit < 0:
+        horizon += f" — не хватает {whole(-budget.limit * budget.days_left)} сум"
+    text = f"{date_line}\n{limit} {horizon}"
+    html = para(date_line) + heading(limit, 1) + para(horizon)
+    warning = _morning_warning(budget)
+    if warning:
+        text += f"\n\n{warning}"
+        html += para(warning)
+    return Report(text, html)
 
 
 def format_day_budget(budget: DayBudget, now: bool = False) -> str:

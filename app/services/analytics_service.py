@@ -659,12 +659,15 @@ class AnalyticsService:
         """Утреннее сообщение и нужен ли 🎉 (вчера уложились в лимит)."""
         from app.services.day_budget import celebrate
 
-        report, budget = self._brief(today, now=False)
+        report, budget = self._brief(today, now=False, compact=True)
         return report, budget is not None and celebrate(budget)
 
-    def _brief(self, today: date | None, now: bool) -> tuple[Report, Any]:
+    def _brief(
+        self, today: date | None, now: bool, *, compact: bool = False
+    ) -> tuple[Report, Any]:
         # day_budget и recurring сами берут отсюда plan_lines и expenses
         from app.services.day_budget import (
+            compact_morning_report,
             day_budget,
             format_day_budget,
             read_forecast,
@@ -699,18 +702,19 @@ class AnalyticsService:
             rates,
             config.FROZEN_CURRENCY,
             self._records(),
-            previous=self._previous_rows(today),
+            previous=None if compact else self._previous_rows(today),
             held=held_on_cards(physical, held, today),
         )
         if budget is None:
-            return (
-                Report(
-                    f"Во вкладке «{sheet}» нет списка поступлений и платежей (блок "
-                    "прогноза справа) — лимит на день не посчитать.\n\n"
-                    + format_plan_report(rows, today)
-                ),
-                None,
+            message = (
+                f"Во вкладке «{sheet}» нет списка поступлений и платежей (блок "
+                "прогноза справа) — лимит на день не посчитать."
             )
+            if not compact:
+                message += "\n\n" + format_plan_report(rows, today)
+            return Report(message), None
+        if compact:
+            return compact_morning_report(budget), budget
         if budget.frozen is not None and self.catalog is not None:
             sheets = self._piggy_sheets()
             budget = replace(

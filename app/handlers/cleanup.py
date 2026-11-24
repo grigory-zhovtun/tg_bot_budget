@@ -62,15 +62,21 @@ def _cards(application: Any, chat_id: int) -> Any:
 
 
 def brief_markup(application: Any, chat_id: int) -> Any:
-    """Утренней сводке — клавиатура карт (включены) или кнопка приложения."""
+    """Кнопка ведёт сразу на «Сегодня». Без Mini App доступны карты чата."""
+    if config.WEBAPP_URL:
+        return app_markup(f"{config.WEBAPP_URL}?open=today", "Открыть сводку")
     if state_of(application.bot_data, chat_id).cards:
         return _cards(application, chat_id)[1]
-    return app_markup(config.WEBAPP_URL) if config.WEBAPP_URL else None
+    return None
 
 
 def anchor_brief(application: Any, chat_id: int, sent: Sent | None) -> None:
     """Сводка с клавиатурой карт — теперь клавиатура держится на ней."""
-    if sent is not None and state_of(application.bot_data, chat_id).cards:
+    if (
+        not config.WEBAPP_URL
+        and sent is not None
+        and state_of(application.bot_data, chat_id).cards
+    ):
         # user_data PTB — только для чтения, словарь пользователя создаёт обращение
         application.user_data[chat_id][ANCHOR] = sent.messages[-1].message_id
 

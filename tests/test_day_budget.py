@@ -604,6 +604,8 @@ def test_service_builds_the_message_from_the_sheet() -> None:
     text = service.morning_brief(date(2026, 10, 2)).text
     assert text.startswith("Во вкладке «Oct 26» нет списка поступлений и платежей")
     assert "📋 План-факт: октябрь 2026" in text
+    scheduled, _ = service.morning_message(date(2026, 10, 2))
+    assert scheduled.text == text.split("\n\n", 1)[0]
     assert AnalyticsService(Sheets({})).morning_brief(date(2026, 11, 1)).text == (
         "Вкладки «Nov 26» с планом нет — бот создаёт её 1-го числа."
     )

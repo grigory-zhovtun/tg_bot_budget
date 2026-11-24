@@ -82,21 +82,23 @@ export default function App({ api }: { api: Api }) {
   const [boot, setBoot] = useState<Bootstrap | null>(initial.boot);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
-  // кнопка бота «Отложил часть…» открывает приложение с ?open=save — «План →
-  // Накопления» и окно «Отложил»; просьба гаснет, как только пользователь пошёл дальше
-  const [openSave, setOpenSave] = useState(
-    () => new URLSearchParams(window.location.search).get("open") === "save",
+  const [launchScreen, setLaunchScreen] = useState(() =>
+    new URLSearchParams(window.location.search).get("open"),
   );
-  const saveSeen = useCallback(() => setOpenSave(false), []);
-  const [tab, setTab] = useState<Tab>(openSave ? "plan" : "entry");
+  const openSave = launchScreen === "save";
+  const saveSeen = useCallback(() => setLaunchScreen(null), []);
+  const [tab, setTab] = useState<Tab>(
+    openSave ? "plan" : launchScreen === "today" ? "dashboard" : "entry",
+  );
   // быстрое действие «Сводки»: с чего открыть «Ввод»; гаснет при смене вкладки
   const [start, setStart] = useState<EntryStart | null>(null);
   const act = useCallback((action: Action) => {
     if (action === "save") {
-      setOpenSave(true);
+      setLaunchScreen("save");
       setTab("plan");
       return;
     }
+    setLaunchScreen(null);
     setStart(action === "spend" ? null : action);
     setTab("entry");
   }, []);
@@ -212,6 +214,7 @@ export default function App({ api }: { api: Api }) {
         {tab === "dashboard" && (
           <DashboardScreen
             api={api}
+            initialSection={launchScreen === "today" ? "today" : undefined}
             actions={quickActions(boot)}
             onAction={act}
           />

@@ -8,6 +8,7 @@ import {
   dashboardFixture,
   planFixture,
 } from "./mocks/fixtures";
+import { storeSection } from "./dashboard/section";
 import { CACHE_KEY } from "./store";
 import { editRow, emptyDraft } from "./plan/draft";
 import { fakeApi } from "./test/fakeApi";
@@ -37,6 +38,24 @@ describe("App", () => {
       await screen.findByText("Откройте приложение заново из бота"),
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Повторить" })).toBeTruthy();
+  });
+
+  it("opens today from the morning brief even after viewing spending", async () => {
+    storeSection("spending");
+    window.history.replaceState(null, "", "/app/?open=today");
+    try {
+      const user = userEvent.setup();
+      render(<App api={fakeApi()} />);
+      await screen.findByRole("region", { name: "Можно сегодня" });
+      await user.click(screen.getByRole("tab", { name: "Календарь" }));
+      await screen.findByText("Октябрь");
+      await user.click(screen.getByRole("tab", { name: "Сводка" }));
+      expect(
+        await screen.findByRole("radio", { name: "Траты", checked: true }),
+      ).toBeTruthy();
+    } finally {
+      window.history.replaceState(null, "", "/");
+    }
   });
 
   it("opens «Отложил» in «Накопления» from the bot's button", async () => {
